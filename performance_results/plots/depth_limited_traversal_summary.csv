@@ -1,0 +1,2 @@
+test_name,total_runs,date_range,mean_execution_time,median_execution_time,std_execution_time,min_execution_time,max_execution_time,min_graph_size,max_graph_size,avg_graph_size
+depth_limited_traversal,15,2025-05-24 to 2025-05-24,0.0002517700195312155,0.0001168251037597,0.00023755465385625363,3.4332275390625e-05,0.000795841217041,10,1000,332.0

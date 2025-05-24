@@ -1,0 +1,18 @@
+Performance Summary for linear_graph_scalability
+==================================================
+
+Total test runs: 30
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0017 seconds
+  Median: 0.0010 seconds
+  Std Dev: 0.0020 seconds
+  Min: 0.0001 seconds
+  Max: 0.0080 seconds
+
+Graph Size Statistics:
+  Sizes tested: [100, 500, 1000, 2000, 5000]
+  Average size: 1720
+
+Performance Trend: improving (64.5% change)

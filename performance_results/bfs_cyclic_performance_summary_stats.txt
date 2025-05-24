@@ -1,0 +1,18 @@
+Performance Summary for bfs_cyclic_performance
+==================================================
+
+Total test runs: 12
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0002 seconds
+  Median: 0.0002 seconds
+  Std Dev: 0.0001 seconds
+  Min: 0.0001 seconds
+  Max: 0.0005 seconds
+
+Graph Size Statistics:
+  Sizes tested: [200, 500, 1000]
+  Average size: 567
+
+Performance Trend: degrading (236.5% change)

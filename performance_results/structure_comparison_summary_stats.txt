@@ -1,0 +1,18 @@
+Performance Summary for structure_comparison
+==================================================
+
+Total test runs: 20
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0006 seconds
+  Median: 0.0005 seconds
+  Std Dev: 0.0001 seconds
+  Min: 0.0004 seconds
+  Max: 0.0008 seconds
+
+Graph Size Statistics:
+  Sizes tested: [50, 1000]
+  Average size: 762
+
+Performance Trend: improving (13.0% change)

@@ -1,0 +1,18 @@
+Performance Summary for depth_limited_traversal
+==================================================
+
+Total test runs: 20
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0002 seconds
+  Median: 0.0001 seconds
+  Std Dev: 0.0002 seconds
+  Min: 0.0000 seconds
+  Max: 0.0008 seconds
+
+Graph Size Statistics:
+  Sizes tested: [10, 50, 100, 500, 1000]
+  Average size: 332
+
+Performance Trend: improving (10.9% change)

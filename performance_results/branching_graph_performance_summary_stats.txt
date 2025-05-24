@@ -1,0 +1,18 @@
+Performance Summary for branching_graph_performance
+==================================================
+
+Total test runs: 30
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0200 seconds
+  Median: 0.0005 seconds
+  Std Dev: 0.0374 seconds
+  Min: 0.0000 seconds
+  Max: 0.1033 seconds
+
+Graph Size Statistics:
+  Sizes tested: [15, 156, 1111, 8421, 127551]
+  Average size: 27451
+
+Performance Trend: improving (21.9% change)

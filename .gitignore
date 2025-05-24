@@ -1,0 +1,5 @@
+/.benchmarks
+/.pytest_cache
+/PERFORMANCE_TESTING.md
+/pytest.ini
+/test

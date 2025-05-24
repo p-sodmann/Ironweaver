@@ -1,0 +1,2 @@
+test_name,total_runs,date_range,mean_execution_time,median_execution_time,std_execution_time,min_execution_time,max_execution_time,min_graph_size,max_graph_size,avg_graph_size
+linear_graph_scalability,25,2025-05-24 to 2025-05-24,0.001868515014648395,0.0010867118835449,0.002086822782586956,7.891654968261719e-05,0.0079808235168457,100,5000,1720.0

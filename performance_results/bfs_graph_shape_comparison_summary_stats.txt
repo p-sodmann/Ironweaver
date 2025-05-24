@@ -1,0 +1,18 @@
+Performance Summary for bfs_graph_shape_comparison
+==================================================
+
+Total test runs: 4
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0004 seconds
+  Median: 0.0004 seconds
+  Std Dev: 0.0000 seconds
+  Min: 0.0004 seconds
+  Max: 0.0005 seconds
+
+Graph Size Statistics:
+  Sizes tested: [1000]
+  Average size: 1000
+
+Performance Trend: degrading (0.0% change)

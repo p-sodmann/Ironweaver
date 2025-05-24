@@ -1,0 +1,2 @@
+test_name,total_runs,date_range,mean_execution_time,median_execution_time,std_execution_time,min_execution_time,max_execution_time,min_graph_size,max_graph_size,avg_graph_size
+cyclic_graph_performance,20,2025-05-24 to 2025-05-24,0.00048011541366573473,0.00020468235015865,0.0006644374255341654,8.058547973632812e-05,0.0029544830322265,50,1000,370.0

@@ -1,0 +1,2 @@
+test_name,total_runs,date_range,mean_execution_time,median_execution_time,std_execution_time,min_execution_time,max_execution_time,min_graph_size,max_graph_size,avg_graph_size
+wide_branching_graph,2,2025-05-24 to 2025-05-24,0.8181549310684204,0.8181549310684204,0.018465883031775022,0.8050975799560547,0.8312122821807861,1010101,1010101,1010101.0

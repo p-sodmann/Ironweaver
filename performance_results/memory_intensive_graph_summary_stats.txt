@@ -1,0 +1,18 @@
+Performance Summary for memory_intensive_graph
+==================================================
+
+Total test runs: 3
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0051 seconds
+  Median: 0.0055 seconds
+  Std Dev: 0.0024 seconds
+  Min: 0.0026 seconds
+  Max: 0.0073 seconds
+
+Graph Size Statistics:
+  Sizes tested: [1000, 2000, 3000]
+  Average size: 2000
+
+Performance Trend: degrading (0.0% change)

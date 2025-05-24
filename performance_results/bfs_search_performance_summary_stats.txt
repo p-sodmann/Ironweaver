@@ -1,0 +1,18 @@
+Performance Summary for bfs_search_performance
+==================================================
+
+Total test runs: 10
+Date range: 2025-05-24 to 2025-05-24
+
+Execution Time Statistics:
+  Mean: 0.0002 seconds
+  Median: 0.0000 seconds
+  Std Dev: 0.0002 seconds
+  Min: 0.0000 seconds
+  Max: 0.0006 seconds
+
+Graph Size Statistics:
+  Sizes tested: [10, 50, 100, 500, 900]
+  Average size: 312
+
+Performance Trend: improving (42.4% change)
