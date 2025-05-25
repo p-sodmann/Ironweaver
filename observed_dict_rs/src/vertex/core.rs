@@ -307,4 +307,22 @@ impl Vertex {
     ) -> PyResult<Py<Vertex>> {
         algorithms::expand(self, py, source_vertex, depth)
     }
+
+    /// Create a new vertex containing only the specified nodes and their connecting edges
+    /// 
+    /// Args:
+    ///     node_ids (list): List of node IDs to include in the filtered vertex
+    ///     
+    /// Returns:
+    ///     Vertex: A new vertex containing only the specified nodes and edges between them
+    ///     
+    /// Raises:
+    ///     ValueError: If any of the specified node IDs don't exist in the vertex
+    fn filter(
+        &self,
+        py: Python<'_>,
+        node_ids: Vec<String>
+    ) -> PyResult<Py<Vertex>> {
+        algorithms::filter(self, py, node_ids)
+    }
 }
