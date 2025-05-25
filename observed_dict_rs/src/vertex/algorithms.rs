@@ -38,7 +38,7 @@ pub fn shortest_path_bfs(
         let new_node = Py::new(py, Node::new(root_node_id.clone(), Some(attr), Some(Vec::new())))?;
         path_nodes.insert(root_node_id, new_node);
         
-        let result_vertex = Vertex::from_nodes(path_nodes);
+        let result_vertex = Vertex::from_nodes(py, path_nodes);
         return Py::new(py, result_vertex);
     }
     
@@ -65,7 +65,7 @@ pub fn shortest_path_bfs(
         
         for edge in edges {
             let to_node: Py<Edge> = edge.clone_ref(py);
-            let to_node_actual: Py<Node> = to_node.bind(py).getattr("to")?.extract()?;
+            let to_node_actual: Py<Node> = to_node.bind(py).getattr("to_node")?.extract()?;
             let to_id = to_node_actual.bind(py).getattr("id")?.extract::<String>()?;
             
             // If not visited, mark and enqueue
@@ -104,7 +104,7 @@ pub fn shortest_path_bfs(
                             
                             for edge in original_edges {
                                 let edge_ref = edge.bind(py);
-                                let edge_to_node: Py<Node> = edge_ref.getattr("to")?.extract()?;
+                                let edge_to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
                                 let edge_to_id = edge_to_node.bind(py).getattr("id")?.extract::<String>()?;
                                 
                                 // Only include edge if target is also in the path
@@ -119,7 +119,7 @@ pub fn shortest_path_bfs(
                         }
                     }
                     
-                    let result_vertex = Vertex::from_nodes(path_nodes);
+                    let result_vertex = Vertex::from_nodes(py, path_nodes);
                     return Py::new(py, result_vertex);
                 }
             }
@@ -170,7 +170,7 @@ pub fn expand(
                 let edges: Vec<Py<Edge>> = current_node.bind(py).getattr("edges")?.extract()?;
                 
                 for edge in edges {
-                    let to_node: Py<Node> = edge.bind(py).getattr("to")?.extract()?;
+                    let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
                     let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
                     
                     // If we haven't visited this node in this BFS traversal
@@ -210,7 +210,7 @@ pub fn expand(
             let mut filtered_edges = Vec::new();
             for edge in source_edges {
                 let edge_ref = edge.bind(py);
-                let to_node: Py<Node> = edge_ref.getattr("to")?.extract()?;
+                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
                 let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
                 
                 // Only include edge if target is also in the discovered nodes
@@ -239,7 +239,7 @@ pub fn expand(
         let mut updated_edges = Vec::new();
         for edge in edges {
             let edge_ref = edge.bind(py);
-            let to_id = edge_ref.getattr("to")?.getattr("id")?.extract::<String>()?;
+            let to_id = edge_ref.getattr("to_node")?.getattr("id")?.extract::<String>()?;
             
             // Get the target node from our result set
             if let Some(target_node) = result_nodes.get(&to_id) {
@@ -261,6 +261,6 @@ pub fn expand(
         final_result_nodes.insert(node_id.clone(), final_node);
     }
     
-    let result_vertex = Vertex::from_nodes(final_result_nodes);
+    let result_vertex = Vertex::from_nodes(py, final_result_nodes);
     Py::new(py, result_vertex)
 }

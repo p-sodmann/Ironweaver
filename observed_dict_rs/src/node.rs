@@ -11,7 +11,11 @@ pub struct Node {
     #[pyo3(get, set)]
     pub attr: HashMap<String, Py<PyAny>>,
     #[pyo3(get, set)]
-    pub edges: Vec<Py<Edge>>,   
+    pub edges: Vec<Py<Edge>>,
+    #[pyo3(get, set)]
+    pub meta: HashMap<String, Py<PyAny>>,
+    #[pyo3(get, set)]
+    pub on_edge_add_callbacks: Vec<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -26,6 +30,8 @@ impl Node {
             id,
             attr: attr.unwrap_or_default(),
             edges: edges.unwrap_or_default(),
+            meta: HashMap::new(),
+            on_edge_add_callbacks: Vec::new(),
         }
     }
 
@@ -52,7 +58,7 @@ impl Node {
         let mut visited = HashSet::<String>::new();
         traverse_recursive(py, self_handle, depth, 0, &mut found, &mut visited)?;
 
-        Py::new(py, Vertex::from_nodes(found))
+        Py::new(py, Vertex::from_nodes(py, found))
     }
 
     /// Breadth-First Search traversal of reachable nodes
@@ -69,7 +75,7 @@ impl Node {
         let mut visited = HashSet::<String>::new();
         bfs_iterative(py, self_handle, depth, &mut found, &mut visited)?;
 
-        Py::new(py, Vertex::from_nodes(found))
+        Py::new(py, Vertex::from_nodes(py, found))
     }
 
     /// Search for a specific node by ID using BFS

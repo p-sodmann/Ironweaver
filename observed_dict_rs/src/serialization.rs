@@ -1,7 +1,6 @@
 // serialization.rs
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyString};
-use pyo3::ToPyObject;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -14,6 +13,7 @@ use crate::{Node, Edge, Vertex};
 pub struct SerializableNode {
     pub id: String,
     pub attr: HashMap<String, SerializableValue>,
+    pub meta: HashMap<String, SerializableValue>,
     pub edge_ids: Vec<String>, // Store edge IDs instead of actual edges
 }
 
@@ -24,6 +24,7 @@ pub struct SerializableEdge {
     pub from_id: String,
     pub to_id: String,
     pub attr: HashMap<String, SerializableValue>,
+    pub meta: HashMap<String, SerializableValue>,
 }
 
 /// Serializable representation of Python values
@@ -43,6 +44,7 @@ pub enum SerializableValue {
 pub struct SerializableGraph {
     pub nodes: HashMap<String, SerializableNode>,
     pub edges: HashMap<String, SerializableEdge>,
+    pub meta: HashMap<String, SerializableValue>,
     pub metadata: HashMap<String, SerializableValue>,
 }
 
@@ -88,9 +90,12 @@ impl SerializableValue {
         match self {
             SerializableValue::None => Ok(py.None()),
             SerializableValue::String(s) => Ok(PyString::new(py, s).into()),
-            SerializableValue::Int(i) => Ok(i.to_object(py)),
-            SerializableValue::Float(f) => Ok(f.to_object(py)),
-            SerializableValue::Bool(b) => Ok(b.to_object(py)),
+            SerializableValue::Int(i) => Ok(i.into_pyobject(py)?.into_any().into()),
+            SerializableValue::Float(f) => Ok(f.into_pyobject(py)?.into_any().into()),
+            SerializableValue::Bool(b) => {
+                let bound = b.into_pyobject(py)?;
+                Ok(bound.as_any().clone().into())
+            },
             SerializableValue::List(list) => {
                 let py_list = pyo3::types::PyList::empty(py);
                 for item in list {
@@ -127,10 +132,18 @@ impl SerializableGraph {
                 serializable_attr.insert(key, SerializableValue::from_python(py, &value)?);
             }
 
+            // Extract node meta
+            let meta_py: HashMap<String, Py<PyAny>> = node_ref.getattr("meta")?.extract()?;
+            let mut serializable_meta = HashMap::new();
+            for (key, value) in meta_py {
+                serializable_meta.insert(key, SerializableValue::from_python(py, &value)?);
+            }
+
             // We'll fill in edge_ids in the second pass
             let serializable_node = SerializableNode {
                 id: node_id.clone(),
                 attr: serializable_attr,
+                meta: serializable_meta,
                 edge_ids: Vec::new(),
             };
             
@@ -146,8 +159,8 @@ impl SerializableGraph {
                 let edge_ref = edge_py.bind(py);
                 
                 // Extract edge information
-                let from_node: Py<Node> = edge_ref.getattr("from")?.extract()?;
-                let to_node: Py<Node> = edge_ref.getattr("to")?.extract()?;
+                let from_node: Py<Node> = edge_ref.getattr("from_node")?.extract()?;
+                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
                 let from_id = from_node.bind(py).getattr("id")?.extract::<String>()?;
                 let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
                 
@@ -162,11 +175,19 @@ impl SerializableGraph {
                     serializable_attr.insert(key, SerializableValue::from_python(py, &value)?);
                 }
                 
+                // Extract edge meta
+                let meta_py: HashMap<String, Py<PyAny>> = edge_ref.getattr("meta")?.extract()?;
+                let mut serializable_meta = HashMap::new();
+                for (key, value) in meta_py {
+                    serializable_meta.insert(key, SerializableValue::from_python(py, &value)?);
+                }
+                
                 let serializable_edge = SerializableEdge {
                     id: edge_id.clone(),
                     from_id: from_id.clone(),
                     to_id,
                     attr: serializable_attr,
+                    meta: serializable_meta,
                 };
                 
                 serializable_edges.insert(edge_id.clone(), serializable_edge);
@@ -176,6 +197,15 @@ impl SerializableGraph {
                     node.edge_ids.push(edge_id);
                 }
             }
+        }
+
+        // Extract vertex meta
+        let mut vertex_meta = HashMap::new();
+        let meta_dict = vertex.meta.bind(py);
+        for (key, value) in meta_dict.iter() {
+            let key_str = key.extract::<String>()?;
+            let value_py = value.into();
+            vertex_meta.insert(key_str, SerializableValue::from_python(py, &value_py)?);
         }
 
         // Add some metadata
@@ -190,6 +220,7 @@ impl SerializableGraph {
         Ok(SerializableGraph {
             nodes: serializable_nodes,
             edges: serializable_edges,
+            meta: vertex_meta,
             metadata,
         })
     }
@@ -207,11 +238,19 @@ impl SerializableGraph {
                 python_attr.insert(key.clone(), value.to_python(py)?);
             }
             
+            // Convert meta back to Python
+            let mut python_meta = HashMap::new();
+            for (key, value) in &serializable_node.meta {
+                python_meta.insert(key.clone(), value.to_python(py)?);
+            }
+            
             // Create node with empty edges for now
             let node = Py::new(py, Node {
                 id: serializable_node.id.clone(),
                 attr: python_attr,
+                meta: python_meta,
                 edges: Vec::new(),
+                on_edge_add_callbacks: Vec::new(),
             })?;
             
             python_nodes.insert(node_id.clone(), node.clone_ref(py));
@@ -237,12 +276,20 @@ impl SerializableGraph {
                 python_attr.insert(key.clone(), value.to_python(py)?);
             }
             
+            // Convert edge meta back to Python
+            let mut python_meta = HashMap::new();
+            for (key, value) in &serializable_edge.meta {
+                python_meta.insert(key.clone(), value.to_python(py)?);
+            }
+            
             let edge = Py::new(py, Edge {
                 id: Some(serializable_edge.id.clone()),
-                from: from_node.clone_ref(py),
-                to: to_node.clone_ref(py),
+                from_node: from_node.clone_ref(py),
+                to_node: to_node.clone_ref(py),
                 attr: python_attr,
+                meta: python_meta,
                 watched_by: Vec::new(),
+                on_meta_change_callbacks: Vec::new(),
             })?;
             
             // Add edge to the from_node's edge list
@@ -259,7 +306,15 @@ impl SerializableGraph {
             }
         }
         
-        Ok(Vertex::from_nodes(python_nodes))
+        // Convert vertex meta back to Python
+        let vertex_meta_dict = PyDict::new(py);
+        for (key, value) in &self.meta {
+            vertex_meta_dict.set_item(key, value.to_python(py)?)?;
+        }
+        
+        let mut vertex = Vertex::from_nodes(py, python_nodes);
+        vertex.meta = vertex_meta_dict.into();
+        Ok(vertex)
     }
 
     /// Save graph to JSON file

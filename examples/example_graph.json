@@ -1,0 +1,157 @@
+{
+  "nodes": {
+    "node2": {
+      "id": "node2",
+      "attr": {
+        "value": {
+          "Int": 2
+        }
+      },
+      "meta": {},
+      "edge_ids": [
+        "edge_3_node2_to_node3"
+      ]
+    },
+    "node5": {
+      "id": "node5",
+      "attr": {
+        "value": {
+          "Int": 5
+        }
+      },
+      "meta": {},
+      "edge_ids": []
+    },
+    "node6": {
+      "id": "node6",
+      "attr": {
+        "value": {
+          "Int": 6
+        }
+      },
+      "meta": {},
+      "edge_ids": []
+    },
+    "node1": {
+      "id": "node1",
+      "attr": {
+        "value": {
+          "Int": 1
+        }
+      },
+      "meta": {},
+      "edge_ids": [
+        "edge_4_node1_to_node2",
+        "edge_5_node1_to_node3"
+      ]
+    },
+    "node3": {
+      "id": "node3",
+      "attr": {
+        "value": {
+          "Int": 3
+        }
+      },
+      "meta": {},
+      "edge_ids": [
+        "edge_0_node3_to_node4"
+      ]
+    },
+    "node4": {
+      "id": "node4",
+      "attr": {
+        "value": {
+          "Int": 4
+        }
+      },
+      "meta": {},
+      "edge_ids": [
+        "edge_1_node4_to_node5",
+        "edge_2_node4_to_node6"
+      ]
+    }
+  },
+  "edges": {
+    "edge_1_node4_to_node5": {
+      "id": "edge_1_node4_to_node5",
+      "from_id": "node4",
+      "to_id": "node5",
+      "attr": {
+        "weight": {
+          "Float": 4.0
+        }
+      },
+      "meta": {}
+    },
+    "edge_2_node4_to_node6": {
+      "id": "edge_2_node4_to_node6",
+      "from_id": "node4",
+      "to_id": "node6",
+      "attr": {
+        "weight": {
+          "Float": 4.0
+        }
+      },
+      "meta": {}
+    },
+    "edge_4_node1_to_node2": {
+      "id": "edge_4_node1_to_node2",
+      "from_id": "node1",
+      "to_id": "node2",
+      "attr": {
+        "weight": {
+          "Float": 1.0
+        }
+      },
+      "meta": {}
+    },
+    "edge_5_node1_to_node3": {
+      "id": "edge_5_node1_to_node3",
+      "from_id": "node1",
+      "to_id": "node3",
+      "attr": {
+        "weight": {
+          "Float": 3.0
+        }
+      },
+      "meta": {}
+    },
+    "edge_0_node3_to_node4": {
+      "id": "edge_0_node3_to_node4",
+      "from_id": "node3",
+      "to_id": "node4",
+      "attr": {
+        "weight": {
+          "Float": 4.0
+        }
+      },
+      "meta": {}
+    },
+    "edge_3_node2_to_node3": {
+      "id": "edge_3_node2_to_node3",
+      "from_id": "node2",
+      "to_id": "node3",
+      "attr": {
+        "weight": {
+          "Float": 2.0
+        }
+      },
+      "meta": {}
+    }
+  },
+  "meta": {},
+  "metadata": {
+    "version": {
+      "String": "1.0"
+    },
+    "node_count": {
+      "Int": 6
+    },
+    "timestamp": {
+      "String": "2025-05-25T06:54:29.810650252+00:00"
+    },
+    "edge_count": {
+      "Int": 6
+    }
+  }
+}

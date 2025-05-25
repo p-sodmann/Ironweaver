@@ -1,8 +1,9 @@
 // vertex/core.rs
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyDict, PyList};
 use std::collections::HashMap;
+
 use crate::{Node, Edge};
 
 // Import the helper modules as sibling modules
@@ -12,23 +13,38 @@ use super::analysis;
 use super::algorithms;
 
 #[pyclass]
-#[derive(Default)]
 pub struct Vertex {
     #[pyo3(get, set)]
     pub nodes: HashMap<String, Py<Node>>,
+    #[pyo3(get, set)]
+    pub meta: Py<PyDict>,
+    #[pyo3(get, set)]
+    pub on_node_add_callbacks: Py<PyList>,
+    #[pyo3(get, set)]
+    pub on_edge_add_callbacks: Py<PyList>,
 }
 
 #[pymethods]
 impl Vertex {
     #[new]
-    fn new() -> Self {
-        Self::default()
+    fn new(py: Python<'_>) -> Self {
+        Vertex {
+            nodes: HashMap::new(),
+            meta: PyDict::new(py).into(),
+            on_node_add_callbacks: PyList::empty(py).into(),
+            on_edge_add_callbacks: PyList::empty(py).into(),
+        }
     }
 
     /// Create a new graph with existing nodes
     #[staticmethod]
-    pub fn from_nodes(nodes: HashMap<String, Py<Node>>) -> Self {
-        Vertex { nodes }
+    pub fn from_nodes(py: Python<'_>, nodes: HashMap<String, Py<Node>>) -> Self {
+        Vertex { 
+            nodes,
+            meta: PyDict::new(py).into(),
+            on_node_add_callbacks: PyList::empty(py).into(),
+            on_edge_add_callbacks: PyList::empty(py).into(),
+        }
     }
 
     fn __getitem__(&self, py: Python<'_>, key: String) -> PyResult<Py<Node>> {
@@ -90,12 +106,34 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If a node with the same ID already exists
     fn add_node(
-        &mut self, 
+        mut slf: PyRefMut<'_, Self>,
         py: Python<'_>, 
         id: String, 
         attr: Option<HashMap<String, Py<PyAny>>>
     ) -> PyResult<Py<Node>> {
-        manipulation::add_node(self, py, id, attr)
+        // First create the node
+        let node = manipulation::add_node(&mut slf, py, id, attr)?;
+        
+        // Get callbacks from PyList
+        let callbacks_list = slf.on_node_add_callbacks.bind(py);
+        let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
+        for callback in callbacks_list.iter() {
+            callbacks_to_call.push(callback.into());
+        }
+        
+        let py_self: Py<Self> = slf.into();
+        
+        // Execute callbacks for node addition
+        for callback in &callbacks_to_call {
+            // Call callback with (self, node) parameters
+            let result = callback.call1(py, (py_self.clone_ref(py), node.clone_ref(py)))?;
+            let should_continue: bool = result.extract(py).unwrap_or(true);
+            if !should_continue {
+                break;
+            }
+        }
+        
+        Ok(node)
     }
 
     /// Add a new edge between two nodes in the graph
@@ -111,13 +149,34 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If either node doesn't exist
     fn add_edge(
-        &mut self,
+        mut slf: PyRefMut<'_, Self>,
         py: Python<'_>,
         from_id: String,
         to_id: String,
         attr: Option<HashMap<String, Py<PyAny>>>
     ) -> PyResult<Py<Edge>> {
-        manipulation::add_edge(self, py, from_id, to_id, attr)
+        let edge = manipulation::add_edge(&mut slf, py, from_id, to_id, attr)?;
+        
+        // Get callbacks from PyList
+        let callbacks_list = slf.on_edge_add_callbacks.bind(py);
+        let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
+        for callback in callbacks_list.iter() {
+            callbacks_to_call.push(callback.into());
+        }
+        
+        let py_self: Py<Self> = slf.into();
+
+        // Execute callbacks for edge addition
+        for callback in &callbacks_to_call {
+            // Call callback with (self, edge) parameters
+            let result = callback.call1(py, (py_self.clone_ref(py), edge.clone_ref(py)))?;
+            let should_continue: bool = result.extract(py).unwrap_or(true);
+            if !should_continue {
+                break;
+            }
+        }
+        
+        Ok(edge)
     }
 
     /// Get a node by its ID

@@ -80,7 +80,7 @@ pub fn to_networkx(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
                     let edge_ref = edge_py.bind(py);
                     
                     // Get target node
-                    if let Ok(to_node) = edge_ref.getattr("to") {
+                    if let Ok(to_node) = edge_ref.getattr("to_node") {
                         if let Ok(to_id) = to_node.getattr("id").and_then(|id| id.extract::<String>()) {
                             // Add edge first
                             digraph.call_method1("add_edge", (node_id, &to_id))?;
