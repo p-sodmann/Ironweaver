@@ -15,6 +15,7 @@ pub struct SerializableNode {
     pub attr: HashMap<String, SerializableValue>,
     pub meta: HashMap<String, SerializableValue>,
     pub edge_ids: Vec<String>, // Store edge IDs instead of actual edges
+    pub inverse_edge_ids: Vec<String>, // Store inverse edge IDs
 }
 
 /// Serializable representation of an edge
@@ -139,12 +140,13 @@ impl SerializableGraph {
                 serializable_meta.insert(key, SerializableValue::from_python(py, &value)?);
             }
 
-            // We'll fill in edge_ids in the second pass
+            // We'll fill in edge_ids and inverse_edge_ids in the second pass
             let serializable_node = SerializableNode {
                 id: node_id.clone(),
                 attr: serializable_attr,
                 meta: serializable_meta,
                 edge_ids: Vec::new(),
+                inverse_edge_ids: Vec::new(),
             };
             
             serializable_nodes.insert(node_id.clone(), serializable_node);
@@ -185,7 +187,7 @@ impl SerializableGraph {
                 let serializable_edge = SerializableEdge {
                     id: edge_id.clone(),
                     from_id: from_id.clone(),
-                    to_id,
+                    to_id: to_id.clone(),
                     attr: serializable_attr,
                     meta: serializable_meta,
                 };
@@ -194,7 +196,12 @@ impl SerializableGraph {
                 
                 // Add edge ID to the source node
                 if let Some(node) = serializable_nodes.get_mut(&from_id) {
-                    node.edge_ids.push(edge_id);
+                    node.edge_ids.push(edge_id.clone());
+                }
+                
+                // Add edge ID to the target node's inverse_edge_ids
+                if let Some(node) = serializable_nodes.get_mut(&to_id) {
+                    node.inverse_edge_ids.push(edge_id);
                 }
             }
         }
@@ -244,12 +251,13 @@ impl SerializableGraph {
                 python_meta.insert(key.clone(), value.to_python(py)?);
             }
             
-            // Create node with empty edges for now
+            // Create node with empty edges and inverse_edges for now
             let node = Py::new(py, Node {
                 id: serializable_node.id.clone(),
                 attr: python_attr,
                 meta: python_meta,
                 edges: Vec::new(),
+                inverse_edges: Vec::new(),
                 on_edge_add_callbacks: Vec::new(),
             })?;
             
@@ -259,6 +267,7 @@ impl SerializableGraph {
         
         // Second pass: create edges and assign them to nodes
         let mut node_edges: HashMap<String, Vec<Py<Edge>>> = HashMap::new();
+        let mut node_inverse_edges: HashMap<String, Vec<Py<Edge>>> = HashMap::new();
         
         for serializable_edge in self.edges.values() {
             let from_node = python_nodes.get(&serializable_edge.from_id)
@@ -295,14 +304,26 @@ impl SerializableGraph {
             // Add edge to the from_node's edge list
             node_edges.entry(serializable_edge.from_id.clone())
                 .or_insert_with(Vec::new)
+                .push(edge.clone_ref(py));
+                
+            // Add edge to the to_node's inverse_edge list
+            node_inverse_edges.entry(serializable_edge.to_id.clone())
+                .or_insert_with(Vec::new)
                 .push(edge);
         }
         
-        // Third pass: update nodes with their edges
+        // Third pass: update nodes with their edges and inverse_edges
         for (node_id, edges) in node_edges {
             if let Some(node_py) = python_nodes.get(&node_id) {
                 let mut node_ref = node_py.bind(py).borrow_mut();
                 node_ref.edges = edges;
+            }
+        }
+        
+        for (node_id, inverse_edges) in node_inverse_edges {
+            if let Some(node_py) = python_nodes.get(&node_id) {
+                let mut node_ref = node_py.bind(py).borrow_mut();
+                node_ref.inverse_edges = inverse_edges;
             }
         }
         

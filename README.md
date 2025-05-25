@@ -1,8 +1,8 @@
-# observed_dict_rs
+# IronWeaver
 
 ![Logo](assets/logo.png)
 
-A high-performance, Rust-powered Python library for graph data structures and algorithms. Built with PyO3, `observed_dict_rs` provides fast, memory-efficient graph operations with seamless Python integration.
+A high-performance, Rust-powered Python library for graph data structures and algorithms. Built with PyO3, `IronWeaver` provides fast, memory-efficient graph operations with seamless Python integration.
 
 ## 🚀 Features
 
@@ -15,9 +15,9 @@ A high-performance, Rust-powered Python library for graph data structures and al
 - **Memory Efficient**: Optimized Rust implementation for large graphs
 
 ## Installation
-
+FIXME: this will not work yet, it needs to be cloned from github, rust compiled and installed
 ```bash
-pip install observed_dict_rs
+pip install IronWeaver
 ```
 
 ## Quick Start
@@ -202,7 +202,7 @@ attrs = edge.attr           # Edge attributes dict
 
 ## Performance
 
-`observed_dict_rs` is built with performance in mind:
+`IronWeaver` is built with performance in mind:
 
 - **Rust Backend**: Core algorithms implemented in Rust for maximum speed
 - **Memory Efficient**: Optimized data structures for large graphs

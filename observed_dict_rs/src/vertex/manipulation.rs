@@ -48,11 +48,16 @@ pub fn add_edge(
         .clone_ref(py);
 
     // Create the edge
-    let edge = Py::new(py, Edge::new(from_node.clone_ref(py), to_node, attr, None))?;
+    let edge = Py::new(py, Edge::new(from_node.clone_ref(py), to_node.clone_ref(py), attr, None))?;
 
     // Add the edge to the from_node's edges list
     let mut from_node_ref = from_node.borrow_mut(py);
     from_node_ref.edges.push(edge.clone_ref(py));
+    drop(from_node_ref); // Release the borrow before borrowing to_node
+    
+    // Add the edge to the to_node's inverse_edges list
+    let mut to_node_ref = to_node.borrow_mut(py);
+    to_node_ref.inverse_edges.push(edge.clone_ref(py));
 
     Ok(edge)
 }

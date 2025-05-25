@@ -13,6 +13,8 @@ pub struct Node {
     #[pyo3(get, set)]
     pub edges: Vec<Py<Edge>>,
     #[pyo3(get, set)]
+    pub inverse_edges: Vec<Py<Edge>>,
+    #[pyo3(get, set)]
     pub meta: HashMap<String, Py<PyAny>>,
     #[pyo3(get, set)]
     pub on_edge_add_callbacks: Vec<Py<PyAny>>,
@@ -30,6 +32,7 @@ impl Node {
             id,
             attr: attr.unwrap_or_default(),
             edges: edges.unwrap_or_default(),
+            inverse_edges: Vec::new(),
             meta: HashMap::new(),
             on_edge_add_callbacks: Vec::new(),
         }
