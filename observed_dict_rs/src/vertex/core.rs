@@ -47,6 +47,20 @@ impl Vertex {
         }
     }
 
+    /// Create a new graph with existing nodes and traversal path
+    #[staticmethod]
+    pub fn from_nodes_with_path(py: Python<'_>, nodes: HashMap<String, Py<Node>>, nodelist: Vec<String>) -> PyResult<Self> {
+        let meta = PyDict::new(py);
+        meta.set_item("nodelist", nodelist)?;
+        
+        Ok(Vertex { 
+            nodes,
+            meta: meta.into(),
+            on_node_add_callbacks: PyList::empty(py).into(),
+            on_edge_add_callbacks: PyList::empty(py).into(),
+        })
+    }
+
     fn __getitem__(&self, py: Python<'_>, key: String) -> PyResult<Py<Node>> {
         self.nodes
             .get(&key)
