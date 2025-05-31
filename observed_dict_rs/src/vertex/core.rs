@@ -354,15 +354,16 @@ impl Vertex {
     ///     
     /// Raises:
     ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length
-    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None))]
+    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None))]
     fn random_walks(
         &self,
         py: Python<'_>,
         start_node_id: String,
         max_length: usize,
         num_attempts: usize,
-        min_length: Option<usize>
+        min_length: Option<usize>,
+        allow_revisit: Option<bool>
     ) -> PyResult<Py<PyList>> {
-        algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts)
+        algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts, allow_revisit)
     }
 }

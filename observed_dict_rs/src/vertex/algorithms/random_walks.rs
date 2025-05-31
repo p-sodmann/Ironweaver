@@ -14,7 +14,8 @@ pub fn random_walks(
     start_node_id: String,
     max_length: usize,
     min_length: Option<usize>,
-    num_attempts: usize
+    num_attempts: usize,
+    allow_revisit: Option<bool>
 ) -> PyResult<Py<PyList>> {
     // Validate start node exists
     if !vertex.nodes.contains_key(&start_node_id) {
@@ -24,6 +25,7 @@ pub fn random_walks(
     }
 
     let min_len = min_length.unwrap_or(1);
+    let allow_revisit_nodes = allow_revisit.unwrap_or(false);
     
     // Validate parameters
     if max_length == 0 {
@@ -43,25 +45,19 @@ pub fn random_walks(
 
     // Perform multiple random walk attempts
     for _ in 0..num_attempts {
-        let mut current_walk = Vec::new();
-        let mut visited = HashSet::new();
-        
-        // Try to perform a random walk with backtracking
-        if let Some(walk) = perform_random_walk_with_min_length(
+        if let Some(walk) = perform_simple_random_walk(
             vertex,
             py,
             start_node_id.clone(),
             max_length,
-            min_len,
-            &mut visited,
-            &mut current_walk,
+            allow_revisit_nodes,
             &mut rng
         )? {
-            // Walk already meets minimum length requirement due to our algorithm
-            all_walks.push(walk);
+            // Only add walks that meet minimum length requirement
+            if walk.len() >= min_len {
+                all_walks.push(walk);
+            }
         }
-        // If perform_random_walk returns None, it means no valid walk was found
-        // This can happen in graphs where no path from start_node can reach min_length
     }
 
     // Remove duplicates
@@ -89,256 +85,76 @@ pub fn random_walks(
     Ok(result.into())
 }
 
-// Recursive helper function to perform a single random walk with minimum length consideration
-fn perform_random_walk_with_min_length(
+// Simple random walk function that embraces randomness without backtracking
+fn perform_simple_random_walk(
     vertex: &Vertex,
     py: Python<'_>,
-    current_node_id: String,
-    remaining_length: usize,
-    min_length: usize,
-    visited: &mut HashSet<String>,
-    current_walk: &mut Vec<String>,
+    start_node_id: String,
+    max_length: usize,
+    allow_revisit: bool,
     rng: &mut rand::rngs::ThreadRng
 ) -> PyResult<Option<Vec<String>>> {
-    // Add current node to the walk
-    current_walk.push(current_node_id.clone());
-    visited.insert(current_node_id.clone());
+    let mut walk = Vec::new();
+    let mut visited = HashSet::new();
+    let mut current_node_id = start_node_id;
 
-    // If we've reached maximum length
-    if remaining_length == 0 || current_walk.len() >= 1000 { // Safety limit to prevent infinite recursion
-        let result = if current_walk.len() >= min_length {
-            Some(current_walk.clone())
-        } else {
-            None // Walk doesn't meet minimum length
+    // Start the walk
+    for _ in 0..max_length {
+        // Add current node to walk
+        walk.push(current_node_id.clone());
+        
+        // Track visited nodes if revisiting is not allowed
+        if !allow_revisit {
+            visited.insert(current_node_id.clone());
+        }
+
+        // Get the current node
+        let current_node = match vertex.nodes.get(&current_node_id) {
+            Some(node) => node,
+            None => break, // Node not found, end walk
         };
-        // Backtrack: remove current node from visited and walk for other attempts
-        current_walk.pop();
-        visited.remove(&current_node_id);
-        return Ok(result);
-    }
 
-    // Check if we can still potentially reach minimum length
-    // If current walk length + remaining length < min_length, we can't succeed
-    if current_walk.len() + remaining_length < min_length {
-        // Can't possibly reach minimum length, backtrack early
-        current_walk.pop();
-        visited.remove(&current_node_id);
-        return Ok(None);
-    }
+        // Get edges from current node
+        let node_ref = current_node.bind(py);
+        let edges: Vec<Py<Edge>> = match node_ref.getattr("edges") {
+            Ok(edges_attr) => match edges_attr.extract() {
+                Ok(edges) => edges,
+                Err(_) => break, // No edges or extraction failed, end walk
+            },
+            Err(_) => break, // No edges attribute, end walk
+        };
 
-    // Get the current node
-    let current_node = match vertex.nodes.get(&current_node_id) {
-        Some(node) => node,
-        None => {
-            // Node not found, backtrack
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(None);
-        }
-    };
-
-    // Get edges from current node
-    let node_ref = current_node.bind(py);
-    let edges: Vec<Py<Edge>> = match node_ref.getattr("edges") {
-        Ok(edges_attr) => match edges_attr.extract() {
-            Ok(edges) => edges,
-            Err(_) => {
-                // No edges or extraction failed, check if current walk meets minimum length
-                let result = if current_walk.len() >= min_length {
-                    Some(current_walk.clone())
-                } else {
-                    None
-                };
-                current_walk.pop();
-                visited.remove(&current_node_id);
-                return Ok(result);
-            }
-        },
-        Err(_) => {
-            // No edges attribute, check if current walk meets minimum length
-            let result = if current_walk.len() >= min_length {
-                Some(current_walk.clone())
-            } else {
-                None
-            };
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(result);
-        }
-    };
-
-    // Filter out edges that lead to already visited nodes
-    let mut valid_edges = Vec::new();
-    for edge in edges {
-        let edge_ref = edge.bind(py);
-        if let Ok(to_node) = edge_ref.getattr("to_node") {
-            if let Ok(to_node_py) = to_node.extract::<Py<Node>>() {
-                let to_node_ref = to_node_py.bind(py);
-                if let Ok(to_id) = to_node_ref.getattr("id") {
-                    if let Ok(to_id_str) = to_id.extract::<String>() {
-                        if !visited.contains(&to_id_str) {
-                            valid_edges.push((edge, to_id_str));
+        // Collect valid next nodes
+        let mut valid_next_nodes = Vec::new();
+        for edge in edges {
+            let edge_ref = edge.bind(py);
+            if let Ok(to_node) = edge_ref.getattr("to_node") {
+                if let Ok(to_node_py) = to_node.extract::<Py<Node>>() {
+                    let to_node_ref = to_node_py.bind(py);
+                    if let Ok(to_id) = to_node_ref.getattr("id") {
+                        if let Ok(to_id_str) = to_id.extract::<String>() {
+                            // Include node if revisiting is allowed OR if we haven't visited it
+                            if allow_revisit || !visited.contains(&to_id_str) {
+                                valid_next_nodes.push(to_id_str);
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    // If no valid edges, this is a dead end - check if we meet minimum length
-    if valid_edges.is_empty() {
-        let result = if current_walk.len() >= min_length {
-            Some(current_walk.clone())
+        // If no valid next nodes, end the walk
+        if valid_next_nodes.is_empty() {
+            break;
+        }
+
+        // Randomly choose next node - this is where the true randomness happens
+        if let Some(next_node) = valid_next_nodes.choose(rng) {
+            current_node_id = next_node.clone();
         } else {
-            None
-        };
-        current_walk.pop();
-        visited.remove(&current_node_id);
-        return Ok(result);
-    }
-
-    // Shuffle the valid edges to try them in random order for backtracking
-    valid_edges.shuffle(rng);
-
-    // Try each valid edge - backtrack if none lead to a successful walk
-    for (_, next_node_id) in valid_edges {
-        // Try this path recursively
-        if let Ok(Some(result_walk)) = perform_random_walk_with_min_length(
-            vertex,
-            py,
-            next_node_id.clone(),
-            remaining_length - 1,
-            min_length,
-            visited,
-            current_walk,
-            rng
-        ) {
-            // Found a successful walk, clean up and return it
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(Some(result_walk));
-        }
-        // If this path didn't work, the recursive call already cleaned up,
-        // so we continue to try the next edge
-    }
-
-    // None of the edges led to a successful walk that meets minimum length
-    // Check if current walk meets minimum length as a fallback
-    let result = if current_walk.len() >= min_length {
-        Some(current_walk.clone())
-    } else {
-        None
-    };
-    current_walk.pop();
-    visited.remove(&current_node_id);
-    Ok(result)
-}
-
-// Recursive helper function to perform a single random walk with backtracking
-fn perform_random_walk(
-    vertex: &Vertex,
-    py: Python<'_>,
-    current_node_id: String,
-    remaining_length: usize,
-    visited: &mut HashSet<String>,
-    current_walk: &mut Vec<String>,
-    rng: &mut rand::rngs::ThreadRng
-) -> PyResult<Option<Vec<String>>> {
-    // Add current node to the walk
-    current_walk.push(current_node_id.clone());
-    visited.insert(current_node_id.clone());
-
-    // If we've reached maximum length, return the walk
-    if remaining_length == 0 || current_walk.len() >= 1000 { // Safety limit to prevent infinite recursion
-        let result = current_walk.clone();
-        // Backtrack: remove current node from visited and walk for other attempts
-        current_walk.pop();
-        visited.remove(&current_node_id);
-        return Ok(Some(result));
-    }
-
-    // Get the current node
-    let current_node = match vertex.nodes.get(&current_node_id) {
-        Some(node) => node,
-        None => {
-            // Node not found, backtrack
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(None);
-        }
-    };
-
-    // Get edges from current node
-    let node_ref = current_node.bind(py);
-    let edges: Vec<Py<Edge>> = match node_ref.getattr("edges") {
-        Ok(edges_attr) => match edges_attr.extract() {
-            Ok(edges) => edges,
-            Err(_) => {
-                // No edges or extraction failed, backtrack
-                current_walk.pop();
-                visited.remove(&current_node_id);
-                return Ok(None);
-            }
-        },
-        Err(_) => {
-            // No edges attribute, backtrack
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(None);
-        }
-    };
-
-    // Filter out edges that lead to already visited nodes
-    let mut valid_edges = Vec::new();
-    for edge in edges {
-        let edge_ref = edge.bind(py);
-        if let Ok(to_node) = edge_ref.getattr("to_node") {
-            if let Ok(to_node_py) = to_node.extract::<Py<Node>>() {
-                let to_node_ref = to_node_py.bind(py);
-                if let Ok(to_id) = to_node_ref.getattr("id") {
-                    if let Ok(to_id_str) = to_id.extract::<String>() {
-                        if !visited.contains(&to_id_str) {
-                            valid_edges.push((edge, to_id_str));
-                        }
-                    }
-                }
-            }
+            break; // Should not happen, but handle gracefully
         }
     }
 
-    // If no valid edges, this is a dead end - backtrack
-    if valid_edges.is_empty() {
-        current_walk.pop();
-        visited.remove(&current_node_id);
-        return Ok(None);
-    }
-
-    // Shuffle the valid edges to try them in random order for backtracking
-    valid_edges.shuffle(rng);
-
-    // Try each valid edge - backtrack if none lead to a successful walk
-    for (_, next_node_id) in valid_edges {
-        // Try this path recursively
-        if let Ok(Some(result_walk)) = perform_random_walk(
-            vertex,
-            py,
-            next_node_id.clone(),
-            remaining_length - 1,
-            visited,
-            current_walk,
-            rng
-        ) {
-            // Found a successful walk, clean up and return it
-            current_walk.pop();
-            visited.remove(&current_node_id);
-            return Ok(Some(result_walk));
-        }
-        // If this path didn't work, the recursive call already cleaned up,
-        // so we continue to try the next edge
-    }
-
-    // None of the edges led to a successful walk, backtrack
-    current_walk.pop();
-    visited.remove(&current_node_id);
-    Ok(None)
+    Ok(Some(walk))
 }
