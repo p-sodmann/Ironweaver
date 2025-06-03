@@ -338,23 +338,24 @@ impl Vertex {
         node_ids: Vec<String>
     ) -> PyResult<Py<Vertex>> {
         algorithms::filter(self, py, node_ids)
-    }
-
-    /// Perform multiple random walks from a starting node
+    }    /// Perform multiple random walks from a starting node
     /// 
     /// Args:
     ///     start_node_id (str): ID of the node to start the random walks from
     ///     max_length (int): Maximum length of each random walk
     ///     num_attempts (int): Number of random walk attempts to perform
     ///     min_length (int, optional): Minimum length of each random walk. Defaults to 1.
+    ///     allow_revisit (bool, optional): Whether to allow revisiting nodes. Defaults to False.
+    ///     include_edge_types (bool, optional): Whether to include edge types in the result. Defaults to False.
+    ///     edge_type_field (str, optional): Field name to extract edge type from. Defaults to "type".
     ///     
     /// Returns:
-    ///     list: A list of lists, where each inner list contains node IDs representing a random walk path.
+    ///     list: A list of lists. If include_edge_types is False, each inner list contains node IDs.
+    ///           If include_edge_types is True, each inner list alternates between node IDs and edge types.
     ///           Duplicates are automatically removed.
     ///     
     /// Raises:
-    ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length
-    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None))]
+    ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length#[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None))]
     fn random_walks(
         &self,
         py: Python<'_>,
@@ -362,8 +363,10 @@ impl Vertex {
         max_length: usize,
         num_attempts: usize,
         min_length: Option<usize>,
-        allow_revisit: Option<bool>
+        allow_revisit: Option<bool>,
+        include_edge_types: Option<bool>,
+        edge_type_field: Option<String>
     ) -> PyResult<Py<PyList>> {
-        algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts, allow_revisit)
+        algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts, allow_revisit, include_edge_types, edge_type_field)
     }
 }
