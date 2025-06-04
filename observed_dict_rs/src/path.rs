@@ -19,20 +19,25 @@ impl Path {
     fn __repr__(&self, py: Python<'_>) -> String {
         let node_ids: Vec<String> = self.nodes
             .iter()
-            .filter_map(|n| n.bind(py)
-            .getattr("id")
-            .ok()
-            .map(|id| id.to_string()))
+            .filter_map(|n| {
+                n.bind(py)
+                    .getattr("id")
+                    .ok()
+                    .and_then(|id| id.extract::<String>().ok())
+            })
             .collect();
         format!("Path({:?})", node_ids)
     }
 
     fn toJSON(&self, py: Python<'_>) -> Vec<String> {
-        self.nodes.iter()
-            .filter_map(|n| n.bind(py)
-            .getattr("id")
-            .ok()
-            .map(|id| id.to_string()))
+        self.nodes
+            .iter()
+            .filter_map(|n| {
+                n.bind(py)
+                    .getattr("id")
+                    .ok()
+                    .and_then(|id| id.extract::<String>().ok())
+            })
             .collect()
     }
 }
