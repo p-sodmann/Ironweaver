@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
+use pyo3::types::{PyAny, PyList};
 use std::collections::{HashMap, HashSet};
 use crate::Edge;
 use crate::Vertex;
@@ -99,6 +99,33 @@ impl Node {
     ) -> PyResult<Option<Py<Node>>> {
         let self_handle: Py<Node> = slf.into();
         bfs_search_iterative(py, self_handle, target_id, depth, &filter)
+    }
+
+    /// Retrieve a value from ``attr`` by key.
+    /// Returns ``None`` if the key does not exist.
+    fn attr_get<'py>(&self, py: Python<'py>, key: String) -> Option<Py<PyAny>> {
+        self.attr.get(&key).map(|v| v.clone_ref(py))
+    }
+
+    /// Set a value in ``attr`` under ``key``.
+    fn attr_set(&mut self, key: String, value: Py<PyAny>) {
+        self.attr.insert(key, value);
+    }
+
+    /// Append ``value`` to a list stored at ``key`` in ``attr``.
+    /// If the list does not exist, it will be created.
+    #[pyo3(signature = (key, value))]
+    fn attr_list_append(&mut self, py: Python<'_>, key: String, value: Py<PyAny>) -> PyResult<()> {
+        if let Some(existing) = self.attr.get(&key) {
+            let list_any = existing.bind(py);
+            let list = list_any.downcast::<PyList>()?;
+            list.append(value)?;
+        } else {
+            let list = PyList::empty(py);
+            list.append(value)?;
+            self.attr.insert(key, list.into());
+        }
+        Ok(())
     }
 }
 
