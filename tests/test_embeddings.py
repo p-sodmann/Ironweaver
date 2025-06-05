@@ -5,10 +5,10 @@ ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, ROOT)
 
 try:
-    from observed_dict_rs import Vertex
+    from ironweaver import Vertex
 except Exception as e:  # pragma: no cover - optional build step
     import pytest
-    pytest.skip(f"observed_dict_rs module unavailable: {e}", allow_module_level=True)
+    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
 from embedding_utils import attach_embeddings_from_meta
 

@@ -1,4 +1,4 @@
-from observed_dict_rs import Vertex
+from ironweaver import Vertex
 
 
 def attach_embeddings_from_meta(vertex: Vertex) -> None:
