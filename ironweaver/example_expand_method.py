@@ -3,7 +3,7 @@
 Test script for the new expand method
 """
 
-from observed_dict_rs import Node, Edge, Vertex
+from ironweaver import Node, Edge, Vertex
 
 def test_expand_method():
     """Test the new expand method with the example from the user"""

@@ -1,10 +1,10 @@
 [package]
-name = "observed_dict_rs"          # <-- same spelling
+name = "ironweaver"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "observed_dict_rs"          # <-- same spelling
+name = "ironweaver"
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -20,7 +20,7 @@ try:
     print("Build successful!")
     
     # Now try to import and test
-    from observed_dict_rs import Vertex, Node, Edge
+    from ironweaver import Vertex, Node, Edge
     
     print("Creating a new empty graph...")
     g = Vertex()

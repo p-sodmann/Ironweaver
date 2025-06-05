@@ -10,7 +10,7 @@ This script shows how to:
 5. Save and load graphs
 """
 
-from observed_dict_rs import Vertex
+from ironweaver import Vertex
 
 def main():
     print("🚀 Graph Construction Demo")

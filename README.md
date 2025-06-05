@@ -25,7 +25,7 @@ pip install IronWeaver
 ### Basic Graph Creation
 
 ```python
-from observed_dict_rs import Vertex, Node, Edge
+from ironweaver import Vertex, Node, Edge
 import networkx as nx
 import matplotlib.pyplot as plt
 
@@ -229,7 +229,7 @@ Contributions are welcome! Please see our contributing guidelines for more infor
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd observed_dict_rs
+cd ironweaver
 
 # Build the Rust extension
 maturin develop

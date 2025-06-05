@@ -8,17 +8,17 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'target/wheels'))
 
 try:
-    import observed_dict_rs
+    import ironweaver
 except ImportError:
     print("Building the Python module first...")
-    os.system("cd /home/inexen/Documents/python/cpyg/cpyg/observed_dict_rs && maturin develop")
-    import observed_dict_rs
+    os.system("cd /home/inexen/Documents/python/cpyg/cpyg/ironweaver && maturin develop")
+    import ironweaver
 
 def test_vertex_bfs():
     """Test the Vertex.bfs method with different scenarios"""
     
     # Create a new vertex (graph)
-    vertex = observed_dict_rs.Vertex()
+    vertex = ironweaver.Vertex()
     
     # Add nodes
     node_a = vertex.add_node("A", {"label": "Node A"})

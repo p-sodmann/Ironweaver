@@ -8,11 +8,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'target/wheels'))
 
 try:
-    import observed_dict_rs
+    import ironweaver
 except ImportError:
     print("Building the Python module first...")
-    os.system("cd /home/inexen/Documents/python/cpyg/cpyg/observed_dict_rs && maturin develop")
-    import observed_dict_rs
+    os.system("cd /home/inexen/Documents/python/cpyg/cpyg/ironweaver && maturin develop")
+    import ironweaver
 
 def test_expand_method():
     """Test the Vertex.expand method with the user's example"""
@@ -20,7 +20,7 @@ def test_expand_method():
     print("=" * 50)
     
     # Create the full graph (g)
-    g = observed_dict_rs.Vertex()
+    g = ironweaver.Vertex()
     node1 = g.add_node('node1', {'value': 1})
     node2 = g.add_node('node2', {'value': 2})
     node3 = g.add_node('node3', {'value': 3})
