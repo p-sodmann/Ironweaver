@@ -369,4 +369,17 @@ impl Vertex {
     ) -> PyResult<Py<PyList>> {
         algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts, allow_revisit, include_edge_types, edge_type_field)
     }
+
+    /// Parallel breadth-first search starting from ``root_node_id``.
+    /// When the graph is large, using this method can provide better performance
+    /// by exploring each BFS frontier concurrently.
+    #[pyo3(signature = (root_node_id, max_depth=None))]
+    fn parallel_bfs(
+        &self,
+        py: Python<'_>,
+        root_node_id: String,
+        max_depth: Option<usize>
+    ) -> PyResult<Py<Vertex>> {
+        algorithms::parallel_bfs(self, py, root_node_id, max_depth)
+    }
 }
