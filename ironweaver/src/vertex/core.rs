@@ -301,6 +301,20 @@ impl Vertex {
         algorithms::shortest_path_bfs(self, py, root_node_id, target_node_id, max_depth)
     }
 
+    /// Parallel Breadth-First Search between source and target nodes.
+    /// This variant uses rayon to process each BFS level concurrently and can
+    /// be faster on very large graphs.
+    #[pyo3(signature = (root_node_id, target_node_id, max_depth=None))]
+    fn parallel_bfs(
+        &self,
+        py: Python<'_>,
+        root_node_id: String,
+        target_node_id: String,
+        max_depth: Option<usize>
+    ) -> PyResult<Py<Vertex>> {
+        algorithms::parallel_bfs(self, py, root_node_id, target_node_id, max_depth)
+    }
+
     /// Expand the current vertex by adding neighbor nodes from a source vertex
     /// 
     /// Args:
