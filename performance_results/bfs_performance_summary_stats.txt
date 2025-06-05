@@ -1,18 +1,18 @@
 Performance Summary for bfs_performance
 ==================================================
 
-Total test runs: 8
-Date range: 2025-05-24 to 2025-05-24
+Total test runs: 12
+Date range: 2025-05-24 to 2025-05-25
 
 Execution Time Statistics:
-  Mean: 0.0008 seconds
-  Median: 0.0005 seconds
-  Std Dev: 0.0008 seconds
-  Min: 0.0001 seconds
+  Mean: 0.0006 seconds
+  Median: 0.0003 seconds
+  Std Dev: 0.0007 seconds
+  Min: 0.0000 seconds
   Max: 0.0025 seconds
 
 Graph Size Statistics:
   Sizes tested: [100, 500, 1000, 2000]
   Average size: 900
 
-Performance Trend: improving (14.5% change)
+Performance Trend: improving (29% change)
