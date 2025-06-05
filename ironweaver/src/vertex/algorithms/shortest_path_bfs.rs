@@ -15,10 +15,15 @@ pub fn shortest_path_bfs(
     use std::collections::{VecDeque, HashMap as StdHashMap};
     
     // Get the root node
-    let root_node = vertex.nodes.get(&root_node_id)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
-            format!("Root node with id '{}' not found", root_node_id)
-        ))?
+    let root_node = vertex
+        .nodes
+        .get(&root_node_id)
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Root node with id '{}' not found",
+                root_node_id
+            ))
+        })?
         .clone_ref(py);
     
     // Check if target exists in the graph
@@ -33,8 +38,12 @@ pub fn shortest_path_bfs(
         let mut path_nodes = HashMap::<String, Py<Node>>::new();
         
         // Create a new node with no edges (since it's just a single node path)
-        let original_node_ref = root_node.bind(py);
-        let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
+        let original_node_ref = root_node.borrow(py);
+        let attr = original_node_ref
+            .attr
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+            .collect::<HashMap<String, Py<PyAny>>>();
         let new_node = Py::new(py, Node::new(root_node_id.clone(), Some(attr), Some(Vec::new())))?;
         path_nodes.insert(root_node_id, new_node);
         
@@ -48,7 +57,7 @@ pub fn shortest_path_bfs(
     
     // Initialize queue with root node
     visited.insert(root_node_id.clone());
-    queue.push_back((root_node, 0));
+    queue.push_back((root_node.clone_ref(py), 0));
     
     // Perform BFS from the root node
     while let Some((current_node, current_depth)) = queue.pop_front() {
@@ -60,15 +69,13 @@ pub fn shortest_path_bfs(
         }
 
         // Get edges from current node
-        let current_ref = current_node.bind(py);
-        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
-        let current_id = current_ref.getattr("id")?.extract::<String>()?;
-        
-        for edge in edges {
-            let edge_ref = edge.bind(py);
-            let to_node_actual: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-            let to_node_ref = to_node_actual.bind(py);
-            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+        let current_ref = current_node.borrow(py);
+        let current_id = current_ref.id.clone();
+
+        for edge in &current_ref.edges {
+            let edge_ref = edge.borrow(py);
+            let to_node_actual: Py<Node> = edge_ref.to_node.clone_ref(py);
+            let to_id = to_node_actual.borrow(py).id.clone();
             
             // If not visited, mark and enqueue
             if !visited.contains(&to_id) {
@@ -95,20 +102,24 @@ pub fn shortest_path_bfs(
                     
                     for path_id in &path_ids {
                         if let Some(original_node) = vertex.nodes.get(path_id) {
-                            let original_node_ref = original_node.bind(py);
-                            
-                            // Get original attributes
-                            let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
-                            
-                            // Get original edges and filter to only include edges to other path nodes
-                            let original_edges: Vec<Py<Edge>> = original_node_ref.getattr("edges")?.extract().unwrap_or_default();
+                            let original_node_ref = original_node.borrow(py);
+
+                            let attr = original_node_ref
+                                .attr
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+                                .collect::<HashMap<String, Py<PyAny>>>();
+                            let original_edges: Vec<Py<Edge>> = original_node_ref
+                                .edges
+                                .iter()
+                                .map(|e| e.clone_ref(py))
+                                .collect();
                             let mut filtered_edges = Vec::new();
-                            
+
                             for edge in original_edges {
-                                let edge_ref = edge.bind(py);
-                                let edge_to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                                let edge_to_node_ref = edge_to_node.bind(py);
-                                let edge_to_id = edge_to_node_ref.getattr("id")?.extract::<String>()?;
+                                let edge_ref = edge.borrow(py);
+                                let edge_to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+                                let edge_to_id = edge_to_node.borrow(py).id.clone();
                                 
                                 // Only include edge if target is also in the path
                                 if path_set.contains(&edge_to_id) {

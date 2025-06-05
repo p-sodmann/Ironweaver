@@ -39,14 +39,11 @@ pub fn expand(
                 }
 
                 // Get edges from current node
-                let current_ref = current_node.bind(py);
-                let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
-
-                for edge in edges {
-                    let edge_ref = edge.bind(py);
-                    let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                    let to_node_ref = to_node.bind(py);
-                    let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+                let current_ref = current_node.borrow(py);
+                for edge in &current_ref.edges {
+                    let edge_ref = edge.borrow(py);
+                    let to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+                    let to_id = to_node.borrow(py).id.clone();
                     
                     // If we haven't visited this node in this BFS traversal
                     if !visited.contains(&to_id) {
@@ -73,21 +70,26 @@ pub fn expand(
     for node_id in &discovered_node_ids {
         // Get the node from the source vertex (which has the complete node data)
         if let Some(source_node) = source_vertex.nodes.get(node_id) {
-            let source_node_ref = source_node.bind(py);
-            
-            // Get node attributes
-            let attr: HashMap<String, Py<PyAny>> = source_node_ref.getattr("attr")?.extract().unwrap_or_default();
-            
-            // Get all edges from the source node
-            let source_edges: Vec<Py<Edge>> = source_node_ref.getattr("edges")?.extract().unwrap_or_default();
+            let source_node_ref = source_node.borrow(py);
+
+            let attr = source_node_ref
+                .attr
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+                .collect::<HashMap<String, Py<PyAny>>>();
+
+            let source_edges: Vec<Py<Edge>> = source_node_ref
+                .edges
+                .iter()
+                .map(|e| e.clone_ref(py))
+                .collect();
             
             // Filter edges to only include those pointing to nodes that are also in our result set
             let mut filtered_edges = Vec::new();
             for edge in source_edges {
-                let edge_ref = edge.bind(py);
-                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let to_node_ref = to_node.bind(py);
-                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+                let edge_ref = edge.borrow(py);
+                let to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+                let to_id = to_node.borrow(py).id.clone();
                 
                 // Only include edge if target is also in the discovered nodes
                 if discovered_node_ids.contains(&to_id) {
@@ -107,22 +109,33 @@ pub fn expand(
     let mut final_result_nodes = HashMap::<String, Py<Node>>::new();
     
     for (node_id, node) in &result_nodes {
-        let node_ref = node.bind(py);
-        let attr: HashMap<String, Py<PyAny>> = node_ref.getattr("attr")?.extract().unwrap_or_default();
-        let edges: Vec<Py<Edge>> = node_ref.getattr("edges")?.extract().unwrap_or_default();
+        let node_ref = node.borrow(py);
+        let attr = node_ref
+            .attr
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+            .collect::<HashMap<String, Py<PyAny>>>();
+        let edges: Vec<Py<Edge>> = node_ref
+            .edges
+            .iter()
+            .map(|e| e.clone_ref(py))
+            .collect();
         
         // Create new edges with proper node references from our result set
         let mut updated_edges = Vec::new();
         for edge in edges {
-            let edge_ref = edge.bind(py);
-            let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-            let to_node_ref = to_node.bind(py);
-            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+            let edge_ref = edge.borrow(py);
+            let to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+            let to_id = to_node.borrow(py).id.clone();
             
             // Get the target node from our result set
             if let Some(target_node) = result_nodes.get(&to_id) {
-                let edge_attr: HashMap<String, Py<PyAny>> = edge_ref.getattr("attr")?.extract().unwrap_or_default();
-                let edge_id: Option<String> = edge_ref.getattr("id").ok().and_then(|id| id.extract().ok());
+                let edge_attr: HashMap<String, Py<PyAny>> = edge_ref
+                    .attr
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+                    .collect();
+                let edge_id: Option<String> = edge_ref.id.clone();
                 
                 let new_edge = Py::new(py, Edge::new(
                     node.clone_ref(py),

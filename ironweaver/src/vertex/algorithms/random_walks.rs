@@ -124,8 +124,9 @@ fn perform_simple_random_walk(
     allow_revisit: bool,
     include_edge_types: bool,
     edge_type_field: &str,
-    rng: &mut rand::rngs::ThreadRng
-) -> PyResult<Option<Walk>> {    let mut walk_nodes = Vec::new();
+    rng: &mut rand::rngs::ThreadRng,
+) -> PyResult<Option<Walk>> {
+    let mut walk_nodes = Vec::new();
     let mut walk_edges = Vec::new();
     let mut visited = HashSet::new();
     let mut current_node_id = start_node_id;
@@ -142,47 +143,27 @@ fn perform_simple_random_walk(
 
         // Get the current node
         let current_node = match vertex.nodes.get(&current_node_id) {
-            Some(node) => node,
+            Some(node) => node.borrow(py),
             None => break, // Node not found, end walk
         };
 
-        // Get edges from current node
-        let node_ref = current_node.bind(py);
-        let edges: Vec<Py<Edge>> = match node_ref.getattr("edges") {
-            Ok(edges_attr) => match edges_attr.extract() {
-                Ok(edges) => edges,
-                Err(_) => break, // No edges or extraction failed, end walk
-            },
-            Err(_) => break, // No edges attribute, end walk
-        };
-
-        // Collect valid next nodes and their corresponding edge types
         let mut valid_next_options = Vec::new();
-        for edge in edges {
-            let edge_ref = edge.bind(py);
-            if let Ok(to_node) = edge_ref.getattr("to_node") {
-                if let Ok(to_node_py) = to_node.extract::<Py<Node>>() {
-                    let to_node_ref = to_node_py.bind(py);
-                    if let Ok(to_id) = to_node_ref.getattr("id") {
-                        if let Ok(to_id_str) = to_id.extract::<String>() {
-                            // Include node if revisiting is allowed OR if we haven't visited it
-                            if allow_revisit || !visited.contains(&to_id_str) {
-                                // Get edge type if needed
-                                let edge_type = if include_edge_types {
-                                    edge_ref.getattr("attr")
-                                        .ok()
-                                        .and_then(|attr| attr.get_item(edge_type_field).ok())
-                                        .and_then(|type_val| type_val.extract::<String>().ok())
-                                        .unwrap_or_else(|| "unknown".to_string())
-                                } else {
-                                    String::new()
-                                };
-                                
-                                valid_next_options.push((to_id_str, edge_type));
-                            }
-                        }
-                    }
-                }
+        for edge in &current_node.edges {
+            let edge_ref = edge.borrow(py);
+            let to_node_py = edge_ref.to_node.clone_ref(py);
+            let to_id_str = to_node_py.borrow(py).id.clone();
+
+            if allow_revisit || !visited.contains(&to_id_str) {
+                let edge_type = if include_edge_types {
+                    edge_ref
+                        .attr
+                        .get(edge_type_field)
+                        .and_then(|val| val.bind(py).extract::<String>().ok())
+                        .unwrap_or_else(|| "unknown".to_string())
+                } else {
+                    String::new()
+                };
+                valid_next_options.push((to_id_str, edge_type));
             }
         }
 

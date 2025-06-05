@@ -131,27 +131,23 @@ impl Node {
 
 // Helper function to check if an edge matches the filter criteria
 fn edge_matches_filter(
-    py: Python<'_>,
     edge: &Py<Edge>,
-    filter: &Option<HashMap<String, Py<PyAny>>>
+    py: Python<'_>,
+    filter: &Option<HashMap<String, Py<PyAny>>>,
 ) -> PyResult<bool> {
     if let Some(filter_map) = filter {
-        let edge_ref = edge.bind(py);
-        let edge_attr: HashMap<String, Py<PyAny>> = edge_ref.getattr("attr")?.extract()?;
-        
-        // Check if all filter criteria are met
+        let edge_ref = edge.borrow(py);
         for (filter_key, filter_value) in filter_map {
-            if let Some(edge_value) = edge_attr.get(filter_key) {
-                // Compare the values by converting to Python objects and using Python's equality
-                let edge_py_obj = edge_value.bind(py);
-                let filter_py_obj = filter_value.bind(py);
-                
-                if !edge_py_obj.eq(filter_py_obj)? {
-                    return Ok(false);
+            match edge_ref.attr.get(filter_key) {
+                Some(edge_value) => {
+                    let eq_obj = edge_value
+                        .bind(py)
+                        .rich_compare(filter_value.bind(py), pyo3::basic::CompareOp::Eq)?;
+                    if !eq_obj.is_truthy()? {
+                        return Ok(false);
+                    }
                 }
-            } else {
-                // Edge doesn't have the required attribute
-                return Ok(false);
+                None => return Ok(false),
             }
         }
     }
@@ -190,7 +186,7 @@ fn traverse_recursive(
     let edges: Vec<Py<Edge>> = node_ref.getattr("edges")?.extract()?;
     for edge in edges {
         // Check if edge matches filter criteria
-        if edge_matches_filter(py, &edge, filter)? {
+        if edge_matches_filter(&edge, py, filter)? {
             let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
             traverse_recursive(py, to_node, depth, current_depth + 1, found, visited, nodelist, filter)?;
         }
@@ -209,19 +205,19 @@ fn bfs_iterative(
     filter: &Option<HashMap<String, Py<PyAny>>>,
 ) -> PyResult<()> {
     use std::collections::VecDeque;
-    
+
     // Queue stores (node, current_depth)
     let mut queue = VecDeque::new();
-    
+
     // Get starting node ID
-    let start_node_ref = start_node.bind(py);
-    let start_id = start_node_ref.getattr("id")?.extract::<String>()?;
+    let start_node_ref = start_node.borrow(py);
+    let start_id = start_node_ref.id.clone();
     
     // Mark starting node and add to queue
     visited.insert(start_id.clone());
     found.insert(start_id.clone(), start_node.clone_ref(py));
-    nodelist.push(start_id);
-    queue.push_back((start_node, 0));
+    nodelist.push(start_id.clone());
+    queue.push_back((start_node.clone_ref(py), 0));
     
     while let Some((current_node, current_depth)) = queue.pop_front() {
         // Check depth limit
@@ -232,16 +228,13 @@ fn bfs_iterative(
         }
 
         // Get edges from current node
-        let current_ref = current_node.bind(py);
-        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
-
-        for edge in edges {
+        let current_ref = current_node.borrow(py);
+        for edge in &current_ref.edges {
             // Check if edge matches filter criteria
-            if edge_matches_filter(py, &edge, filter)? {
-                let edge_ref = edge.bind(py);
-                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let to_node_ref = to_node.bind(py);
-                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+            if edge_matches_filter(&edge, py, filter)? {
+                let edge_ref = edge.borrow(py);
+                let to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+                let to_id = to_node.borrow(py).id.clone();
                 
                 // If not visited, mark and enqueue
                 if !visited.contains(&to_id) {
@@ -272,17 +265,17 @@ fn bfs_search_iterative(
     let mut visited = HashSet::<String>::new();
     
     // Get starting node ID
-    let start_node_ref = start_node.bind(py);
-    let start_id = start_node_ref.getattr("id")?.extract::<String>()?;
+    let start_node_ref = start_node.borrow(py);
+    let start_id = start_node_ref.id.clone();
     
     // Check if start node is the target
     if start_id == target_id {
-        return Ok(Some(start_node));
+        return Ok(Some(start_node.clone_ref(py)));
     }
     
     // Mark starting node and add to queue
-    visited.insert(start_id);
-    queue.push_back((start_node, 0));
+    visited.insert(start_id.clone());
+    queue.push_back((start_node.clone_ref(py), 0));
     
     while let Some((current_node, current_depth)) = queue.pop_front() {
         // Check depth limit
@@ -293,16 +286,13 @@ fn bfs_search_iterative(
         }
         
         // Get edges from current node
-        let current_ref = current_node.bind(py);
-        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
-        
-        for edge in edges {
+        let current_ref = current_node.borrow(py);
+        for edge in &current_ref.edges {
             // Check if edge matches filter criteria
-            if edge_matches_filter(py, &edge, filter)? {
-                let edge_ref = edge.bind(py);
-                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let to_node_ref = to_node.bind(py);
-                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
+            if edge_matches_filter(&edge, py, filter)? {
+                let edge_ref = edge.borrow(py);
+                let to_node: Py<Node> = edge_ref.to_node.clone_ref(py);
+                let to_id = to_node.borrow(py).id.clone();
                 
                 // If this is our target, return it
                 if to_id == target_id {
