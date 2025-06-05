@@ -37,13 +37,16 @@ pub fn expand(
                 if current_depth >= expansion_depth {
                     continue;
                 }
-                
+
                 // Get edges from current node
-                let edges: Vec<Py<Edge>> = current_node.bind(py).getattr("edges")?.extract()?;
-                
+                let current_ref = current_node.bind(py);
+                let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
+
                 for edge in edges {
-                    let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
-                    let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
+                    let edge_ref = edge.bind(py);
+                    let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+                    let to_node_ref = to_node.bind(py);
+                    let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
                     
                     // If we haven't visited this node in this BFS traversal
                     if !visited.contains(&to_id) {
@@ -83,7 +86,8 @@ pub fn expand(
             for edge in source_edges {
                 let edge_ref = edge.bind(py);
                 let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
+                let to_node_ref = to_node.bind(py);
+                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
                 
                 // Only include edge if target is also in the discovered nodes
                 if discovered_node_ids.contains(&to_id) {
@@ -111,7 +115,9 @@ pub fn expand(
         let mut updated_edges = Vec::new();
         for edge in edges {
             let edge_ref = edge.bind(py);
-            let to_id = edge_ref.getattr("to_node")?.getattr("id")?.extract::<String>()?;
+            let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+            let to_node_ref = to_node.bind(py);
+            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
             
             // Get the target node from our result set
             if let Some(target_node) = result_nodes.get(&to_id) {

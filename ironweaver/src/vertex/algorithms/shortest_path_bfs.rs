@@ -58,15 +58,17 @@ pub fn shortest_path_bfs(
                 continue;
             }
         }
-        
+
         // Get edges from current node
-        let edges: Vec<Py<Edge>> = current_node.bind(py).getattr("edges")?.extract()?;
-        let current_id = current_node.bind(py).getattr("id")?.extract::<String>()?;
+        let current_ref = current_node.bind(py);
+        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
+        let current_id = current_ref.getattr("id")?.extract::<String>()?;
         
         for edge in edges {
-            let to_node: Py<Edge> = edge.clone_ref(py);
-            let to_node_actual: Py<Node> = to_node.bind(py).getattr("to_node")?.extract()?;
-            let to_id = to_node_actual.bind(py).getattr("id")?.extract::<String>()?;
+            let edge_ref = edge.bind(py);
+            let to_node_actual: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+            let to_node_ref = to_node_actual.bind(py);
+            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
             
             // If not visited, mark and enqueue
             if !visited.contains(&to_id) {
@@ -105,7 +107,8 @@ pub fn shortest_path_bfs(
                             for edge in original_edges {
                                 let edge_ref = edge.bind(py);
                                 let edge_to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                                let edge_to_id = edge_to_node.bind(py).getattr("id")?.extract::<String>()?;
+                                let edge_to_node_ref = edge_to_node.bind(py);
+                                let edge_to_id = edge_to_node_ref.getattr("id")?.extract::<String>()?;
                                 
                                 // Only include edge if target is also in the path
                                 if path_set.contains(&edge_to_id) {
