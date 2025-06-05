@@ -2,6 +2,8 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyString};
 use serde::{Deserialize, Serialize};
+use serde::ser::{SerializeStruct, Serializer as _};
+use bincode::Options;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -342,7 +344,13 @@ impl SerializableGraph {
     pub fn save_to_json<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self)?;
+        let mut serializer = serde_json::Serializer::pretty(writer);
+        let mut st = serializer.serialize_struct("SerializableGraph", 4)?;
+        st.serialize_field("nodes", &self.nodes)?;
+        st.serialize_field("edges", &self.edges)?;
+        st.serialize_field("meta", &self.meta)?;
+        st.serialize_field("metadata", &self.metadata)?;
+        st.end()?;
         Ok(())
     }
 
@@ -358,7 +366,14 @@ impl SerializableGraph {
     pub fn save_to_binary<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        bincode::serialize_into(writer, self)?;
+        let options = bincode::DefaultOptions::new().with_fixint_encoding();
+        let mut serializer = bincode::Serializer::new(writer, options);
+        let mut st = serializer.serialize_struct("SerializableGraph", 4)?;
+        st.serialize_field("nodes", &self.nodes)?;
+        st.serialize_field("edges", &self.edges)?;
+        st.serialize_field("meta", &self.meta)?;
+        st.serialize_field("metadata", &self.metadata)?;
+        st.end()?;
         Ok(())
     }
 
