@@ -30,10 +30,10 @@ pub fn filter(
     for node_id in &filter_set {
         if let Some(source_node) = vertex.nodes.get(node_id) {
             let source_node_ref = source_node.bind(py);
-            
+
             // Get node attributes
             let attr: HashMap<String, Py<PyAny>> = source_node_ref.getattr("attr")?.extract().unwrap_or_default();
-            
+
             // Get all edges from the source node
             let source_edges: Vec<Py<Edge>> = source_node_ref.getattr("edges")?.extract().unwrap_or_default();
             
@@ -42,7 +42,8 @@ pub fn filter(
             for edge in source_edges {
                 let edge_ref = edge.bind(py);
                 let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
+                let to_node_ref = to_node.bind(py);
+                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
                 
                 // Only include edge if target is also in the filter set
                 if filter_set.contains(&to_id) {
@@ -70,7 +71,9 @@ pub fn filter(
         let mut updated_edges = Vec::new();
         for edge in edges {
             let edge_ref = edge.bind(py);
-            let to_id = edge_ref.getattr("to_node")?.getattr("id")?.extract::<String>()?;
+            let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+            let to_node_ref = to_node.bind(py);
+            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
             
             // Get the target node from our result set
             if let Some(target_node) = result_nodes.get(&to_id) {

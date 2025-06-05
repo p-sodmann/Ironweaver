@@ -214,7 +214,8 @@ fn bfs_iterative(
     let mut queue = VecDeque::new();
     
     // Get starting node ID
-    let start_id = start_node.bind(py).getattr("id")?.extract::<String>()?;
+    let start_node_ref = start_node.bind(py);
+    let start_id = start_node_ref.getattr("id")?.extract::<String>()?;
     
     // Mark starting node and add to queue
     visited.insert(start_id.clone());
@@ -229,15 +230,18 @@ fn bfs_iterative(
                 continue;
             }
         }
-        
+
         // Get edges from current node
-        let edges: Vec<Py<Edge>> = current_node.bind(py).getattr("edges")?.extract()?;
-        
+        let current_ref = current_node.bind(py);
+        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
+
         for edge in edges {
             // Check if edge matches filter criteria
             if edge_matches_filter(py, &edge, filter)? {
-                let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
-                let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
+                let edge_ref = edge.bind(py);
+                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+                let to_node_ref = to_node.bind(py);
+                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
                 
                 // If not visited, mark and enqueue
                 if !visited.contains(&to_id) {
@@ -268,7 +272,8 @@ fn bfs_search_iterative(
     let mut visited = HashSet::<String>::new();
     
     // Get starting node ID
-    let start_id = start_node.bind(py).getattr("id")?.extract::<String>()?;
+    let start_node_ref = start_node.bind(py);
+    let start_id = start_node_ref.getattr("id")?.extract::<String>()?;
     
     // Check if start node is the target
     if start_id == target_id {
@@ -288,13 +293,16 @@ fn bfs_search_iterative(
         }
         
         // Get edges from current node
-        let edges: Vec<Py<Edge>> = current_node.bind(py).getattr("edges")?.extract()?;
+        let current_ref = current_node.bind(py);
+        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
         
         for edge in edges {
             // Check if edge matches filter criteria
             if edge_matches_filter(py, &edge, filter)? {
-                let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
-                let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
+                let edge_ref = edge.bind(py);
+                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
+                let to_node_ref = to_node.bind(py);
+                let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
                 
                 // If this is our target, return it
                 if to_id == target_id {
