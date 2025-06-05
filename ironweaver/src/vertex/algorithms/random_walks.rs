@@ -7,7 +7,6 @@ use crate::{Node, Edge};
 use super::super::core::Vertex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use rayon::prelude::*;
 
 // Structure to hold a walk with optional edge types
 #[derive(Clone)]
@@ -49,28 +48,27 @@ pub fn random_walks(
             "min_length cannot be greater than max_length"
         ));
     }
+    
+    let mut all_walks = Vec::new();
+    let mut rng = thread_rng();    // Perform multiple random walk attempts
+    for _ in 0..num_attempts {
+        if let Some(walk) = perform_simple_random_walk(
+            vertex,
+            py,
+            start_node_id.clone(),
+            max_length,
+            allow_revisit_nodes,
+            include_edges,
+            &type_field,
+            &mut rng
+        )? {
+            // Only add walks that meet minimum length requirement
+            if walk.nodes.len() >= min_len {
+                all_walks.push(walk);
+            }
+        }
+    }    // Remove duplicates
 
-    let all_walks: Vec<Walk> = (0..num_attempts)
-        .into_par_iter()
-        .filter_map(|_| {
-            Python::with_gil(|gil| {
-                let mut rng = thread_rng();
-                match perform_simple_random_walk(
-                    vertex,
-                    gil,
-                    start_node_id.clone(),
-                    max_length,
-                    allow_revisit_nodes,
-                    include_edges,
-                    &type_field,
-                    &mut rng,
-                ) {
-                    Ok(Some(w)) if w.nodes.len() >= min_len => Some(w),
-                    _ => None,
-                }
-            })
-        })
-        .collect();
     // Remove duplicates
     let mut unique_walks = Vec::new();
     let mut seen_walks = HashSet::new();
