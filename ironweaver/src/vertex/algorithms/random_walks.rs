@@ -15,6 +15,48 @@ struct Walk {
     edges: Vec<String>, // Edge types between nodes
 }
 
+fn validate_params(vertex: &Vertex, start_node_id: &str, max_length: usize, min_len: usize) -> PyResult<()> {
+    if !vertex.nodes.contains_key(start_node_id) {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            format!("Start node with id '{}' not found", start_node_id),
+        ));
+    }
+
+    if max_length == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "max_length must be greater than 0",
+        ));
+    }
+
+    if min_len > max_length {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "min_length cannot be greater than max_length",
+        ));
+    }
+
+    Ok(())
+}
+
+fn deduplicate_walks(walks: Vec<Walk>, include_edges: bool) -> Vec<Walk> {
+    let mut unique_walks = Vec::new();
+    let mut seen_walks = HashSet::new();
+
+    for walk in walks {
+        let walk_key = if include_edges {
+            format!("{}|{}", walk.nodes.join(","), walk.edges.join(","))
+        } else {
+            walk.nodes.join(",")
+        };
+
+        if !seen_walks.contains(&walk_key) {
+            seen_walks.insert(walk_key);
+            unique_walks.push(walk);
+        }
+    }
+
+    unique_walks
+}
+
 pub fn random_walks(
     vertex: &Vertex,
     py: Python<'_>,
@@ -26,28 +68,12 @@ pub fn random_walks(
     include_edge_types: Option<bool>,
     edge_type_field: Option<String>
 ) -> PyResult<Py<PyList>> {
-    // Validate start node exists
-    if !vertex.nodes.contains_key(&start_node_id) {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Start node with id '{}' not found", start_node_id)
-        ));
-    }    let min_len = min_length.unwrap_or(1);
+    let min_len = min_length.unwrap_or(1);
     let allow_revisit_nodes = allow_revisit.unwrap_or(false);
     let include_edges = include_edge_types.unwrap_or(false);
     let type_field = edge_type_field.unwrap_or_else(|| "type".to_string());
-    
-    // Validate parameters
-    if max_length == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "max_length must be greater than 0"
-        ));
-    }
-    
-    if min_len > max_length {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "min_length cannot be greater than max_length"
-        ));
-    }
+
+    validate_params(vertex, &start_node_id, max_length, min_len)?;
     
     let mut all_walks = Vec::new();
     let mut rng = thread_rng();    // Perform multiple random walk attempts
@@ -67,25 +93,9 @@ pub fn random_walks(
                 all_walks.push(walk);
             }
         }
-    }    // Remove duplicates
-
-    // Remove duplicates
-    let mut unique_walks = Vec::new();
-    let mut seen_walks = HashSet::new();
-    
-    for walk in all_walks {
-        // Create a string representation for comparison
-        let walk_key = if include_edges {
-            format!("{}|{}", walk.nodes.join(","), walk.edges.join(","))
-        } else {
-            walk.nodes.join(",")
-        };
-        
-        if !seen_walks.contains(&walk_key) {
-            seen_walks.insert(walk_key);
-            unique_walks.push(walk);
-        }
     }
+
+    let unique_walks = deduplicate_walks(all_walks, include_edges);
 
     // Convert to Python list
     let result = PyList::empty(py);
