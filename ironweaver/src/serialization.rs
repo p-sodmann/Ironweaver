@@ -2,6 +2,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyString};
 use serde::{Deserialize, Serialize};
+use half::f16;
 use serde::ser::{SerializeStruct, Serializer as _};
 use bincode::Options;
 use std::collections::HashMap;
@@ -36,6 +37,7 @@ pub enum SerializableValue {
     String(String),
     Int(i64),
     Float(f64),
+    Half(f16),
     Bool(bool),
     None,
     List(Vec<SerializableValue>),
@@ -43,7 +45,7 @@ pub enum SerializableValue {
 }
 
 /// Complete graph representation for serialization
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SerializableGraph {
     pub nodes: HashMap<String, SerializableNode>,
     pub edges: HashMap<String, SerializableEdge>,
@@ -88,6 +90,27 @@ impl SerializableValue {
         }
     }
 
+    /// Recursively convert Float variants to Half
+    pub fn to_f16(&mut self) {
+        match self {
+            SerializableValue::Float(f) => {
+                let half_val = f16::from_f64(*f);
+                *self = SerializableValue::Half(half_val);
+            }
+            SerializableValue::List(list) => {
+                for item in list {
+                    item.to_f16();
+                }
+            }
+            SerializableValue::Dict(dict) => {
+                for value in dict.values_mut() {
+                    value.to_f16();
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Convert SerializableValue back to Python object
     pub fn to_python(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match self {
@@ -95,6 +118,7 @@ impl SerializableValue {
             SerializableValue::String(s) => Ok(PyString::new(py, s).into()),
             SerializableValue::Int(i) => Ok(i.into_pyobject(py)?.into_any().into()),
             SerializableValue::Float(f) => Ok(f.into_pyobject(py)?.into_any().into()),
+            SerializableValue::Half(h) => Ok(h.to_f64().into_pyobject(py)?.into_any().into()),
             SerializableValue::Bool(b) => {
                 let bound = b.into_pyobject(py)?;
                 Ok(bound.as_any().clone().into())
@@ -383,6 +407,39 @@ impl SerializableGraph {
         let reader = BufReader::new(file);
         let graph = bincode::deserialize_from(reader)?;
         Ok(graph)
+    }
+
+    /// Convert all Float values to Half (f16)
+    pub fn convert_floats_to_f16(&mut self) {
+        for node in self.nodes.values_mut() {
+            for value in node.attr.values_mut() {
+                value.to_f16();
+            }
+            for value in node.meta.values_mut() {
+                value.to_f16();
+            }
+        }
+        for edge in self.edges.values_mut() {
+            for value in edge.attr.values_mut() {
+                value.to_f16();
+            }
+            for value in edge.meta.values_mut() {
+                value.to_f16();
+            }
+        }
+        for value in self.meta.values_mut() {
+            value.to_f16();
+        }
+        for value in self.metadata.values_mut() {
+            value.to_f16();
+        }
+    }
+
+    /// Save graph to binary using f16 for floats
+    pub fn save_to_binary_f16<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+        let mut graph = self.clone();
+        graph.convert_floats_to_f16();
+        graph.save_to_binary(path)
     }
 }
 

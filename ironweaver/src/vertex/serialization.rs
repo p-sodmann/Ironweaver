@@ -22,6 +22,15 @@ pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyR
     Ok(())
 }
 
+pub fn save_to_binary_f16(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
+    let serializable_graph = SerializableGraph::from_vertex(py, vertex)?;
+    serializable_graph.save_to_binary_f16(&file_path)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to save graph to binary: {}", e)
+        ))?;
+    Ok(())
+}
+
 pub fn load_from_json(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex>> {
     let serializable_graph = SerializableGraph::load_from_json(&file_path)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
