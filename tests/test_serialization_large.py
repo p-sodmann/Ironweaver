@@ -25,13 +25,18 @@ def test_large_serialization(tmp_path):
     v = build_large_graph(node_count)
     json_file = tmp_path / "graph.json"
     bin_file = tmp_path / "graph.bin"
+    bin_file_f16 = tmp_path / "graph_f16.bin"
 
     v.save_to_json(str(json_file))
     v.save_to_binary(str(bin_file))
+    v.save_to_binary_f16(str(bin_file_f16))
 
     v_json = Vertex.load_from_json(str(json_file))
     assert v_json.node_count() == node_count
 
     v_bin = Vertex.load_from_binary(str(bin_file))
     assert v_bin.node_count() == node_count
+
+    v_bin_f16 = Vertex.load_from_binary(str(bin_file_f16))
+    assert v_bin_f16.node_count() == node_count
 

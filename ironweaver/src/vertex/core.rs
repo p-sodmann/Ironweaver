@@ -230,6 +230,12 @@ impl Vertex {
         serialization::save_to_binary(self, py, file_path)
     }
 
+    /// Save the graph to a binary file using f16 precision for floats
+    #[pyo3(text_signature = "(self, file_path)")]
+    fn save_to_binary_f16(&self, py: Python<'_>, file_path: String) -> PyResult<()> {
+        serialization::save_to_binary_f16(self, py, file_path)
+    }
+
     /// Load a graph from a JSON file
     /// 
     /// Args:

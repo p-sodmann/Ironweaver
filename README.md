@@ -132,6 +132,8 @@ graph.save_to_json("my_graph.json")
 
 # Save to binary format (more efficient for large graphs)
 graph.save_to_binary("my_graph.bin")
+# Or use half precision floats to reduce file size
+graph.save_to_binary_f16("my_graph_f16.bin")
 
 # Load from file
 loaded_graph = Vertex.load_from_json("my_graph.json")
@@ -171,6 +173,7 @@ metadata = graph.get_metadata() -> dict
 # Persistence
 graph.save_to_json(file_path: str)
 graph.save_to_binary(file_path: str)
+graph.save_to_binary_f16(file_path: str)
 loaded = Vertex.load_from_json(file_path: str) -> Vertex
 loaded = Vertex.load_from_binary(file_path: str) -> Vertex
 ```
