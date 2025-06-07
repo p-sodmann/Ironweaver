@@ -405,7 +405,10 @@ impl SerializableGraph {
     pub fn load_from_binary<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-        let graph = bincode::deserialize_from(reader)?;
+        // Use the same fixed-int encoding as in `save_to_binary` to avoid
+        // misinterpreting the serialized lengths.
+        let options = bincode::DefaultOptions::new().with_fixint_encoding();
+        let graph = options.deserialize_from(reader)?;
         Ok(graph)
     }
 
