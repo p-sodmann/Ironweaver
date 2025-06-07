@@ -403,10 +403,29 @@ impl SerializableGraph {
 
     /// Load graph from binary file
     pub fn load_from_binary<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = path.as_ref();
+        // Set a decoding limit to the file size so bincode will error out
+        // instead of trying to allocate absurd amounts of memory when the
+        // encoding does not match.
+        let file_len = std::fs::metadata(path)?.len();
+
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-        let graph = bincode::deserialize_from(reader)?;
-        Ok(graph)
+        let options = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .with_limit(file_len);
+
+        match options.deserialize_from(reader) {
+            Ok(graph) => Ok(graph),
+            Err(_) => {
+                // Fallback to varint decoding for backward compatibility
+                let file = File::open(path)?;
+                let reader = BufReader::new(file);
+                let fallback_opts = bincode::DefaultOptions::new().with_limit(file_len);
+                let graph = fallback_opts.deserialize_from(reader)?;
+                Ok(graph)
+            }
+        }
     }
 
     /// Convert all Float values to Half (f16)
