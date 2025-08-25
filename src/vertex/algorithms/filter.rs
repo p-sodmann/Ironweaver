@@ -94,7 +94,12 @@ pub fn filter(
         let final_node = Py::new(py, Node::new(node_id.clone(), Some(attr), Some(updated_edges)))?;
         final_result_nodes.insert(node_id.clone(), final_node);
     }
-    
-    let result_vertex = Vertex::from_nodes(py, final_result_nodes);
+
+    let result_vertex = Vertex {
+        nodes: final_result_nodes,
+        meta: vertex.meta.clone_ref(py),
+        on_edge_add_callbacks: vertex.on_edge_add_callbacks.clone_ref(py),
+        on_node_add_callbacks: vertex.on_node_add_callbacks.clone_ref(py),
+    };
     Py::new(py, result_vertex)
 }
