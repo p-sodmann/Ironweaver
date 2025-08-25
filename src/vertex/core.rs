@@ -4,13 +4,13 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use std::collections::HashMap;
 
-use crate::{Node, Edge};
+use crate::{Edge, Node};
 
 // Import the helper modules as sibling modules
+use super::algorithms;
+use super::analysis;
 use super::manipulation;
 use super::serialization;
-use super::analysis;
-use super::algorithms;
 
 #[pyclass]
 pub struct Vertex {
@@ -39,7 +39,7 @@ impl Vertex {
     /// Create a new graph with existing nodes
     #[staticmethod]
     pub fn from_nodes(py: Python<'_>, nodes: HashMap<String, Py<Node>>) -> Self {
-        Vertex { 
+        Vertex {
             nodes,
             meta: PyDict::new(py).into(),
             on_node_add_callbacks: PyList::empty(py).into(),
@@ -49,11 +49,15 @@ impl Vertex {
 
     /// Create a new graph with existing nodes and traversal path
     #[staticmethod]
-    pub fn from_nodes_with_path(py: Python<'_>, nodes: HashMap<String, Py<Node>>, nodelist: Vec<String>) -> PyResult<Self> {
+    pub fn from_nodes_with_path(
+        py: Python<'_>,
+        nodes: HashMap<String, Py<Node>>,
+        nodelist: Vec<String>,
+    ) -> PyResult<Self> {
         let meta = PyDict::new(py);
         meta.set_item("nodelist", nodelist)?;
-        
-        Ok(Vertex { 
+
+        Ok(Vertex {
             nodes,
             meta: meta.into(),
             on_node_add_callbacks: PyList::empty(py).into(),
@@ -73,9 +77,15 @@ impl Vertex {
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
-        let keys: Vec<String> = self.nodes
+        let keys: Vec<String> = self
+            .nodes
             .values()
-            .filter_map(|n| n.bind(py).getattr("id").ok().and_then(|o| o.extract::<String>().ok()))
+            .filter_map(|n| {
+                n.bind(py)
+                    .getattr("id")
+                    .ok()
+                    .and_then(|o| o.extract::<String>().ok())
+            })
             .collect();
         format!("Vertex({})", keys.join(", "))
     }
@@ -89,7 +99,7 @@ impl Vertex {
     }
 
     /// Check if a node with the given ID exists
-    /// 
+    ///
     /// Args:
     ///     id (str): The node ID to check
     ///     
@@ -100,7 +110,7 @@ impl Vertex {
     }
 
     /// Get the number of nodes in the graph
-    /// 
+    ///
     /// Returns:
     ///     int: The number of nodes
     fn node_count(&self) -> usize {
@@ -109,7 +119,7 @@ impl Vertex {
 
     // Manipulation methods
     /// Add a new node to the graph
-    /// 
+    ///
     /// Args:
     ///     id (str): Unique identifier for the node
     ///     attr (dict, optional): Attributes for the node
@@ -121,22 +131,22 @@ impl Vertex {
     ///     ValueError: If a node with the same ID already exists
     fn add_node(
         mut slf: PyRefMut<'_, Self>,
-        py: Python<'_>, 
-        id: String, 
-        attr: Option<HashMap<String, Py<PyAny>>>
+        py: Python<'_>,
+        id: String,
+        attr: Option<HashMap<String, Py<PyAny>>>,
     ) -> PyResult<Py<Node>> {
         // First create the node
         let node = manipulation::add_node(&mut slf, py, id, attr)?;
-        
+
         // Get callbacks from PyList
         let callbacks_list = slf.on_node_add_callbacks.bind(py);
         let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
         for callback in callbacks_list.iter() {
             callbacks_to_call.push(callback.into());
         }
-        
+
         let py_self: Py<Self> = slf.into();
-        
+
         // Execute callbacks for node addition
         for callback in &callbacks_to_call {
             // Call callback with (self, node) parameters
@@ -146,12 +156,12 @@ impl Vertex {
                 break;
             }
         }
-        
+
         Ok(node)
     }
 
     /// Add a new edge between two nodes in the graph
-    /// 
+    ///
     /// Args:
     ///     from_id (str): ID of the source node
     ///     to_id (str): ID of the target node
@@ -167,17 +177,17 @@ impl Vertex {
         py: Python<'_>,
         from_id: String,
         to_id: String,
-        attr: Option<HashMap<String, Py<PyAny>>>
+        attr: Option<HashMap<String, Py<PyAny>>>,
     ) -> PyResult<Py<Edge>> {
         let edge = manipulation::add_edge(&mut slf, py, from_id, to_id, attr)?;
-        
+
         // Get callbacks from PyList
         let callbacks_list = slf.on_edge_add_callbacks.bind(py);
         let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
         for callback in callbacks_list.iter() {
             callbacks_to_call.push(callback.into());
         }
-        
+
         let py_self: Py<Self> = slf.into();
 
         // Execute callbacks for edge addition
@@ -189,12 +199,12 @@ impl Vertex {
                 break;
             }
         }
-        
+
         Ok(edge)
     }
 
     /// Get a node by its ID
-    /// 
+    ///
     /// Args:
     ///     id (str): The node ID to look up
     ///     
@@ -209,7 +219,7 @@ impl Vertex {
 
     // Serialization methods
     /// Save the graph to a JSON file
-    /// 
+    ///
     /// Args:
     ///     file_path (str): Path to save the graph to
     ///     
@@ -220,7 +230,7 @@ impl Vertex {
     }
 
     /// Save the graph to a binary file (more efficient for large graphs)
-    /// 
+    ///
     /// Args:
     ///     file_path (str): Path to save the graph to
     ///     
@@ -237,7 +247,7 @@ impl Vertex {
     }
 
     /// Load a graph from a JSON file
-    /// 
+    ///
     /// Args:
     ///     file_path (str): Path to load the graph from
     ///     
@@ -252,7 +262,7 @@ impl Vertex {
     }
 
     /// Load a graph from a binary file
-    /// 
+    ///
     /// Args:
     ///     file_path (str): Path to load the graph from
     ///     
@@ -273,7 +283,7 @@ impl Vertex {
     }
 
     /// Convert the graph to a NetworkX DiGraph object
-    /// 
+    ///
     /// Returns:
     ///     networkx.DiGraph: A NetworkX directed graph representation of this vertex
     ///     
@@ -285,7 +295,7 @@ impl Vertex {
 
     // Algorithm methods
     /// Find the shortest path between source and target nodes using Breadth-First Search
-    /// 
+    ///
     /// Args:
     ///     root_node_id (str): ID of the source node to start the search from
     ///     target_node_id (str): ID of the target node to find
@@ -302,13 +312,13 @@ impl Vertex {
         py: Python<'_>,
         root_node_id: String,
         target_node_id: String,
-        max_depth: Option<usize>
+        max_depth: Option<usize>,
     ) -> PyResult<Py<Vertex>> {
         algorithms::shortest_path_bfs(self, py, root_node_id, target_node_id, max_depth)
     }
 
     /// Expand the current vertex by adding neighbor nodes from a source vertex
-    /// 
+    ///
     /// Args:
     ///     source_vertex (Vertex): The source vertex to expand from (contains the full graph)
     ///     depth (int, optional): Maximum depth to traverse for expansion. Defaults to 1.
@@ -323,29 +333,81 @@ impl Vertex {
         &self,
         py: Python<'_>,
         source_vertex: &Vertex,
-        depth: Option<usize>
+        depth: Option<usize>,
     ) -> PyResult<Py<Vertex>> {
         algorithms::expand(self, py, source_vertex, depth)
     }
 
     /// Create a new vertex containing only the specified nodes and their connecting edges
-    /// 
+    ///
     /// Args:
-    ///     node_ids (list): List of node IDs to include in the filtered vertex
-    ///     
+    ///     ids (list, optional): List of node IDs to include
+    ///     id (str, optional): Single node ID to include
+    ///     **kwargs: Attribute key/value pairs to match nodes
+    ///
     /// Returns:
     ///     Vertex: A new vertex containing only the specified nodes and edges between them
-    ///     
+    ///
     /// Raises:
-    ///     ValueError: If any of the specified node IDs don't exist in the vertex
+    ///     ValueError: If any of the specified node IDs don't exist in the vertex or
+    ///                 no filter criteria are provided
+    #[pyo3(signature = (**kwargs))]
     fn filter(
         &self,
         py: Python<'_>,
-        node_ids: Vec<String>
+        kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<Vertex>> {
+        let kwargs = kwargs.ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(
+                "Must specify ids, id, or attribute filters",
+            )
+        })?;
+
+        let mut filters: HashMap<String, Py<PyAny>> = kwargs.extract()?;
+
+        // Determine which node IDs to include based on the provided keyword arguments
+        let node_ids: Vec<String> = if let Some(ids_any) = filters.remove("ids") {
+            ids_any.extract(py)?
+        } else if let Some(id_any) = filters.remove("id") {
+            vec![id_any.extract(py)?]
+        } else if !filters.is_empty() {
+            let mut matches = Vec::new();
+            for (node_id, node) in &self.nodes {
+                let node_ref = node.bind(py);
+                let attrs: HashMap<String, Py<PyAny>> =
+                    node_ref.getattr("attr")?.extract().unwrap_or_default();
+
+                let mut all_match = true;
+                for (key, value) in &filters {
+                    match attrs.get(key) {
+                        Some(node_val) => {
+                            if !node_val.bind(py).eq(value.bind(py))? {
+                                all_match = false;
+                                break;
+                            }
+                        }
+                        None => {
+                            all_match = false;
+                            break;
+                        }
+                    }
+                }
+
+                if all_match {
+                    matches.push(node_id.clone());
+                }
+            }
+            matches
+        } else {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Must specify ids, id, or attribute filters",
+            ));
+        };
+
         algorithms::filter(self, py, node_ids)
-    }    /// Perform multiple random walks from a starting node
-    /// 
+    }
+    /// Perform multiple random walks from a starting node
+    ///
     /// Args:
     ///     start_node_id (str): ID of the node to start the random walks from
     ///     max_length (int): Maximum length of each random walk
@@ -371,8 +433,18 @@ impl Vertex {
         min_length: Option<usize>,
         allow_revisit: Option<bool>,
         include_edge_types: Option<bool>,
-        edge_type_field: Option<String>
+        edge_type_field: Option<String>,
     ) -> PyResult<Py<PyList>> {
-        algorithms::random_walks(self, py, start_node_id, max_length, min_length, num_attempts, allow_revisit, include_edge_types, edge_type_field)
+        algorithms::random_walks(
+            self,
+            py,
+            start_node_id,
+            max_length,
+            min_length,
+            num_attempts,
+            allow_revisit,
+            include_edge_types,
+            edge_type_field,
+        )
     }
 }
