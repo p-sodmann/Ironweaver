@@ -75,11 +75,14 @@ def parse_lgf(
         if indent == 0:
             parts = stripped.split()
             node_id = parts[0]
-            labels = parts[1:]
-            attrs = {"labels": labels} if labels else {}
+            labels = parts[1:] if len(parts) > 1 else []
+            
             if graph.has_node(node_id):
                 current_node = graph.get_node(node_id)
+                # Update labels for existing node
+                current_node.attr_set("labels", labels)
             else:
+                attrs = {"labels": labels}
                 graph.add_node(node_id, attrs)
                 current_node = graph.get_node(node_id)
             current_edge = None
