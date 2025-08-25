@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ironweaver import Vertex
+from ._ironweaver import Vertex
 
 
 def _parse_value(value: str):
@@ -20,7 +20,7 @@ def _parse_value(value: str):
     return value
 
 
-def parse_igf3(text: str) -> Vertex:
+def parse_lgf(text: str) -> Vertex:
     """Parse LGF text into a :class:`Vertex` graph.
 
     Parameters

@@ -10,7 +10,7 @@ except Exception as e:
     import pytest
     pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
-from lgf_parser import parse_igf3
+from ironweaver.lgf_parser import parse_igf3
 
 
 EXAMPLE = """\

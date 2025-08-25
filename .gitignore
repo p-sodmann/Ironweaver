@@ -3,3 +3,8 @@
 /PERFORMANCE_TESTING.md
 /pytest.ini
 /test
+/target
+*.so
+*.lock
+*.pyc
+*.in

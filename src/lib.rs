@@ -15,7 +15,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 #[pymodule]
-fn ironweaver(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _ironweaver(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ObservedDictionary>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Node>()?;
