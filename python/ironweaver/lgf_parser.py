@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from ._ironweaver import Vertex
 
 
@@ -20,20 +22,30 @@ def _parse_value(value: str):
     return value
 
 
-def parse_lgf(text: str) -> Vertex:
+def parse_lgf(
+    text: str,
+    graph: Vertex | None = None,
+    base_path: str | None = None,
+) -> Vertex:
     """Parse LGF text into a :class:`Vertex` graph.
 
     Parameters
     ----------
     text:
         Input text in LGF format.
+    graph:
+        Existing graph to add nodes and edges to. If ``None``, a new graph is
+        created.
+    base_path:
+        Base path used to resolve relative ``import`` statements.
 
     Returns
     -------
     Vertex
         The parsed graph.
     """
-    graph = Vertex()
+    graph = graph or Vertex()
+    base_path = base_path or ""
     current_node = None
     current_edge = None
     edge_indent = 0
@@ -43,6 +55,22 @@ def parse_lgf(text: str) -> Vertex:
         if not stripped or stripped == "#":
             continue
         indent = len(raw_line) - len(raw_line.lstrip())
+
+        if indent == 0 and stripped.startswith("import(") and stripped.endswith(")"):
+            import_path = stripped[len("import(") : -1].strip()
+            if (import_path.startswith("\"") and import_path.endswith("\"")) or (
+                import_path.startswith("'") and import_path.endswith("'")
+            ):
+                import_path = import_path[1:-1]
+            full_path = os.path.join(base_path, import_path)
+            with open(full_path, "r", encoding="utf-8") as f:
+                imported_text = f.read()
+            imported_base = os.path.dirname(full_path)
+            parse_lgf(imported_text, graph=graph, base_path=imported_base)
+            current_node = None
+            current_edge = None
+            edge_indent = 0
+            continue
 
         if indent == 0:
             parts = stripped.split()
@@ -79,3 +107,13 @@ def parse_lgf(text: str) -> Vertex:
             current_edge = None
 
     return graph
+
+
+def parse_lgf_file(path: str) -> Vertex:
+    """Parse an LGF file from ``path`` into a :class:`Vertex` graph."""
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    return parse_lgf(text, base_path=os.path.dirname(path))
+
+
+__all__ = ["parse_lgf", "parse_lgf_file"]
