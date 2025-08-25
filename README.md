@@ -91,7 +91,7 @@ plt.show()
 
 ```python
 # Create a subgraph and expand it by exploring neighbors
-filtered_graph = graph.filter(['node2'])  # Start with just node2
+filtered_graph = graph.filter(ids=['node2'])  # Start with just node2
 expanded = filtered_graph.expand(graph, depth=1)  # Expand 1 level
 
 print(f"Original nodes: {graph.keys()}")
@@ -167,7 +167,7 @@ edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 # Algorithms
 path = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None) -> Vertex
 expanded = graph.expand(source: Vertex, depth: int = 1) -> Vertex
-filtered = graph.filter(node_ids: List[str]) -> Vertex
+filtered = graph.filter(**filters) -> Vertex  # filters can include 'ids', 'id', or attribute=value pairs
 
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph
