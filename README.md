@@ -13,11 +13,14 @@ A high-performance, Rust-powered Python library for graph data structures and al
 - **Serialization**: JSON and binary save/load capabilities
 - **Event-Driven**: Callback system for node and edge modifications
 - **Memory Efficient**: Optimized Rust implementation for large graphs
+- **LGF Parsing**: Read Lemon Graph Format files directly from Python
 
 ## Installation
-FIXME: this will not work yet, it needs to be cloned from github, rust compiled and installed
+Build the package from source to get the latest version:
+
 ```bash
-pip install IronWeaver
+pip install maturin
+pip install -e .
 ```
 
 ## Quick Start
@@ -242,8 +245,7 @@ pytest
 ```
 
 ## License
-
-TODO: Add license information here.
+Licensed under the MIT License. See the LICENSE file for details.
 
 ## Acknowledgments
 
@@ -252,6 +254,6 @@ TODO: Add license information here.
 - Inspired by the need for high-performance graph operations in Python
 
 ---
-
 **Note**: This library is designed for applications requiring high-performance graph operations. For simple use cases, NetworkX might be more appropriate. For complex, large-scale graph analysis, `IronWeaver` might provide significant performance advantages.
-Initially it was developed for the [Gustabor](gustabor.de) project.
+Initially it was developed for the [Gustabor](https://gustabor.de) project.
+
