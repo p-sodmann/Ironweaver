@@ -1,0 +1,56 @@
+# Company organizational structure
+alice Person Employee
+  name = "Alice Johnson"
+  department = "Engineering"
+  level = "Senior"
+  is_manager = true
+  -works_at-> tech_corp
+    position = "Engineering Manager"
+    start_date = "2019-01-10"
+    salary = 120000
+  -manages-> bob
+    start_date = "2020-06-15"
+  -manages-> charlie
+    start_date = "2021-03-01"
+
+bob Person Employee
+  name = "Bob Smith"
+  department = "Engineering"
+  level = "Mid"
+  is_manager = false
+  -works_at-> tech_corp
+    position = "Senior Developer"
+    start_date = "2020-01-15"
+    salary = 95000
+  <-reports_to- alice
+
+charlie Person Employee
+  name = "Charlie Brown"
+  department = "Engineering"  
+  level = "Junior"
+  is_manager = false
+  -works_at-> tech_corp
+    position = "Software Developer"
+    start_date = "2021-03-01"
+    salary = 75000
+  <-reports_to- alice
+
+diana Person Employee
+  name = "Diana Prince"
+  department = "Marketing"
+  level = "Senior"
+  is_manager = true
+  -works_at-> tech_corp
+    position = "Marketing Director"
+    start_date = "2018-05-20"
+    salary = 110000
+
+tech_corp Company
+  name = "Tech Corporation"
+  founded = "2015-05-20"
+  industry = "Software Development"
+  size = "Medium"
+  headquarters = "San Francisco"
+  <-founded_by- alice
+    role = "Co-founder"
+    equity_percentage = 15.0

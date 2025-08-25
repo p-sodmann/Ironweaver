@@ -1,0 +1,16 @@
+# Import shared people definitions
+import("people.lgf")
+
+# Add relationships between people
+alice Person
+  -knows-> bob
+    since = "2020-01-15"
+    context = "work"
+  -knows-> charlie
+    since = "2019-06-20"
+    context = "university"
+
+bob Person
+  -knows-> charlie
+    since = "2021-03-10"
+    context = "introduced_by_alice"

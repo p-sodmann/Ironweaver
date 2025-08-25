@@ -1,0 +1,12 @@
+# Shared definitions for people
+alice Person
+  name = "Alice Johnson"
+  age = 30
+
+bob Person
+  name = "Bob Smith" 
+  age = 28
+
+charlie Person
+  name = "Charlie Brown"
+  age = 26

@@ -144,6 +144,70 @@ print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
 
+### LGF (Lemon Graph Format) Support
+
+IronWeaver supports reading graphs from the Lemon Graph Format (LGF), which provides a human-readable text format for representing graphs with nodes, edges, and attributes.
+
+```python
+from ironweaver import parse_lgf, parse_lgf_file
+
+# Parse LGF from string
+lgf_content = """
+person_1 Person
+  name = "Alice"
+  age = 30
+  -knows-> person_2
+    since = 2020
+  -works_at-> company_1
+
+person_2 Person
+  name = "Bob"
+  age = 25
+
+company_1 Company
+  name = "Tech Corp"
+  <-founded_by- person_1
+"""
+
+graph = parse_lgf(lgf_content)
+print(f"Parsed {graph.node_count()} nodes")
+
+# Parse LGF from file
+graph = parse_lgf_file("my_graph.lgf")
+```
+
+#### LGF Syntax
+
+**Node Declaration:**
+```
+node_id NodeType
+  attribute = "value"
+  number_attr = 42
+  boolean_attr = true
+```
+
+**Edge Declaration (New Syntax):**
+```
+# Forward relationship: from current node to target
+  -relationship_type-> target_node
+
+# Inverse relationship: from target node to current node  
+  <-relationship_type- target_node
+```
+
+**Supported Data Types:**
+- **Strings**: `"quoted text"` or `'quoted text'` 
+- **Numbers**: `42`, `3.14`
+- **Booleans**: `true`, `false`
+- **Unquoted values**: treated as strings
+
+**Import Support:**
+```
+import("other_file.lgf")
+```
+
+See the [LGF Documentation](docs/LGF.md) for detailed syntax and examples.
+
 ## API Reference
 
 ### Core Classes

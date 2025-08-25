@@ -52,7 +52,7 @@ def parse_lgf(
 
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
-        if not stripped or stripped == "#":
+        if not stripped or stripped.startswith("#"):
             continue
         indent = len(raw_line) - len(raw_line.lstrip())
 
@@ -88,14 +88,46 @@ def parse_lgf(
             current_edge = None
             continue
 
-        if stripped.startswith("->"):
-            rest = stripped[2:].strip()
-            target, typ = rest.split(None, 1)
-            if not graph.has_node(target):
-                graph.add_node(target, {})
-            current_edge = graph.add_edge(current_node.id, target, {"type": typ})
-            edge_indent = indent
-            continue
+        # Handle new forward syntax: -relationship-> target
+        if stripped.startswith("-") and "->" in stripped:
+            # Extract relationship and target from -relationship-> target format
+            arrow_pos = stripped.find("->")
+            if arrow_pos > 1:  # Must have at least one character for relationship
+                relationship_part = stripped[1:arrow_pos]  # Remove leading '-'
+                target_part = stripped[arrow_pos + 2:].strip()  # Remove '->' and strip
+                
+                # Remove trailing dash if present (for -relationship-> format)
+                if relationship_part.endswith("-"):
+                    relationship = relationship_part[:-1]  # Remove trailing '-'
+                else:
+                    relationship = relationship_part  # Use as-is for -relationship-> format
+                
+                target = target_part
+                
+                if relationship and target:  # Ensure both are non-empty
+                    if not graph.has_node(target):
+                        graph.add_node(target, {})
+                    current_edge = graph.add_edge(current_node.id, target, {"type": relationship})
+                    edge_indent = indent
+                    continue
+
+        # Handle new inverse syntax: <-relationship- target
+        if stripped.startswith("<-") and stripped.count("-") >= 2:
+            # Extract relationship and target from <-relationship- target format
+            rest = stripped[2:]  # Remove '<-'
+            if "-" in rest:
+                dash_pos = rest.rfind("-")  # Find the last dash
+                if dash_pos > 0:  # Must have at least one character for relationship
+                    relationship = rest[:dash_pos]
+                    target = rest[dash_pos + 1:].strip()
+                    
+                    if target and relationship:
+                        if not graph.has_node(target):
+                            graph.add_node(target, {})
+                        # Create edge from target to current_node (inverse direction)
+                        current_edge = graph.add_edge(target, current_node.id, {"type": relationship})
+                        edge_indent = indent
+                        continue
 
         key, _, value = stripped.partition("=")
         key = key.strip()

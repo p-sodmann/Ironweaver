@@ -1,0 +1,24 @@
+# Simple social network example
+alice Person
+  name = "Alice Johnson"
+  age = 30
+  city = "San Francisco"
+  -knows-> bob
+    since = "2020-01-15"
+    relationship_strength = 0.8
+  -knows-> charlie
+    since = "2019-06-20"
+    relationship_strength = 0.9
+
+bob Person
+  name = "Bob Smith"
+  age = 28
+  city = "San Francisco"
+  -knows-> charlie
+    since = "2021-03-10"
+    relationship_strength = 0.7
+
+charlie Person
+  name = "Charlie Brown"
+  age = 26
+  city = "Oakland"
