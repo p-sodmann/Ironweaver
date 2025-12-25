@@ -183,3 +183,81 @@ n2 Person
     # Instead, it should be treated as a node attribute
     attributes = dict(n1.attr)
     assert "-> n2 KNOWS" in attributes  # The line gets parsed as an attribute
+
+
+def test_parse_lgf_list_attributes():
+    """Test parsing list attributes in various formats"""
+    
+    # Test multi-line list
+    multi_line_example = """\
+me Person
+    likes_libraries = [
+        "a pretty library",
+        "a graph library",
+    ]
+    name = "Test User"
+"""
+    
+    g = parse_lgf(multi_line_example)
+    node = g.get_node("me")
+    assert node.attr_get("likes_libraries") == ["a pretty library", "a graph library"]
+    assert node.attr_get("name") == "Test User"
+    
+    # Test single-line list
+    single_line_example = """\
+you Person
+    tags = ["tag1", "tag2", "tag3"]
+    count = 42
+"""
+    
+    g2 = parse_lgf(single_line_example)
+    node2 = g2.get_node("you")
+    assert node2.attr_get("tags") == ["tag1", "tag2", "tag3"]
+    assert node2.attr_get("count") == 42
+    
+    # Test empty list
+    empty_list_example = """\
+empty Person
+    items = []
+"""
+    
+    g3 = parse_lgf(empty_list_example)
+    node3 = g3.get_node("empty")
+    assert node3.attr_get("items") == []
+    
+    # Test mixed types in list
+    mixed_example = """\
+mixed Person
+    values = [1, 2.5, "hello", true]
+"""
+    
+    g4 = parse_lgf(mixed_example)
+    node4 = g4.get_node("mixed")
+    assert node4.attr_get("values") == [1, 2.5, "hello", True]
+
+
+def test_parse_lgf_list_on_edges():
+    """Test parsing list attributes on edges"""
+    
+    edge_list_example = """\
+n1 Person
+    name = Alice
+    -FRIENDS-> n2
+        shared_interests = [
+            "coding",
+            "music",
+        ]
+        since = 2020
+
+n2 Person
+    name = Bob
+"""
+    
+    g = parse_lgf(edge_list_example)
+    n1 = g.get_node("n1")
+    edges = n1.edges
+    assert len(edges) == 1
+    e = edges[0]
+    assert e.attr["type"] == "FRIENDS"
+    assert e.attr["shared_interests"] == ["coding", "music"]
+    assert e.attr["since"] == 2020

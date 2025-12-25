@@ -22,6 +22,12 @@ def _parse_value(value: str):
     return value
 
 
+def _parse_list_item(item: str):
+    """Parse a single list item, handling quoted strings and other types."""
+    item = item.strip().rstrip(",")
+    return _parse_value(item)
+
+
 def parse_lgf(
     text: str,
     graph: Vertex | None = None,
@@ -49,12 +55,47 @@ def parse_lgf(
     current_node = None
     current_edge = None
     edge_indent = 0
+    
+    # State for multi-line list parsing
+    list_key = None
+    list_items = []
+    list_indent = 0
+    in_list = False
 
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(raw_line) - len(raw_line.lstrip())
+
+        # Handle multi-line list continuation
+        if in_list:
+            # Check if this line closes the list
+            if "]" in stripped:
+                # Extract any items before the closing bracket
+                before_bracket = stripped[:stripped.index("]")]
+                if before_bracket.strip():
+                    list_items.append(_parse_list_item(before_bracket))
+                
+                # Save the completed list
+                if current_edge is not None and list_indent > edge_indent:
+                    attrs = dict(current_edge.attr)
+                    attrs[list_key] = list_items
+                    current_edge.attr = attrs
+                else:
+                    current_node.attr_set(list_key, list_items)
+                
+                # Reset list state
+                in_list = False
+                list_key = None
+                list_items = []
+                list_indent = 0
+                continue
+            else:
+                # Add item to list (strip commas)
+                if stripped:
+                    list_items.append(_parse_list_item(stripped))
+                continue
 
         if indent == 0 and stripped.startswith("import(") and stripped.endswith(")"):
             import_path = stripped[len("import(") : -1].strip()
@@ -131,7 +172,36 @@ def parse_lgf(
 
         key, _, value = stripped.partition("=")
         key = key.strip()
-        value = _parse_value(value)
+        value_str = value.strip()
+
+        # Check if this is the start of a multi-line list
+        if value_str.startswith("["):
+            if value_str.endswith("]"):
+                # Single-line list: [item1, item2, ...]
+                inner = value_str[1:-1]
+                if inner.strip():
+                    # Parse comma-separated items
+                    items = []
+                    for item in inner.split(","):
+                        item = item.strip()
+                        if item:
+                            items.append(_parse_value(item))
+                    value = items
+                else:
+                    value = []
+            else:
+                # Multi-line list starting
+                in_list = True
+                list_key = key
+                list_items = []
+                list_indent = indent
+                # Check if there are items on the opening line after '['
+                after_bracket = value_str[1:].strip()
+                if after_bracket:
+                    list_items.append(_parse_list_item(after_bracket))
+                continue
+        else:
+            value = _parse_value(value_str)
 
         if current_edge is not None and indent > edge_indent:
             attrs = dict(current_edge.attr)
