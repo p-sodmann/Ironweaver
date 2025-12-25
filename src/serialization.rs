@@ -378,11 +378,23 @@ impl SerializableGraph {
         Ok(())
     }
 
+    /// Serialize graph to JSON string
+    pub fn to_json_string(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let json = serde_json::to_string_pretty(self)?;
+        Ok(json)
+    }
+
     /// Load graph from JSON file
     pub fn load_from_json<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         let graph = serde_json::from_reader(reader)?;
+        Ok(graph)
+    }
+
+    /// Load graph from JSON string
+    pub fn from_json_string(json: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let graph = serde_json::from_str(json)?;
         Ok(graph)
     }
 

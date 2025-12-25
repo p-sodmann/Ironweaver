@@ -218,14 +218,18 @@ impl Vertex {
     }
 
     // Serialization methods
-    /// Save the graph to a JSON file
+    /// Save the graph to a JSON file or return JSON string
     ///
     /// Args:
-    ///     file_path (str): Path to save the graph to
+    ///     file_path (str, optional): Path to save the graph to. If None, returns JSON string.
+    ///     
+    /// Returns:
+    ///     None if file_path is provided, or str (JSON) if file_path is None
     ///     
     /// Raises:
-    ///     RuntimeError: If saving fails
-    fn save_to_json(&self, py: Python<'_>, file_path: String) -> PyResult<()> {
+    ///     RuntimeError: If saving/serialization fails
+    #[pyo3(signature = (file_path=None))]
+    fn save_to_json(&self, py: Python<'_>, file_path: Option<String>) -> PyResult<Py<PyAny>> {
         serialization::save_to_json(self, py, file_path)
     }
 
@@ -246,19 +250,20 @@ impl Vertex {
         serialization::save_to_binary_f16(self, py, file_path)
     }
 
-    /// Load a graph from a JSON file
+    /// Load a graph from a JSON file, JSON string, or dict
     ///
     /// Args:
-    ///     file_path (str): Path to load the graph from
+    ///     source (str | dict): Either a file path, a JSON string, or a dict representing the graph
     ///     
     /// Returns:
     ///     Vertex: The loaded graph
     ///     
     /// Raises:
     ///     RuntimeError: If loading fails
+    ///     TypeError: If source is not a valid type
     #[staticmethod]
-    fn load_from_json(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex>> {
-        serialization::load_from_json(py, file_path)
+    fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<Vertex>> {
+        serialization::load_from_json(py, source)
     }
 
     /// Load a graph from a binary file
