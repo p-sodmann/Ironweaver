@@ -13,7 +13,7 @@ A high-performance, Rust-powered Python library for graph data structures and al
 - **Serialization**: JSON and binary save/load capabilities
 - **Event-Driven**: Callback system for node and edge modifications
 - **Memory Efficient**: Optimized Rust implementation for large graphs
-- **LGF Parsing**: Read Lemon Graph Format files directly from Python
+- **LGF Parsing**: Read Labeled Graph Format files directly from Python
 
 ## Installation
 Build the package from source to get the latest version:
@@ -144,9 +144,9 @@ print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
 
-### LGF (Lemon Graph Format) Support
+### LGF (Labeled Graph Format) Support
 
-IronWeaver supports reading graphs from the Lemon Graph Format (LGF), which provides a human-readable text format for representing graphs with nodes, edges, and attributes.
+IronWeaver supports reading graphs from the Labeled Graph Format (LGF), which provides a human-readable text format for representing graphs with nodes, edges, and attributes.
 
 ```python
 from ironweaver import parse_lgf, parse_lgf_file
