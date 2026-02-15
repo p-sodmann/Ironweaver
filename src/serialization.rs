@@ -1,6 +1,6 @@
 // serialization.rs
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyString};
+use pyo3::types::{PyAny, PyDict, PyList, PyString};
 use serde::{Deserialize, Serialize};
 use half::f16;
 use serde::ser::{SerializeStruct, Serializer as _};
@@ -285,6 +285,8 @@ impl SerializableGraph {
                 edges: Vec::new(),
                 inverse_edges: Vec::new(),
                 on_edge_add_callbacks: Vec::new(),
+                on_update_callbacks: PyList::empty(py).into(),
+                vertex: None,
             })?;
             
             python_nodes.insert(node_id.clone(), node.clone_ref(py));
@@ -325,6 +327,8 @@ impl SerializableGraph {
                 meta: python_meta,
                 watched_by: Vec::new(),
                 on_meta_change_callbacks: Vec::new(),
+                on_update_callbacks: PyList::empty(py).into(),
+                vertex: None,
             })?;
             
             // Add edge to the from_node's edge list

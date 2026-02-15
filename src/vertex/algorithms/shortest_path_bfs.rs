@@ -35,7 +35,7 @@ pub fn shortest_path_bfs(
         // Create a new node with no edges (since it's just a single node path)
         let original_node_ref = root_node.bind(py);
         let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
-        let new_node = Py::new(py, Node::new(root_node_id.clone(), Some(attr), Some(Vec::new())))?;
+        let new_node = Py::new(py, Node::new(py, root_node_id.clone(), Some(attr), Some(Vec::new())))?;
         path_nodes.insert(root_node_id, new_node);
         
         let result_vertex = Vertex::from_nodes(py, path_nodes);
@@ -117,7 +117,7 @@ pub fn shortest_path_bfs(
                             }
                             
                             // Create new node with filtered edges
-                            let new_node = Py::new(py, Node::new(path_id.clone(), Some(attr), Some(filtered_edges)))?;
+                            let new_node = Py::new(py, Node::new(py, path_id.clone(), Some(attr), Some(filtered_edges)))?;
                             path_nodes.insert(path_id.clone(), new_node);
                         }
                     }

@@ -19,7 +19,7 @@ pub fn add_node(
     }
 
     // Create new node
-    let node = Py::new(py, Node::new(id.clone(), attr, None))?;
+    let node = Py::new(py, Node::new(py, id.clone(), attr, None))?;
     
     // Add to nodes hashmap
     vertex.nodes.insert(id, node.clone_ref(py));
@@ -48,7 +48,7 @@ pub fn add_edge(
         .clone_ref(py);
 
     // Create the edge
-    let edge = Py::new(py, Edge::new(from_node.clone_ref(py), to_node.clone_ref(py), attr, None))?;
+    let edge = Py::new(py, Edge::new(py, from_node.clone_ref(py), to_node.clone_ref(py), attr, None))?;
 
     // Add the edge to the from_node's edges list
     let mut from_node_ref = from_node.borrow_mut(py);

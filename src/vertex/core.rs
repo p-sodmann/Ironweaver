@@ -9,6 +9,7 @@ use crate::{Edge, Node};
 // Import the helper modules as sibling modules
 use super::algorithms;
 use super::analysis;
+use super::callbacks;
 use super::manipulation;
 use super::serialization;
 
@@ -22,6 +23,10 @@ pub struct Vertex {
     pub on_node_add_callbacks: Py<PyList>,
     #[pyo3(get, set)]
     pub on_edge_add_callbacks: Py<PyList>,
+    #[pyo3(get, set)]
+    pub on_node_update_callbacks: Py<PyList>,
+    #[pyo3(get, set)]
+    pub on_edge_update_callbacks: Py<PyList>,
 }
 
 #[pymethods]
@@ -33,6 +38,8 @@ impl Vertex {
             meta: PyDict::new(py).into(),
             on_node_add_callbacks: PyList::empty(py).into(),
             on_edge_add_callbacks: PyList::empty(py).into(),
+            on_node_update_callbacks: PyList::empty(py).into(),
+            on_edge_update_callbacks: PyList::empty(py).into(),
         }
     }
 
@@ -44,6 +51,8 @@ impl Vertex {
             meta: PyDict::new(py).into(),
             on_node_add_callbacks: PyList::empty(py).into(),
             on_edge_add_callbacks: PyList::empty(py).into(),
+            on_node_update_callbacks: PyList::empty(py).into(),
+            on_edge_update_callbacks: PyList::empty(py).into(),
         }
     }
 
@@ -62,6 +71,8 @@ impl Vertex {
             meta: meta.into(),
             on_node_add_callbacks: PyList::empty(py).into(),
             on_edge_add_callbacks: PyList::empty(py).into(),
+            on_node_update_callbacks: PyList::empty(py).into(),
+            on_edge_update_callbacks: PyList::empty(py).into(),
         })
     }
 
@@ -138,24 +149,26 @@ impl Vertex {
         // First create the node
         let node = manipulation::add_node(&mut slf, py, id, attr)?;
 
-        // Get callbacks from PyList
-        let callbacks_list = slf.on_node_add_callbacks.bind(py);
-        let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
-        for callback in callbacks_list.iter() {
-            callbacks_to_call.push(callback.into());
-        }
-
+        // Collect the callback lists before consuming slf
+        let update_cbs = slf.on_node_update_callbacks.clone_ref(py);
+        let add_cbs = slf.on_node_add_callbacks.clone_ref(py);
         let py_self: Py<Self> = slf.into();
 
-        // Execute callbacks for node addition
-        for callback in &callbacks_to_call {
-            // Call callback with (self, node) parameters
-            let result = callback.call1(py, (py_self.clone_ref(py), node.clone_ref(py)))?;
-            let should_continue: bool = result.extract(py).unwrap_or(true);
-            if !should_continue {
-                break;
-            }
+        // Link the vertex's on_node_update_callbacks to the new node so that
+        // future attr_set calls on the node fire the vertex-level callbacks.
+        // Also store a back-reference to the vertex so callbacks can access it.
+        {
+            let mut node_ref = node.bind(py).borrow_mut();
+            node_ref.on_update_callbacks = update_cbs;
+            node_ref.vertex = Some(py_self.clone_ref(py).into_any());
         }
+
+        callbacks::fire_node_add_callbacks(
+            py,
+            add_cbs.bind(py),
+            py_self.into_any(),
+            node.clone_ref(py),
+        )?;
 
         Ok(node)
     }
@@ -181,24 +194,26 @@ impl Vertex {
     ) -> PyResult<Py<Edge>> {
         let edge = manipulation::add_edge(&mut slf, py, from_id, to_id, attr)?;
 
-        // Get callbacks from PyList
-        let callbacks_list = slf.on_edge_add_callbacks.bind(py);
-        let mut callbacks_to_call: Vec<Py<PyAny>> = Vec::new();
-        for callback in callbacks_list.iter() {
-            callbacks_to_call.push(callback.into());
-        }
-
+        // Collect the callback lists before consuming slf
+        let update_cbs = slf.on_edge_update_callbacks.clone_ref(py);
+        let add_cbs = slf.on_edge_add_callbacks.clone_ref(py);
         let py_self: Py<Self> = slf.into();
 
-        // Execute callbacks for edge addition
-        for callback in &callbacks_to_call {
-            // Call callback with (self, edge) parameters
-            let result = callback.call1(py, (py_self.clone_ref(py), edge.clone_ref(py)))?;
-            let should_continue: bool = result.extract(py).unwrap_or(true);
-            if !should_continue {
-                break;
-            }
+        // Link the vertex's on_edge_update_callbacks to the new edge so that
+        // future attr_set calls on the edge fire the vertex-level callbacks.
+        // Also store a back-reference to the vertex so callbacks can access it.
+        {
+            let mut edge_ref = edge.bind(py).borrow_mut();
+            edge_ref.on_update_callbacks = update_cbs;
+            edge_ref.vertex = Some(py_self.clone_ref(py).into_any());
         }
+
+        callbacks::fire_edge_add_callbacks(
+            py,
+            add_cbs.bind(py),
+            py_self.into_any(),
+            edge.clone_ref(py),
+        )?;
 
         Ok(edge)
     }

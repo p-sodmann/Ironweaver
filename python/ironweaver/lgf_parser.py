@@ -214,11 +214,11 @@ def parse_lgf(
     return graph
 
 
-def parse_lgf_file(path: str) -> Vertex:
+def parse_lgf_file(path: str, graph: Vertex = None) -> Vertex:
     """Parse an LGF file from ``path`` into a :class:`Vertex` graph."""
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
-    return parse_lgf(text, base_path=os.path.dirname(path))
+    return parse_lgf(text, base_path=os.path.dirname(path), graph=graph)
 
 
 __all__ = ["parse_lgf", "parse_lgf_file"]

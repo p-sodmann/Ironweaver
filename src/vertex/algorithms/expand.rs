@@ -98,7 +98,7 @@ pub fn expand(
             }
             
             // Create new node with filtered edges
-            let new_node = Py::new(py, Node::new(node_id.clone(), Some(attr), Some(filtered_edges)))?;
+            let new_node = Py::new(py, Node::new(py, node_id.clone(), Some(attr), Some(filtered_edges)))?;
             result_nodes.insert(node_id.clone(), new_node);
         }
     }
@@ -125,6 +125,7 @@ pub fn expand(
                 let edge_id: Option<String> = edge_ref.getattr("id").ok().and_then(|id| id.extract().ok());
                 
                 let new_edge = Py::new(py, Edge::new(
+                    py,
                     node.clone_ref(py),
                     target_node.clone_ref(py),
                     Some(edge_attr),
@@ -135,7 +136,7 @@ pub fn expand(
         }
         
         // Create final node with updated edges
-        let final_node = Py::new(py, Node::new(node_id.clone(), Some(attr), Some(updated_edges)))?;
+        let final_node = Py::new(py, Node::new(py, node_id.clone(), Some(attr), Some(updated_edges)))?;
         final_result_nodes.insert(node_id.clone(), final_node);
     }
     
