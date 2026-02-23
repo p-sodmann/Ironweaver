@@ -1,6 +1,6 @@
-# LGF (Lemon Graph Format) Documentation
+# LGF (Labeled Graph Format) Documentation
 
-The Lemon Graph Format (LGF) is a human-readable text format for representing graphs with nodes, edges, and attributes. IronWeaver provides comprehensive support for parsing LGF files with both programmatic and file-based interfaces.
+The Labeled Graph Format (LGF) is a human-readable text format for representing graphs with nodes, edges, and attributes. IronWeaver provides comprehensive support for parsing LGF files with both programmatic and file-based interfaces.
 
 ## Quick Start
 
