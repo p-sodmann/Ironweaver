@@ -2,19 +2,62 @@
 
 All filter operations return a **new** `Vertex` containing only the matched nodes and the edges between them. The original graph is unchanged.
 
+## Lambda filtering
+
+Pass a callable that receives a `NodeView` and returns `True` for nodes to keep.
+
+```python
+sub = v.filter(lambda n: (
+    n.id.startswith("test_")
+    and n.type in {"A", "B", "C"}
+    and n.attr("score") < 0.8
+    and n.attr("status") != "archived"
+))
+```
+
+### NodeView API
+
+The `NodeView` passed to your predicate exposes:
+
+| Property / Method | Description |
+|---|---|
+| `n.id` | Node identifier |
+| `n.type` | Shortcut for `attr["type"]` |
+| `n.attr("key")` | Attribute value, or `None` if missing |
+| `n.attr("key", default)` | Attribute value with fallback |
+| `n.has_attr("key")` | `True` if the attribute exists |
+| `n.attrs` | Full attribute dict |
+| `n.edges` | Outgoing edges |
+| `n.inverse_edges` | Incoming edges |
+| `n.degree` / `n.in_degree` | Outgoing / incoming edge count |
+| `n.has_edge_to("id")` | `True` if an outgoing edge reaches that node |
+| `n.has_edge_from("id")` | `True` if an incoming edge comes from that node |
+| `n.neighbor_ids` | Set of outgoing neighbour IDs |
+| `n.node` | The underlying `Node` object |
+
+### Predicate helpers
+
+Combinators are available in `ironweaver.filter.predicates`:
+
+```python
+from ironweaver.filter.predicates import attr_equals, attr_contains, p_and, p_or, p_not
+
+sub = v.filter(p_and(
+    attr_contains("Labels", "Field"),
+    p_not(attr_equals("type", "selector"))
+))
+```
+
 ## Filter by ID
 
 ```python
-# Single node
 sub = v.filter(id="a")
-
-# Multiple nodes
 sub = v.filter(ids=["a", "b", "c"])
 ```
 
 ## Filter by attribute
 
-Pass any keyword argument to match nodes whose `attr` contains that key/value pair. All conditions must match (AND logic).
+Pass keyword arguments to match nodes whose `attr` contains that key/value pair. All conditions must match (AND logic).
 
 ```python
 sub = v.filter(color="red")

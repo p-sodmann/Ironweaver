@@ -4,11 +4,12 @@
 
 A high-performance, Rust-powered Python library for graph data structures and algorithms. Built with PyO3, `IronWeaver` provides fast, memory-efficient graph operations with seamless Python integration.
 
-## 🚀 Features
+## Features
 
-- **High Performance**: Rust-powered backend for blazing-fast graph operations
+- **High Performance**: Rust-powered backend for fast graph operations
 - **Rich Graph API**: Intuitive Python interface for creating and manipulating graphs
 - **Advanced Algorithms**: BFS, shortest path, graph expansion, and filtering
+- **Lambda Filtering**: Filter nodes with expressive predicates (`n.type`, `n.attr("score")`, etc.)
 - **NetworkX Integration**: Seamless conversion to NetworkX for visualization
 - **Serialization**: JSON and binary save/load capabilities
 - **Event-Driven**: Callback system for node and edge modifications
@@ -71,7 +72,30 @@ plt.title("Graph Visualization")
 plt.show()
 ```
 
-## 🔬 Advanced Features
+## Advanced Features
+
+### Filtering with Lambdas
+
+Filter nodes using expressive lambda predicates:
+
+```python
+# Keep active nodes of certain types with high scores
+result = graph.filter(lambda n: (
+    n.id.startswith("test_")
+    and n.type in {"A", "B", "C"}
+    and n.attr("score") < 0.8
+    and n.attr("status") != "archived"
+))
+```
+
+Also supports ID-based and attribute-based filtering:
+
+```python
+sub = graph.filter(ids=["node1", "node2"])
+sub = graph.filter(type="process")
+```
+
+See the [Filtering Documentation](docs/filtering.md) for the full `NodeView` API.
 
 ### Shortest Path Finding
 
@@ -231,7 +255,8 @@ edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 # Algorithms
 path = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None) -> Vertex
 expanded = graph.expand(source: Vertex, depth: int = 1) -> Vertex
-filtered = graph.filter(**filters) -> Vertex  # filters can include 'ids', 'id', or attribute=value pairs
+filtered = graph.filter(predicate) -> Vertex   # lambda/callable filtering
+filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
 
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph
