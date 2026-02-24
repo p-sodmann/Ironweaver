@@ -2,8 +2,8 @@
 
 This module embraces a tiny, function-based approach to filtering graph nodes.
 Rather than implementing a custom query language, :meth:`Vertex.filter`
-accepts any callable that receives a :class:`~ironweaver.Node` and returns a
-boolean.  The utilities below simply build and compose such callables.
+accepts any callable that receives a :class:`~ironweaver.NodeView` and returns
+a boolean.  The utilities below simply build and compose such callables.
 
 Example
 -------
@@ -20,13 +20,20 @@ Example
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
-from .. import Node
+from .. import Node, NodeView
 
 
-def attr_equals(key: str, value: Any) -> Callable[[Node], bool]:
-    """Match nodes where ``node.attr[key] == value``.
+def _get_attr(node: Union[Node, NodeView], key: str, default=None):
+    """Get attribute value from either a Node or NodeView."""
+    if isinstance(node, NodeView):
+        return node.attr(key, default)
+    return node.attr.get(key, default)
+
+
+def attr_equals(key: str, value: Any) -> Callable[[Union[Node, NodeView]], bool]:
+    """Match nodes where ``node.attr(key) == value``.
 
     Example
     -------
@@ -34,14 +41,14 @@ def attr_equals(key: str, value: Any) -> Callable[[Node], bool]:
     >>> graph.filter(pred)  # doctest: +SKIP
     """
 
-    def _predicate(node: Node) -> bool:
-        return node.attr.get(key) == value
+    def _predicate(node: Union[Node, NodeView]) -> bool:
+        return _get_attr(node, key) == value
 
     return _predicate
 
 
-def attr_contains(key: str, member: Any) -> Callable[[Node], bool]:
-    """Match nodes where ``member`` is found in ``node.attr[key]``.
+def attr_contains(key: str, member: Any) -> Callable[[Union[Node, NodeView]], bool]:
+    """Match nodes where ``member`` is found in ``node.attr(key)``.
 
     Example
     -------
@@ -49,8 +56,8 @@ def attr_contains(key: str, member: Any) -> Callable[[Node], bool]:
     >>> graph.filter(pred)  # doctest: +SKIP
     """
 
-    def _predicate(node: Node) -> bool:
-        value = node.attr.get(key)
+    def _predicate(node: Union[Node, NodeView]) -> bool:
+        value = _get_attr(node, key)
         if value is None:
             return False
         try:
