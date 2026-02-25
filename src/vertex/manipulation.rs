@@ -70,3 +70,43 @@ pub fn get_node(vertex: &Vertex, py: Python<'_>, id: String) -> PyResult<Py<Node
             format!("Node with id '{}' not found", id)
         ))
 }
+
+/// Remove edges and inverse_edges that point to nodes not present in the vertex.
+/// Returns the number of edges removed.
+pub fn prune(vertex: &Vertex, py: Python<'_>) -> PyResult<usize> {
+    let mut removed = 0usize;
+
+    for node_py in vertex.nodes.values() {
+        let mut node_ref = node_py.bind(py).borrow_mut();
+
+        let before_edges = node_ref.edges.len();
+        node_ref.edges.retain(|edge| {
+            let edge_ref = edge.bind(py);
+            let to_id = edge_ref
+                .borrow()
+                .to_node
+                .bind(py)
+                .borrow()
+                .id
+                .clone();
+            vertex.nodes.contains_key(&to_id)
+        });
+        removed += before_edges - node_ref.edges.len();
+
+        let before_inv = node_ref.inverse_edges.len();
+        node_ref.inverse_edges.retain(|edge| {
+            let edge_ref = edge.bind(py);
+            let from_id = edge_ref
+                .borrow()
+                .from_node
+                .bind(py)
+                .borrow()
+                .id
+                .clone();
+            vertex.nodes.contains_key(&from_id)
+        });
+        removed += before_inv - node_ref.inverse_edges.len();
+    }
+
+    Ok(removed)
+}

@@ -426,6 +426,17 @@ impl Vertex {
 
         algorithms::filter(self, py, node_ids)
     }
+    /// Remove edges and inverse_edges that reference nodes not present in the vertex.
+    ///
+    /// This is useful after filtering or subsetting the graph, when edges may still
+    /// point to nodes that are no longer part of the vertex.
+    ///
+    /// Returns:
+    ///     int: The number of edges removed
+    fn prune(&self, py: Python<'_>) -> PyResult<usize> {
+        manipulation::prune(self, py)
+    }
+
     /// Perform multiple random walks from a starting node
     ///
     /// Args:

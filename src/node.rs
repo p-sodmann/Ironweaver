@@ -61,19 +61,21 @@ impl Node {
     /// Traverse reachable nodes, returning Vertex
     /// If depth is None, traverses all.
     /// filter: Optional HashMap of edge attribute filters (e.g., {"type": "broader"})
+    /// edge_filter: Optional Python callable that receives an Edge and returns bool
     /// Returns a Vertex (dict of id:Node) with traversal path in meta["nodelist"]
     fn traverse<'py>(
         slf: PyRef<'py, Self>,
         py: Python<'py>,
         depth: Option<usize>,
-        filter: Option<HashMap<String, Py<PyAny>>>
+        filter: Option<HashMap<String, Py<PyAny>>>,
+        edge_filter: Option<Py<PyAny>>,
     ) -> PyResult<Py<Vertex>> {
         let self_handle: Py<Node> = slf.into();
 
         let mut found = HashMap::<String, Py<Node>>::new();
         let mut visited = HashSet::<String>::new();
         let mut nodelist = Vec::<String>::new();
-        traverse_recursive(py, self_handle, depth, 0, &mut found, &mut visited, &mut nodelist, &filter)?;
+        traverse_recursive(py, self_handle, depth, 0, &mut found, &mut visited, &mut nodelist, &filter, &edge_filter)?;
 
         Py::new(py, Vertex::from_nodes_with_path(py, found, nodelist)?)
     }
@@ -81,35 +83,39 @@ impl Node {
     /// Breadth-First Search traversal of reachable nodes
     /// If depth is None, traverses all nodes.
     /// filter: Optional HashMap of edge attribute filters (e.g., {"type": "broader"})
+    /// edge_filter: Optional Python callable that receives an Edge and returns bool
     /// Returns a Vertex (dict of id:Node) in BFS order with traversal path in meta["nodelist"]
     fn bfs<'py>(
         slf: PyRef<'py, Self>,
         py: Python<'py>,
         depth: Option<usize>,
-        filter: Option<HashMap<String, Py<PyAny>>>
+        filter: Option<HashMap<String, Py<PyAny>>>,
+        edge_filter: Option<Py<PyAny>>,
     ) -> PyResult<Py<Vertex>> {
         let self_handle: Py<Node> = slf.into();
 
         let mut found = HashMap::<String, Py<Node>>::new();
         let mut visited = HashSet::<String>::new();
         let mut nodelist = Vec::<String>::new();
-        bfs_iterative(py, self_handle, depth, &mut found, &mut visited, &mut nodelist, &filter)?;
+        bfs_iterative(py, self_handle, depth, &mut found, &mut visited, &mut nodelist, &filter, &edge_filter)?;
 
         Py::new(py, Vertex::from_nodes_with_path(py, found, nodelist)?)
     }
 
     /// Search for a specific node by ID using BFS
     /// filter: Optional HashMap of edge attribute filters (e.g., {"type": "broader"})
+    /// edge_filter: Optional Python callable that receives an Edge and returns bool
     /// Returns the node if found, None otherwise
     fn bfs_search<'py>(
         slf: PyRef<'py, Self>,
         py: Python<'py>,
         target_id: String,
         depth: Option<usize>,
-        filter: Option<HashMap<String, Py<PyAny>>>
+        filter: Option<HashMap<String, Py<PyAny>>>,
+        edge_filter: Option<Py<PyAny>>,
     ) -> PyResult<Option<Py<Node>>> {
         let self_handle: Py<Node> = slf.into();
-        bfs_search_iterative(py, self_handle, target_id, depth, &filter)
+        bfs_search_iterative(py, self_handle, target_id, depth, &filter, &edge_filter)
     }
 
     /// Retrieve a value from ``attr`` by key.
@@ -193,8 +199,10 @@ impl Node {
 fn edge_matches_filter(
     py: Python<'_>,
     edge: &Py<Edge>,
-    filter: &Option<HashMap<String, Py<PyAny>>>
+    filter: &Option<HashMap<String, Py<PyAny>>>,
+    edge_filter: &Option<Py<PyAny>>,
 ) -> PyResult<bool> {
+    // Check dict-based filter first
     if let Some(filter_map) = filter {
         let edge_ref = edge.bind(py);
         let edge_attr: HashMap<String, Py<PyAny>> = edge_ref.getattr("attr")?.extract()?;
@@ -215,6 +223,16 @@ fn edge_matches_filter(
             }
         }
     }
+
+    // Check callable edge_filter
+    if let Some(ref callable) = edge_filter {
+        let result = callable.call1(py, (edge.clone_ref(py),))?;
+        let passes: bool = result.extract(py)?;
+        if !passes {
+            return Ok(false);
+        }
+    }
+
     Ok(true)
 }
 
@@ -228,6 +246,7 @@ fn traverse_recursive(
     visited: &mut HashSet<String>,
     nodelist: &mut Vec<String>,
     filter: &Option<HashMap<String, Py<PyAny>>>,
+    edge_filter: &Option<Py<PyAny>>,
 ) -> PyResult<()> {
     let node_ref = node_handle.bind(py);
 
@@ -250,9 +269,9 @@ fn traverse_recursive(
     let edges: Vec<Py<Edge>> = node_ref.getattr("edges")?.extract()?;
     for edge in edges {
         // Check if edge matches filter criteria
-        if edge_matches_filter(py, &edge, filter)? {
+        if edge_matches_filter(py, &edge, filter, edge_filter)? {
             let to_node: Py<Node> = edge.bind(py).getattr("to_node")?.extract()?;
-            traverse_recursive(py, to_node, depth, current_depth + 1, found, visited, nodelist, filter)?;
+            traverse_recursive(py, to_node, depth, current_depth + 1, found, visited, nodelist, filter, edge_filter)?;
         }
     }
     Ok(())
@@ -267,6 +286,7 @@ fn bfs_iterative(
     visited: &mut HashSet<String>,
     nodelist: &mut Vec<String>,
     filter: &Option<HashMap<String, Py<PyAny>>>,
+    edge_filter: &Option<Py<PyAny>>,
 ) -> PyResult<()> {
     use std::collections::VecDeque;
     
@@ -297,7 +317,7 @@ fn bfs_iterative(
 
         for edge in edges {
             // Check if edge matches filter criteria
-            if edge_matches_filter(py, &edge, filter)? {
+            if edge_matches_filter(py, &edge, filter, edge_filter)? {
                 let edge_ref = edge.bind(py);
                 let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
                 let to_node_ref = to_node.bind(py);
@@ -324,6 +344,7 @@ fn bfs_search_iterative(
     target_id: String,
     depth: Option<usize>,
     filter: &Option<HashMap<String, Py<PyAny>>>,
+    edge_filter: &Option<Py<PyAny>>,
 ) -> PyResult<Option<Py<Node>>> {
     use std::collections::VecDeque;
     
@@ -358,7 +379,7 @@ fn bfs_search_iterative(
         
         for edge in edges {
             // Check if edge matches filter criteria
-            if edge_matches_filter(py, &edge, filter)? {
+            if edge_matches_filter(py, &edge, filter, edge_filter)? {
                 let edge_ref = edge.bind(py);
                 let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
                 let to_node_ref = to_node.bind(py);

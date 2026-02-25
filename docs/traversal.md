@@ -6,7 +6,7 @@ Ironweaver provides several traversal methods on both `Node` and `Vertex`.
 
 All node-level methods start from a single node and follow outgoing edges. They return a `Vertex` with the discovered nodes and a `meta["nodelist"]` recording visit order.
 
-### DFS — `node.traverse(depth, filter)`
+### DFS — `node.traverse(depth, filter, edge_filter)`
 
 ```python
 node = v.get_node("root")
@@ -14,13 +14,13 @@ result = node.traverse(depth=3)
 result.meta["nodelist"]  # visit order
 ```
 
-### BFS — `node.bfs(depth, filter)`
+### BFS — `node.bfs(depth, filter, edge_filter)`
 
 ```python
 result = node.bfs(depth=2)
 ```
 
-### BFS search — `node.bfs_search(target_id, depth, filter)`
+### BFS search — `node.bfs_search(target_id, depth, filter, edge_filter)`
 
 Returns the target `Node` if reachable, otherwise `None`. Stops as soon as the target is found.
 
@@ -30,13 +30,49 @@ found = node.bfs_search("target", depth=5)
 
 ### Edge filtering
 
-All three methods accept an optional `filter` dict to restrict which edges are followed:
+All three methods accept a `filter` parameter to restrict which edges are followed. The filter can be a **dict** for simple attribute matching or a **callable** (lambda) for more expressive logic.
+
+#### Dict filter
+
+Only edges whose `attr` matches **every** key/value pair in the dict are traversed:
 
 ```python
 result = node.bfs(depth=2, filter={"type": "knows"})
 ```
 
-Only edges whose `attr` matches **every** key/value pair in the filter are traversed.
+#### Lambda filter
+
+Pass a callable that receives an `EdgeView` and returns `True` for edges that should be followed:
+
+```python
+result = node.traverse(depth=3, filter=lambda e: e.type == "knows")
+result = node.bfs(depth=3, filter=lambda e: e.type in ("knows", "follows"))
+found  = node.bfs_search("target", depth=5, filter=lambda e: e.attr("weight") > 0.5)
+```
+
+You can also use the explicit `edge_filter` keyword argument (useful when combining with a dict filter):
+
+```python
+result = node.bfs(depth=3, edge_filter=lambda e: e.has_attr("type") and e.type == "knows")
+```
+
+> **Note:** `filter` accepts either a dict or a callable, but not both. Use `edge_filter` if you need a callable alongside a dict filter.
+
+#### EdgeView API
+
+The `EdgeView` passed to your predicate exposes:
+
+| Property / Method | Description |
+|---|---|
+| `e.type` | Shortcut for `attr["type"]` |
+| `e.attr("key")` | Attribute value, or `None` if missing |
+| `e.attr("key", default)` | Attribute value with fallback |
+| `e.has_attr("key")` | `True` if the attribute exists |
+| `e.attrs` | Full attribute dict |
+| `e.from_node` | Source node |
+| `e.to_node` | Target node |
+| `e.id` | Edge ID (if set) |
+| `e.edge` | The underlying `Edge` object |
 
 ---
 

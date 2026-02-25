@@ -136,6 +136,79 @@ class NodeView:
         return hash(self._node.id)
 
 
+class EdgeView:
+    """Lightweight proxy around :class:`Edge` for use in traversal filter lambdas.
+
+    Provides a clean, expressive API so that predicates read naturally::
+
+        node.traverse(depth=3, filter=lambda e: e.type == "knows")
+
+    Attributes
+    ----------
+    type : str or None
+        Shortcut for ``edge.attr.get("type")``.
+    from_node : Node
+        The source node of this edge.
+    to_node : Node
+        The target node of this edge.
+    attrs : dict
+        The full attribute dictionary (same as ``edge.attr``).
+    edge : Edge
+        The underlying :class:`Edge` object.
+    """
+
+    __slots__ = ("_edge",)
+
+    def __init__(self, edge: Edge):
+        object.__setattr__(self, "_edge", edge)
+
+    @property
+    def type(self):
+        """Shortcut for ``edge.attr.get("type")``."""
+        return self._edge.attr.get("type")
+
+    @property
+    def from_node(self):
+        return self._edge.from_node
+
+    @property
+    def to_node(self):
+        return self._edge.to_node
+
+    @property
+    def attrs(self) -> dict:
+        """The full attribute dictionary."""
+        return self._edge.attr
+
+    @property
+    def edge(self) -> Edge:
+        """Access the underlying :class:`Edge` object."""
+        return self._edge
+
+    @property
+    def id(self):
+        return self._edge.id
+
+    def attr(self, key: str, default=None):
+        """Return the value of attribute *key*, or *default* if missing."""
+        return self._edge.attr.get(key, default)
+
+    def has_attr(self, key: str) -> bool:
+        """Return ``True`` if attribute *key* exists on this edge."""
+        return key in self._edge.attr
+
+    def __repr__(self):
+        return repr(self._edge)
+
+    def __eq__(self, other):
+        if isinstance(other, EdgeView):
+            return self._edge is other._edge
+        return NotImplemented
+
+    def __hash__(self):
+        return id(self._edge)
+
+
 class FilterResult:
     """A result object that can behave as both a Vertex and an iterable of nodes."""
     
@@ -259,11 +332,121 @@ Vertex.__iter__ = _vertex_iter
 Vertex.__len__ = _vertex_len
 
 
+# ---------------------------------------------------------------------------
+# Wrap Node traversal methods to accept callable edge filters via EdgeView
+# ---------------------------------------------------------------------------
+
+def _wrap_edge_filter(fn):
+    """Wrap a callable predicate so it receives an EdgeView instead of a raw Edge."""
+    def _wrapper(edge):
+        return fn(EdgeView(edge))
+    return _wrapper
+
+
+def _node_traverse(self, depth=None, filter=None, edge_filter=None):
+    """Traverse reachable nodes via DFS.
+
+    Parameters
+    ----------
+    depth : int, optional
+        Maximum traversal depth.
+    filter : dict or callable, optional
+        If a dict, only edges whose ``attr`` matches every key/value pair are
+        followed.  If a callable, it receives an :class:`EdgeView` and must
+        return ``True`` for edges that should be followed.
+    edge_filter : callable, optional
+        Explicit callable edge filter (same semantics as a callable *filter*).
+        Cannot be combined with a callable *filter*.
+    """
+    dict_filter = None
+    callable_filter = edge_filter
+
+    if filter is not None:
+        if callable(filter):
+            if edge_filter is not None:
+                raise ValueError("Cannot pass both a callable 'filter' and 'edge_filter'")
+            callable_filter = filter
+        else:
+            dict_filter = filter
+
+    ef = _wrap_edge_filter(callable_filter) if callable_filter is not None else None
+    return self._original_traverse(depth=depth, filter=dict_filter, edge_filter=ef)
+
+
+def _node_bfs(self, depth=None, filter=None, edge_filter=None):
+    """BFS traversal of reachable nodes.
+
+    Parameters
+    ----------
+    depth : int, optional
+        Maximum traversal depth.
+    filter : dict or callable, optional
+        Dict for attribute matching or callable receiving :class:`EdgeView`.
+    edge_filter : callable, optional
+        Explicit callable edge filter.
+    """
+    dict_filter = None
+    callable_filter = edge_filter
+
+    if filter is not None:
+        if callable(filter):
+            if edge_filter is not None:
+                raise ValueError("Cannot pass both a callable 'filter' and 'edge_filter'")
+            callable_filter = filter
+        else:
+            dict_filter = filter
+
+    ef = _wrap_edge_filter(callable_filter) if callable_filter is not None else None
+    return self._original_bfs(depth=depth, filter=dict_filter, edge_filter=ef)
+
+
+def _node_bfs_search(self, target_id, depth=None, filter=None, edge_filter=None):
+    """BFS search for a target node.
+
+    Parameters
+    ----------
+    target_id : str
+        ID of the node to find.
+    depth : int, optional
+        Maximum traversal depth.
+    filter : dict or callable, optional
+        Dict for attribute matching or callable receiving :class:`EdgeView`.
+    edge_filter : callable, optional
+        Explicit callable edge filter.
+    """
+    dict_filter = None
+    callable_filter = edge_filter
+
+    if filter is not None:
+        if callable(filter):
+            if edge_filter is not None:
+                raise ValueError("Cannot pass both a callable 'filter' and 'edge_filter'")
+            callable_filter = filter
+        else:
+            dict_filter = filter
+
+    ef = _wrap_edge_filter(callable_filter) if callable_filter is not None else None
+    return self._original_bfs_search(target_id, depth=depth, filter=dict_filter, edge_filter=ef)
+
+
+def _setup_traversal_methods():
+    Node._original_traverse = Node.traverse
+    Node._original_bfs = Node.bfs
+    Node._original_bfs_search = Node.bfs_search
+
+    Node.traverse = _node_traverse
+    Node.bfs = _node_bfs
+    Node.bfs_search = _node_bfs_search
+
+_setup_traversal_methods()
+
+
 # Export all public components
 __all__ = [
     "Vertex",
     "Node",
     "NodeView",
+    "EdgeView",
     "Edge",
     "Path",
     "ObservedDictionary",
