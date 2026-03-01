@@ -120,8 +120,13 @@ def parse_lgf(
             
             if graph.has_node(node_id):
                 current_node = graph.get_node(node_id)
-                # Update labels for existing node
-                current_node.attr_set("labels", labels)
+                # Merge new labels into existing labels
+                existing_labels = current_node.attr_get("labels") or []
+                merged = list(existing_labels)
+                for lbl in labels:
+                    if lbl not in merged:
+                        merged.append(lbl)
+                current_node.attr_set("labels", merged)
             else:
                 attrs = {"labels": labels}
                 graph.add_node(node_id, attrs)

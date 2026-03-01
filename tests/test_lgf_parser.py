@@ -261,3 +261,41 @@ n2 Person
     assert e.attr["type"] == "FRIENDS"
     assert e.attr["shared_interests"] == ["coding", "music"]
     assert e.attr["since"] == 2020
+
+
+def test_parse_lgf_duplicate_node_merges_labels():
+    """Test that defining a node twice merges labels instead of overwriting."""
+    example = """\
+n1 Person
+  name = Alice
+
+n1 Employee
+  company = Acme
+"""
+
+    g = parse_lgf(example)
+    assert g.node_count() == 1
+
+    n1 = g.get_node("n1")
+    assert n1.attr_get("labels") == ["Person", "Employee"]
+    assert n1.attr_get("name") == "Alice"
+    assert n1.attr_get("company") == "Acme"
+
+
+def test_parse_lgf_duplicate_node_no_duplicate_labels():
+    """Test that re-declaring a node with the same label doesn't duplicate it."""
+    example = """\
+n1 Person
+  name = Alice
+
+n1 Person
+  age = 30
+"""
+
+    g = parse_lgf(example)
+    assert g.node_count() == 1
+
+    n1 = g.get_node("n1")
+    assert n1.attr_get("labels") == ["Person"]
+    assert n1.attr_get("name") == "Alice"
+    assert n1.attr_get("age") == 30
