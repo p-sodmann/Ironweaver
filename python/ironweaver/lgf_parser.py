@@ -50,7 +50,9 @@ def parse_lgf(
     Vertex
         The parsed graph.
     """
-    graph = graph or Vertex()
+    if graph is None:
+        graph = Vertex()
+        
     base_path = base_path or ""
     current_node = None
     current_edge = None
