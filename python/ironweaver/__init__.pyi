@@ -297,7 +297,14 @@ class Node:
 
 @final
 class Path:
-    """An ordered sequence of nodes, typically a shortest-path result."""
+    """An ordered sequence of nodes.
+
+    .. note::
+        No current public API method returns a ``Path`` object directly.
+        ``shortest_path_bfs`` and the traversal methods return a
+        :class:`Vertex` subgraph; use ``result.meta["nodelist"]`` for the
+        ordered node-ID list. ``Path`` is reserved for future use.
+    """
 
     nodes: list[Node]
 
@@ -339,7 +346,9 @@ class Vertex:
     on_node_update_callbacks – ``(vertex, node, key, new_val, old_val) -> bool``
     on_edge_update_callbacks – ``(vertex, edge, key, new_val, old_val) -> bool``
 
-    Return False from any callback to stop further callbacks in that chain.
+    Return ``False`` from any callback to stop further callbacks in that chain.
+    The node or edge is **always added** regardless of the return value —
+    returning ``False`` only prevents subsequent callbacks from running.
     """
 
     nodes: dict[str, Node]
@@ -374,7 +383,17 @@ class Vertex:
     def has_node(self, id: str) -> bool: ...
     def node_count(self) -> int: ...
     def get_metadata(self) -> dict[str, Any]:
-        """Return summary metadata: node_count, edge_count, node_ids, etc."""
+        """Return summary metadata about the graph.
+
+        Returned keys:
+
+        ==================  =================================================
+        ``node_count``      Number of nodes (int)
+        ``edge_count``      Number of edges (int)
+        ``average_degree``  Mean number of outgoing edges per node (float)
+        ``node_ids``        List of all node ID strings
+        ==================  =================================================
+        """
         ...
 
     # ------------------------------------------------------------------
@@ -464,6 +483,15 @@ class Vertex:
         """Expand this subgraph by pulling neighbour nodes from *source_vertex*.
 
         *depth* defaults to 1 (one hop).
+
+        Only **outgoing** edges are followed during expansion; nodes that point
+        *into* the seed nodes are not included.
+
+        Example::
+
+            seed = graph.filter(id="ckd")
+            expanded = seed.expand(graph, depth=1)
+            # expanded now contains ckd + all nodes ckd has outgoing edges to
         """
         ...
     def filter(
@@ -496,7 +524,7 @@ class Vertex:
         **Attribute equality mode** (keyword arguments)::
 
             result = g.filter(type="Person")
-            result = g.filter(status="active", role="admin")
+            result = g.filter(status="active", role="admin")  # multiple kwargs are ANDed
 
         The predicate receives a :class:`NodeView` which exposes:
 
@@ -552,6 +580,12 @@ class Vertex:
             Attribute key used to read the edge type. Pass None to use "type".
 
         Returns a list of walks; each walk is a list of strings.
+
+        .. important::
+            All seven arguments are **positional and required**. Pass ``None``
+            for optional parameters to use their defaults::
+
+                walks = graph.random_walks("node1", 5, 20, 2, None, True, None)
         """
         ...
 

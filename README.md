@@ -92,11 +92,12 @@ Also supports ID-based and attribute-based filtering:
 
 ```python
 sub = graph.filter(ids=["node1", "node2"])
-sub = graph.filter(id="node1")          # single node
-sub = graph.filter(type="process")      # attribute equality
+sub = graph.filter(id="node1")                        # single node
+sub = graph.filter(type="process")                    # attribute equality
+sub = graph.filter(type="process", status="active")   # multiple kwargs are ANDed
 ```
 
-> **Note:** calling `graph.filter()` with no arguments raises `ValueError`. Exactly one filtering mode must be used.
+> **Note:** calling `graph.filter()` with no arguments raises `ValueError`. Exactly one filtering mode must be used. Mixing modes (e.g. a predicate *and* keyword args) also raises `ValueError`.
 
 See the [Filtering Documentation](docs/filtering.md) for the full `NodeView` API.
 
@@ -128,6 +129,9 @@ print(f"Filtered nodes: {filtered_graph.keys()}")
 print(f"Expanded nodes: {expanded.keys()}")
 ```
 
+> **Note:** `expand` follows **outgoing** edges only. Nodes that have edges *pointing into* the seed nodes are not pulled in.
+
+
 ### BFS / DFS Traversal
 
 `Node.bfs()` and `Node.traverse()` return a `Vertex` subgraph. The visit order is in `result.meta["nodelist"]`:
@@ -144,6 +148,22 @@ causes_only = graph["disease_a"].bfs(filter=lambda e: e.type == "causes")
 # DFS variant; also accepts a dict shorthand for edge attribute matching
 dfs_result = graph["alice"].traverse(depth=3, filter={"type": "knows"})
 ```
+
+### BFS Search
+
+`bfs_search` finds a single target node and returns it (or `None` if unreachable), without building a subgraph:
+
+```python
+# Returns the Node object if found, None otherwise
+target = graph["alice"].bfs_search("bob", depth=3)
+if target is not None:
+    print(f"Found: {target.id}, attrs: {target.attr}")
+else:
+    print("Not reachable within depth 3")
+```
+
+Use `bfs_search` when you only need to know *whether* a node is reachable and want the `Node` itself; use `bfs` when you need the full reachable subgraph.
+
 
 ### Random Walks
 
@@ -190,6 +210,8 @@ new_edge = graph.add_edge('node3', 'node4', {'weight': 1.5})
 
 print(f"Graph metadata: {graph.meta}")
 ```
+
+> **Note:** returning `False` from a callback stops subsequent callbacks in that chain, but the node or edge is **always added** regardless.
 
 ### Persistence
 
@@ -339,6 +361,10 @@ found = node.bfs_search(target_id: str, depth: int = None) -> Node | None
 
 # Attribute mutation that fires on_update_callbacks
 node.attr_set(key, value)   # use this; direct node.attr[key] = value bypasses callbacks
+
+# Append to a list attribute (creates the list if the key is missing)
+node.attr_list_append("tags", "urgent")
+node.attr_list_append("tags", "reviewed")   # node.attr["tags"] == ["urgent", "reviewed"]
 ```
 
 #### `Edge`
@@ -350,6 +376,10 @@ from_node = edge.from_node  # Source node
 to_node = edge.to_node      # Target node
 attrs = edge.attr           # Edge attributes dict
 ```
+
+#### `Path`
+
+> **Note:** No current public API method returns a `Path` object directly. `shortest_path_bfs` and the traversal methods return a `Vertex` subgraph — use `result.meta["nodelist"]` for the ordered list of node IDs. `Path` is reserved for future use.
 
 ## Performance
 

@@ -36,12 +36,13 @@ pub fn shortest_path_bfs(
         let original_node_ref = root_node.bind(py);
         let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
         let new_node = Py::new(py, Node::new(py, root_node_id.clone(), Some(attr), Some(Vec::new())))?;
+        let nodelist = vec![root_node_id.clone()];
         path_nodes.insert(root_node_id, new_node);
-        
-        let result_vertex = Vertex::from_nodes(py, path_nodes);
+
+        let result_vertex = Vertex::from_nodes_with_path(py, path_nodes, nodelist)?;
         return Py::new(py, result_vertex);
     }
-    
+
     let mut visited = std::collections::HashSet::<String>::new();
     let mut queue = VecDeque::new();
     let mut parent_map = StdHashMap::<String, String>::new();
@@ -122,7 +123,8 @@ pub fn shortest_path_bfs(
                         }
                     }
                     
-                    let result_vertex = Vertex::from_nodes(py, path_nodes);
+                    path_ids.reverse(); // built target→root; reverse to root→target
+                    let result_vertex = Vertex::from_nodes_with_path(py, path_nodes, path_ids)?;
                     return Py::new(py, result_vertex);
                 }
             }
