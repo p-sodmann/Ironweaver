@@ -283,6 +283,12 @@ def _filter(self, predicate=None, **kwargs):
     >>> result = g.filter(ids=["test_a", "other"])
     """
 
+    if predicate is not None and kwargs:
+        raise ValueError(
+            "Cannot mix filtering modes: provide either a predicate function "
+            "or keyword arguments, not both"
+        )
+
     if predicate is not None:
         # Predicate-based filtering — wrap each node in a NodeView
         matching_ids = [

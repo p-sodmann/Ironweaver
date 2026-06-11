@@ -276,6 +276,18 @@ node_id NodeType
   boolean_attr = true
 ```
 
+> **Note:** the `NodeType` label is stored in `attr["labels"]` as a **list**
+> (e.g. `{"labels": ["NodeType"]}`), not in `attr["type"]`. A node declared
+> multiple times has its labels merged into that list. This means
+> `graph.filter(type="NodeType")` and `NodeView.type` do **not** match
+> LGF-parsed nodes — filter on the label list instead:
+>
+> ```python
+> from ironweaver.filter.predicates import attr_contains
+> clinicians = graph.filter(attr_contains("labels", "NodeType"))
+> # or: graph.filter(lambda n: "NodeType" in n.attr("labels", []))
+> ```
+
 **Edge Declaration (New Syntax):**
 ```
 # Forward relationship: from current node to target

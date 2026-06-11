@@ -185,3 +185,10 @@ def test_filter_no_args_raises():
     import pytest
     with pytest.raises(ValueError):
         v.filter()
+
+
+def test_filter_mixed_modes_raises():
+    v = build_rich_graph()
+    import pytest
+    with pytest.raises(ValueError):
+        v.filter(lambda n: True, type="A")

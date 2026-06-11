@@ -545,8 +545,9 @@ class Vertex:
         ``n.node``          the underlying :class:`Node` object
         ==================  =====================================================
 
-        Raises :exc:`ValueError` if called with no arguments — exactly one
-        filtering mode must be used.
+        Raises :exc:`ValueError` if called with no arguments, or with both a
+        predicate and keyword arguments — exactly one filtering mode must be
+        used.
         """
         ...
     def random_walks(
@@ -616,6 +617,14 @@ def parse_lgf(
         corp_1 Company
           name = "Tech Corp"
           <-founded_by- alice
+
+    .. note::
+        The node-type label (``Person``, ``Company`` …) is stored in
+        ``attr["labels"]`` as a **list** (labels from repeated declarations
+        are merged), not in ``attr["type"]``. Use
+        ``graph.filter(attr_contains("labels", "Person"))`` or
+        ``lambda n: "Person" in n.attr("labels", [])`` to filter parsed
+        nodes — ``filter(type=...)`` and ``NodeView.type`` will not match.
 
     Parameters
     ----------
