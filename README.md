@@ -76,7 +76,7 @@ plt.show()
 
 ### Filtering with Lambdas
 
-Filter nodes using expressive lambda predicates:
+Filter nodes using expressive lambda predicates. The argument `n` is a [`NodeView`](docs/filtering.md) — a read-only proxy exposing `.id`, `.type`, `.attr(key)`, `.degree`, `.has_edge_to(id)`, and more:
 
 ```python
 # Keep active nodes of certain types with high scores
@@ -92,20 +92,25 @@ Also supports ID-based and attribute-based filtering:
 
 ```python
 sub = graph.filter(ids=["node1", "node2"])
-sub = graph.filter(type="process")
+sub = graph.filter(id="node1")          # single node
+sub = graph.filter(type="process")      # attribute equality
 ```
+
+> **Note:** calling `graph.filter()` with no arguments raises `ValueError`. Exactly one filtering mode must be used.
 
 See the [Filtering Documentation](docs/filtering.md) for the full `NodeView` API.
 
 ### Shortest Path Finding
 
 ```python
-# Find shortest path between nodes using BFS
-path = graph.shortest_path_bfs('node1', 'node3')
-print(f"Shortest path: {path}")
+# Returns a Vertex subgraph containing only the path nodes.
+# Raises ValueError if either node is missing or the target is unreachable.
+result = graph.shortest_path_bfs('node1', 'node3')
+print(f"Path order: {result.meta['nodelist']}")  # ordered node IDs
+print(f"Path nodes: {result.keys()}")
 
 # Visualize the path
-path_nx = path.to_networkx()
+path_nx = result.to_networkx()
 nx.draw(path_nx, with_labels=True, node_color='orange')
 plt.title("Shortest Path from node1 to node3")
 plt.show()
@@ -123,6 +128,41 @@ print(f"Filtered nodes: {filtered_graph.keys()}")
 print(f"Expanded nodes: {expanded.keys()}")
 ```
 
+### BFS / DFS Traversal
+
+`Node.bfs()` and `Node.traverse()` return a `Vertex` subgraph. The visit order is in `result.meta["nodelist"]`:
+
+```python
+# BFS from a node — all reachable nodes up to depth 2
+reachable = graph["alice"].bfs(depth=2)
+print(reachable.meta["nodelist"])   # BFS discovery order
+print(reachable.keys())             # same nodes, dict order
+
+# Filter which edges to follow — the callable receives an EdgeView
+causes_only = graph["disease_a"].bfs(filter=lambda e: e.type == "causes")
+
+# DFS variant; also accepts a dict shorthand for edge attribute matching
+dfs_result = graph["alice"].traverse(depth=3, filter={"type": "knows"})
+```
+
+### Random Walks
+
+```python
+walks = graph.random_walks(
+    start_node_id="node1",   # starting node
+    max_length=5,             # maximum hops per walk
+    num_attempts=20,          # attempts; duplicate walks are removed automatically
+    min_length=2,             # minimum walk length to keep (None = no minimum)
+    allow_revisit=None,       # None uses default (False)
+    include_edge_types=True,  # interleave edge-type strings: ["a", "knows", "b", ...]
+    edge_type_field=None,     # attribute key for edge type; None defaults to "type"
+)
+for walk in walks:
+    print(walk)
+```
+
+All seven arguments are required; pass `None` for optional ones to use the defaults.
+
 ### Event-Driven Programming
 
 ```python
@@ -133,7 +173,7 @@ def on_node_added(vertex, node):
     if "visited_nodes" not in vertex.meta:
         vertex.meta["visited_nodes"] = []
     vertex.meta["visited_nodes"].append(node.id)
-    return True  # Continue processing
+    return True  # Return False to stop subsequent callbacks in this chain
 
 def on_edge_added(vertex, edge):
     print(f"Edge added: {edge.from_node.id} -> {edge.to_node.id}")
@@ -154,16 +194,20 @@ print(f"Graph metadata: {graph.meta}")
 ### Persistence
 
 ```python
-# Save graph to JSON
+# Save to a file
 graph.save_to_json("my_graph.json")
+
+# Save to a string (omit the path — returns the JSON string instead of writing a file)
+json_str = graph.save_to_json()
 
 # Save to binary format (more efficient for large graphs)
 graph.save_to_binary("my_graph.bin")
-# Or use half precision floats to reduce file size
+# Or use half-precision floats to reduce file size
 graph.save_to_binary_f16("my_graph_f16.bin")
 
-# Load from file
-loaded_graph = Vertex.load_from_json("my_graph.json")
+# Load from a file path, a raw JSON string, or a plain dict
+loaded_graph = Vertex.load_from_json("my_graph.json")   # file path
+loaded_graph = Vertex.load_from_json(json_str)           # JSON string
 print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
@@ -253,20 +297,26 @@ count = graph.node_count() -> int
 edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 
 # Algorithms
-path = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None) -> Vertex
+result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None) -> Vertex
+# result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable
 expanded = graph.expand(source: Vertex, depth: int = 1) -> Vertex
-filtered = graph.filter(predicate) -> Vertex   # lambda/callable filtering
+filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
+pruned_count = graph.prune() -> int            # remove dangling edges after filter/subset
+walks = graph.random_walks(start_node_id, max_length, num_attempts,
+                            min_length, allow_revisit, include_edge_types,
+                            edge_type_field) -> list[list[str]]
 
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph
 metadata = graph.get_metadata() -> dict
 
 # Persistence
-graph.save_to_json(file_path: str)
+graph.save_to_json("path.json")              # write to file
+json_str = graph.save_to_json()              # no arg → returns JSON string
 graph.save_to_binary(file_path: str)
 graph.save_to_binary_f16(file_path: str)
-loaded = Vertex.load_from_json(file_path: str) -> Vertex
+loaded = Vertex.load_from_json(source)       # file path, JSON string, or dict
 loaded = Vertex.load_from_binary(file_path: str) -> Vertex
 ```
 
@@ -275,14 +325,20 @@ Represents individual vertices in the graph with attributes and edges.
 
 ```python
 # Access node properties
-id = node.id  # Node identifier
-attrs = node.attr  # Node attributes dict
+id = node.id        # Node identifier
+attrs = node.attr   # Node attributes dict
 edges = node.edges  # List of outgoing edges
 
-# Traversal from node
-reachable = node.traverse(depth: int = None) -> Vertex
-bfs_result = node.bfs(depth: int = None) -> Vertex
-found = node.bfs_search(target_id: str, depth: int = None) -> Node
+# Traversal — result.meta["nodelist"] contains visit order
+reachable = node.traverse(depth: int = None) -> Vertex   # DFS
+bfs_result = node.bfs(depth: int = None) -> Vertex       # BFS
+# Both accept filter= (dict for attr match, or callable receiving EdgeView)
+
+# Search: returns the Node if found, None otherwise
+found = node.bfs_search(target_id: str, depth: int = None) -> Node | None
+
+# Attribute mutation that fires on_update_callbacks
+node.attr_set(key, value)   # use this; direct node.attr[key] = value bypasses callbacks
 ```
 
 #### `Edge`

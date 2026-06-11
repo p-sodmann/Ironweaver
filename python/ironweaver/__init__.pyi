@@ -1,21 +1,16 @@
 """
 Public type stubs for the ironweaver package.
 
-This file describes every symbol that is available after::
+This file describes every symbol available after::
 
     from ironweaver import Vertex, Node, Edge, Path
     from ironweaver import NodeView, EdgeView
     from ironweaver import parse_lgf, parse_lgf_file
-
-The Rust-backed classes (Vertex, Node, Edge, Path, ObservedDictionary) are
-defined here with their full *Python-level* signatures, which include the
-monkey-patched methods added in __init__.py (e.g. Vertex.filter accepting a
-predicate callable, Node.traverse accepting an EdgeView callable filter).
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, final
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -33,6 +28,8 @@ class NodeView:
             and not n.has_attr("deleted")
         ))
     """
+
+    def __init__(self, node: Node) -> None: ...
 
     @property
     def id(self) -> str:
@@ -101,6 +98,8 @@ class EdgeView:
         node.bfs(filter=lambda e: e.attr("weight", 0) > 0.5)
     """
 
+    def __init__(self, edge: Edge) -> None: ...
+
     @property
     def type(self) -> str | None:
         """Shortcut for ``edge.attr.get("type")``. Returns None if not set."""
@@ -134,24 +133,26 @@ class EdgeView:
         ...
 
 # ---------------------------------------------------------------------------
-# ObservedDictionary
+# ObservedDictionary  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
+@final
 class ObservedDictionary:
     """A dict-like container that fires per-key callbacks when values change."""
 
-    def __init__(
-        self,
-        node: Any | None = ...,
-        callbacks: dict[str, list[Callable[..., Any]]] | None = ...,
-    ) -> None: ...
-    def __setitem__(self, key: str, value: Any) -> None: ...
-    def __getitem__(self, key: str) -> Any: ...
+    def __new__(
+        cls,
+        node: Any | None,
+        callbacks: dict[str, list[Callable[..., Any]]] | None,
+    ) -> ObservedDictionary: ...
+    def __getitem__(self, key: str, /) -> Any: ...
+    def __setitem__(self, key: str, value: Any, /) -> None: ...
 
 # ---------------------------------------------------------------------------
-# Edge
+# Edge  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
+@final
 class Edge:
     """A directed, attributed edge between two nodes.
 
@@ -179,13 +180,13 @@ class Edge:
     vertex: Vertex | None
     """Back-reference to the owning Vertex (set automatically by add_edge)."""
 
-    def __init__(
-        self,
+    def __new__(
+        cls,
         from_node: Node,
         to_node: Node,
-        attr: dict[str, Any] | None = ...,
-        id: str | None = ...,
-    ) -> None: ...
+        attr: dict[str, Any] | None,
+        id: str | None,
+    ) -> Edge: ...
     def __repr__(self) -> str: ...
     def toJSON(self) -> dict[str, Any]:
         """Return the attr dict as a plain Python dict."""
@@ -198,9 +199,10 @@ class Edge:
         ...
 
 # ---------------------------------------------------------------------------
-# Node
+# Node  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
+@final
 class Node:
     """A graph node with a string ID, an attribute dict, and directed edge lists.
 
@@ -227,12 +229,12 @@ class Node:
     vertex: Vertex | None
     """Back-reference to the owning Vertex (set automatically by add_node)."""
 
-    def __init__(
-        self,
+    def __new__(
+        cls,
         id: str,
-        attr: dict[str, Any] | None = ...,
-        edges: list[Edge] | None = ...,
-    ) -> None: ...
+        attr: dict[str, Any] | None,
+        edges: list[Edge] | None,
+    ) -> Node: ...
     def __repr__(self) -> str: ...
     def traverse(
         self,
@@ -290,24 +292,26 @@ class Node:
         ...
 
 # ---------------------------------------------------------------------------
-# Path
+# Path  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
+@final
 class Path:
     """An ordered sequence of nodes, typically a shortest-path result."""
 
     nodes: list[Node]
 
-    def __init__(self, nodes: list[Node] | None = ...) -> None: ...
+    def __new__(cls, nodes: list[Node] | None) -> Path: ...
     def __repr__(self) -> str: ...
     def toJSON(self) -> list[str]:
         """Return the list of node IDs along this path."""
         ...
 
 # ---------------------------------------------------------------------------
-# Vertex — main graph class
+# Vertex — main graph class  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
+@final
 class Vertex:
     """A directed property graph with Rust-powered performance.
 
@@ -347,8 +351,8 @@ class Vertex:
     on_node_update_callbacks: list[Callable[[Vertex | None, Node, str, Any, Any | None], bool]]
     on_edge_update_callbacks: list[Callable[[Vertex | None, Edge, str, Any, Any | None], bool]]
 
-    def __init__(self) -> None: ...
-    def __getitem__(self, key: str) -> Node:
+    def __new__(cls) -> Vertex: ...
+    def __getitem__(self, key: str, /) -> Node:
         """Return the node with the given ID. Raises KeyError if not found."""
         ...
     def __iter__(self) -> Iterator[Node]:
@@ -377,10 +381,10 @@ class Vertex:
     # Mutation
     # ------------------------------------------------------------------
 
-    def add_node(self, id: str, attr: dict[str, Any] | None = ...) -> Node:
+    def add_node(self, id: str, attr: dict[str, Any] | None) -> Node:
         """Add a node and return it. Raises ValueError if *id* already exists."""
         ...
-    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> Edge:
+    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None) -> Edge:
         """Add a directed edge and return it. Raises ValueError if either node is missing."""
         ...
     def get_node(self, id: str) -> Node:
@@ -412,7 +416,14 @@ class Vertex:
         ...
     @staticmethod
     def load_from_json(source: str | dict[str, Any]) -> Vertex:
-        """Load from a file path, a raw JSON string, or a plain dict."""
+        """Load from a file path, a raw JSON string, or a plain dict.
+
+        Example::
+
+            loaded = Vertex.load_from_json("my_graph.json")   # file path
+            loaded = Vertex.load_from_json(json_string)        # raw JSON string
+            loaded = Vertex.load_from_json({"nodes": {...}})   # plain dict
+        """
         ...
     @staticmethod
     def load_from_binary(file_path: str) -> Vertex: ...
@@ -445,6 +456,7 @@ class Vertex:
     ) -> Vertex:
         """Return a new Vertex containing only the nodes on the shortest BFS path.
 
+        The ordered sequence of node IDs is in ``result.meta["nodelist"]``.
         Raises ValueError if either node is missing or the target is unreachable.
         """
         ...
@@ -479,7 +491,7 @@ class Vertex:
         **ID list mode**::
 
             result = g.filter(ids=["alice", "bob"])
-            result = g.filter(id="alice")          # single node
+            result = g.filter(id="alice")
 
         **Attribute equality mode** (keyword arguments)::
 
@@ -504,6 +516,9 @@ class Vertex:
         ``n.neighbor_ids``  set of outgoing neighbour IDs
         ``n.node``          the underlying :class:`Node` object
         ==================  =====================================================
+
+        Raises :exc:`ValueError` if called with no arguments — exactly one
+        filtering mode must be used.
         """
         ...
     def random_walks(
@@ -511,10 +526,10 @@ class Vertex:
         start_node_id: str,
         max_length: int,
         num_attempts: int,
-        min_length: int | None = ...,
-        allow_revisit: bool | None = ...,
-        include_edge_types: bool | None = ...,
-        edge_type_field: str | None = ...,
+        min_length: int | None,
+        allow_revisit: bool | None,
+        include_edge_types: bool | None,
+        edge_type_field: str | None,
     ) -> list[list[str]]:
         """Perform random walks from *start_node_id*.
 
@@ -527,14 +542,14 @@ class Vertex:
         num_attempts:
             Number of walk attempts. Duplicate walks are removed automatically.
         min_length:
-            Minimum walk length to include (default 1).
+            Minimum walk length to include. Pass None to disable.
         allow_revisit:
-            Allow visiting the same node twice (default False).
+            Allow visiting the same node twice. Pass None to use default (False).
         include_edge_types:
             If True, each walk alternates between node IDs and edge-type strings,
-            e.g. ["alice", "knows", "bob", "works_at", "corp_1"].
+            e.g. ["alice", "knows", "bob"]. Pass None to use default (False).
         edge_type_field:
-            Attribute key used to read the edge type (default "type").
+            Attribute key used to read the edge type. Pass None to use "type".
 
         Returns a list of walks; each walk is a list of strings.
         """
