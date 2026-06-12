@@ -2,11 +2,12 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::{Node, Edge};
 use super::super::core::Vertex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use rand::Rng;
 
 // Structure to hold a walk with optional edge types
 #[derive(Clone)]
@@ -15,11 +16,33 @@ struct Walk {
     edges: Vec<String>, // Edge types between nodes
 }
 
-fn validate_params(vertex: &Vertex, start_node_id: &str, max_length: usize, min_len: usize) -> PyResult<()> {
-    if !vertex.nodes.contains_key(start_node_id) {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Start node with id '{}' not found", start_node_id),
-        ));
+fn validate_params(
+    vertex: &Vertex,
+    start_node_id: &Option<String>,
+    max_length: usize,
+    min_len: usize,
+    stratified: bool,
+) -> PyResult<()> {
+    match start_node_id {
+        Some(id) => {
+            if !vertex.nodes.contains_key(id) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    format!("Start node with id '{}' not found", id),
+                ));
+            }
+        }
+        None => {
+            if !stratified {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "start_node_id may only be None when stratified=True",
+                ));
+            }
+            if vertex.nodes.is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Cannot perform stratified walks on an empty graph",
+                ));
+            }
+        }
     }
 
     if max_length == 0 {
@@ -57,35 +80,79 @@ fn deduplicate_walks(walks: Vec<Walk>, include_edges: bool) -> Vec<Walk> {
     unique_walks
 }
 
+// Pick an index with probability proportional to its weight.
+fn weighted_pick_index(weights: &[f64], rng: &mut rand::rngs::ThreadRng) -> usize {
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        return 0;
+    }
+    let mut target = rng.gen::<f64>() * total;
+    for (i, w) in weights.iter().enumerate() {
+        target -= w;
+        if target < 0.0 {
+            return i;
+        }
+    }
+    weights.len() - 1
+}
+
+// Weight used in stratified mode: inverse of how often the node was visited
+// (smoothed so unvisited nodes have weight 1.0 instead of infinity).
+fn stratified_weight(visit_counts: &HashMap<String, u64>, node_id: &str) -> f64 {
+    1.0 / (1.0 + *visit_counts.get(node_id).unwrap_or(&0) as f64)
+}
+
 pub fn random_walks(
     vertex: &Vertex,
     py: Python<'_>,
-    start_node_id: String,
+    start_node_id: Option<String>,
     max_length: usize,
     min_length: Option<usize>,
     num_attempts: usize,
     allow_revisit: Option<bool>,
     include_edge_types: Option<bool>,
-    edge_type_field: Option<String>
+    edge_type_field: Option<String>,
+    stratified: Option<bool>
 ) -> PyResult<Py<PyList>> {
     let min_len = min_length.unwrap_or(1);
     let allow_revisit_nodes = allow_revisit.unwrap_or(false);
     let include_edges = include_edge_types.unwrap_or(false);
     let type_field = edge_type_field.unwrap_or_else(|| "type".to_string());
+    let stratified_mode = stratified.unwrap_or(false);
 
-    validate_params(vertex, &start_node_id, max_length, min_len)?;
-    
+    validate_params(vertex, &start_node_id, max_length, min_len, stratified_mode)?;
+
+    // Visit counts persist across all attempts of this call so that later
+    // walks are steered towards nodes that earlier walks neglected.
+    let mut visit_counts: HashMap<String, u64> = HashMap::new();
+
     let mut all_walks = Vec::new();
     let mut rng = thread_rng();    // Perform multiple random walk attempts
     for _ in 0..num_attempts {
+        let walk_start = match &start_node_id {
+            Some(id) => id.clone(),
+            None => {
+                // Stratified start: sample over all nodes, favouring the
+                // least-visited ones.
+                let ids: Vec<&String> = vertex.nodes.keys().collect();
+                let weights: Vec<f64> = ids
+                    .iter()
+                    .map(|id| stratified_weight(&visit_counts, id))
+                    .collect();
+                ids[weighted_pick_index(&weights, &mut rng)].clone()
+            }
+        };
+
         if let Some(walk) = perform_simple_random_walk(
             vertex,
             py,
-            start_node_id.clone(),
+            walk_start,
             max_length,
             allow_revisit_nodes,
             include_edges,
             &type_field,
+            stratified_mode,
+            &mut visit_counts,
             &mut rng
         )? {
             // Only add walks that meet minimum length requirement
@@ -132,6 +199,8 @@ fn perform_simple_random_walk(
     allow_revisit: bool,
     include_edge_types: bool,
     edge_type_field: &str,
+    stratified: bool,
+    visit_counts: &mut HashMap<String, u64>,
     rng: &mut rand::rngs::ThreadRng
 ) -> PyResult<Option<Walk>> {    let mut walk_nodes = Vec::new();
     let mut walk_edges = Vec::new();
@@ -142,7 +211,10 @@ fn perform_simple_random_walk(
     for _ in 0..max_length {
         // Add current node to walk
         walk_nodes.push(current_node_id.clone());
-        
+        if stratified {
+            *visit_counts.entry(current_node_id.clone()).or_insert(0) += 1;
+        }
+
         // Track visited nodes if revisiting is not allowed
         if !allow_revisit {
             visited.insert(current_node_id.clone());
@@ -199,8 +271,20 @@ fn perform_simple_random_walk(
             break;
         }
 
-        // Randomly choose next option - this is where the true randomness happens
-        if let Some((next_node, edge_type)) = valid_next_options.choose(rng) {
+        // Randomly choose next option - this is where the true randomness happens.
+        // In stratified mode the choice is biased towards the least-visited
+        // candidates; otherwise it is uniform.
+        let chosen = if stratified {
+            let weights: Vec<f64> = valid_next_options
+                .iter()
+                .map(|(id, _)| stratified_weight(visit_counts, id))
+                .collect();
+            valid_next_options.get(weighted_pick_index(&weights, rng))
+        } else {
+            valid_next_options.choose(rng)
+        };
+
+        if let Some((next_node, edge_type)) = chosen {
             if include_edge_types {
                 walk_edges.push(edge_type.clone());
             }

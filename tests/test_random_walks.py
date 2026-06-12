@@ -55,6 +55,50 @@ def test_include_edge_types():
     assert walks == [["n1", "x", "n2", "y", "n3"]]
 
 
+def build_star(leaves):
+    v = Vertex()
+    v.add_node("hub", {})
+    for i in range(leaves):
+        v.add_node(f"leaf{i}", {})
+        v.add_edge("hub", f"leaf{i}", {"type": "t"})
+    return v
+
+
+def test_stratified_start_covers_all_nodes():
+    # Isolated nodes: only stratified mode can sample starts across the graph.
+    v = Vertex()
+    for i in range(6):
+        v.add_node(f"n{i}", {})
+    walks = v.random_walks(None, 1, 150, stratified=True)
+    assert {w[0] for w in walks} == {f"n{i}" for i in range(6)}
+
+
+def test_stratified_steps_cover_all_branches():
+    v = build_star(8)
+    walks = v.random_walks("hub", 2, 100, stratified=True)
+    assert all(w[0] == "hub" for w in walks)  # fixed start is respected
+    reached = {w[1] for w in walks if len(w) > 1}
+    assert reached == {f"leaf{i}" for i in range(8)}
+
+
+def test_stratified_none_start_requires_flag():
+    import pytest
+    v = build_star(2)
+    with pytest.raises(ValueError):
+        v.random_walks(None, 2, 5)
+    with pytest.raises(ValueError):
+        Vertex().random_walks(None, 2, 5, stratified=True)  # empty graph
+    with pytest.raises(ValueError):
+        v.random_walks("missing", 2, 5, stratified=True)
+
+
+def test_stratified_with_edge_types():
+    v = build_star(3)
+    walks = v.random_walks(None, 2, 50, stratified=True, include_edge_types=True)
+    full = [w for w in walks if len(w) == 3]
+    assert full and all(w[1] == "t" for w in full)
+
+
 def test_optional_args_have_defaults():
     v = build_vertex([("n1", "n2", "x"), ("n2", "n3", "y")])
     walks = v.random_walks("n1", 3, 5)

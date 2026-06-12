@@ -185,6 +185,21 @@ for walk in walks:
 
 Duplicate walks are removed automatically.
 
+**Stratified mode** aims for equal node visit frequencies: every choice is
+weighted by `1 / (1 + times_visited)`, steering walks towards the
+least-visited nodes. Visit counts persist across all attempts of one call.
+With `stratified=True`, `start_node_id` may be `None` — each walk's start is
+then sampled across the whole graph with the same inverse-count weighting:
+
+```python
+# Evenly explore the whole graph (start nodes sampled, steps biased
+# towards least-visited nodes)
+walks = graph.random_walks(None, 5, 50, stratified=True)
+
+# Fixed start, but steps still favour least-visited nodes
+walks = graph.random_walks("node1", 5, 50, stratified=True)
+```
+
 ### Event-Driven Programming
 
 ```python
@@ -343,7 +358,10 @@ pruned_count = graph.prune() -> int            # remove dangling edges after fil
 walks = graph.random_walks(start_node_id, max_length, num_attempts,
                             min_length=None, allow_revisit=False,
                             include_edge_types=False,
-                            edge_type_field="type") -> list[list[str]]
+                            edge_type_field="type",
+                            stratified=False) -> list[list[str]]
+# stratified=True biases every choice towards least-visited nodes;
+# start_node_id may then be None to sample starts across the whole graph
 
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph

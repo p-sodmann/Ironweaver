@@ -560,20 +560,23 @@ class Vertex:
         ...
     def random_walks(
         self,
-        start_node_id: str,
+        start_node_id: str | None,
         max_length: int,
         num_attempts: int,
         min_length: int | None = ...,
         allow_revisit: bool | None = ...,
         include_edge_types: bool | None = ...,
         edge_type_field: str | None = ...,
+        stratified: bool | None = ...,
     ) -> list[list[str]]:
         """Perform random walks from *start_node_id*.
 
         Parameters
         ----------
         start_node_id:
-            ID of the starting node.
+            ID of the starting node. May be None only when ``stratified=True``,
+            in which case each walk's start node is sampled across the whole
+            graph (favouring least-visited nodes).
         max_length:
             Maximum number of hops per walk.
         num_attempts:
@@ -587,6 +590,12 @@ class Vertex:
             e.g. ["alice", "knows", "bob"]. Defaults to False.
         edge_type_field:
             Attribute key used to read the edge type. Defaults to "type".
+        stratified:
+            If True, aim for equal node visit frequencies: every choice (the
+            start node when *start_node_id* is None, and each step) is weighted
+            by ``1 / (1 + times_visited)``, steering walks towards the
+            least-visited nodes. Visit counts persist across all attempts of
+            one call. Defaults to False.
 
         Returns a list of walks; each walk is a list of strings.
 
@@ -594,6 +603,7 @@ class Vertex:
 
             walks = graph.random_walks("node1", 5, 20)
             walks = graph.random_walks("node1", 5, 20, include_edge_types=True)
+            walks = graph.random_walks(None, 5, 50, stratified=True)
         """
         ...
 

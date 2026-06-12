@@ -440,32 +440,41 @@ impl Vertex {
     /// Perform multiple random walks from a starting node
     ///
     /// Args:
-    ///     start_node_id (str): ID of the node to start the random walks from
+    ///     start_node_id (str, optional): ID of the node to start the random walks from.
+    ///         May be None only when stratified=True, in which case each walk's start
+    ///         is sampled across all nodes with probability inversely proportional to
+    ///         how often each node has been visited so far.
     ///     max_length (int): Maximum length of each random walk
     ///     num_attempts (int): Number of random walk attempts to perform
     ///     min_length (int, optional): Minimum length of each random walk. Defaults to 1.
     ///     allow_revisit (bool, optional): Whether to allow revisiting nodes. Defaults to False.
     ///     include_edge_types (bool, optional): Whether to include edge types in the result. Defaults to False.
     ///     edge_type_field (str, optional): Field name to extract edge type from. Defaults to "type".
-    ///     
+    ///     stratified (bool, optional): Equalize node visit frequencies. Every choice
+    ///         (the start node when start_node_id is None, and each step) is weighted by
+    ///         1 / (1 + times_visited), steering walks towards least-visited nodes.
+    ///         Visit counts persist across all attempts of one call. Defaults to False.
+    ///
     /// Returns:
     ///     list: A list of lists. If include_edge_types is False, each inner list contains node IDs.
     ///           If include_edge_types is True, each inner list alternates between node IDs and edge types.
     ///           Duplicates are automatically removed.
-    ///     
+    ///
     /// Raises:
-    ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length
-    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None))]
+    ///     ValueError: If start_node_id doesn't exist, is None without stratified=True,
+    ///         max_length is 0, or min_length > max_length
+    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None, stratified=None))]
     fn random_walks(
         &self,
         py: Python<'_>,
-        start_node_id: String,
+        start_node_id: Option<String>,
         max_length: usize,
         num_attempts: usize,
         min_length: Option<usize>,
         allow_revisit: Option<bool>,
         include_edge_types: Option<bool>,
         edge_type_field: Option<String>,
+        stratified: Option<bool>,
     ) -> PyResult<Py<PyList>> {
         algorithms::random_walks(
             self,
@@ -477,6 +486,7 @@ impl Vertex {
             allow_revisit,
             include_edge_types,
             edge_type_field,
+            stratified,
         )
     }
 }

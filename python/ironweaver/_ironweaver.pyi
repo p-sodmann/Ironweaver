@@ -177,13 +177,14 @@ class Vertex:
     def prune(self) -> int: ...
     def random_walks(
         self,
-        start_node_id: str,
+        start_node_id: str | None,
         max_length: int,
         num_attempts: int,
         min_length: int | None = ...,
         allow_revisit: bool | None = ...,
         include_edge_types: bool | None = ...,
         edge_type_field: str | None = ...,
+        stratified: bool | None = ...,
     ) -> list[list[str]]: ...
 
 __all__ = ["ObservedDictionary", "Edge", "Node", "Path", "Vertex"]
