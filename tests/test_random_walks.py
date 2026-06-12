@@ -54,3 +54,19 @@ def test_include_edge_types():
     )
     assert walks == [["n1", "x", "n2", "y", "n3"]]
 
+
+def test_optional_args_have_defaults():
+    v = build_vertex([("n1", "n2", "x"), ("n2", "n3", "y")])
+    walks = v.random_walks("n1", 3, 5)
+    assert ["n1", "n2", "n3"] in walks
+
+    with_types = v.random_walks("n1", 3, 5, include_edge_types=True)
+    assert ["n1", "x", "n2", "y", "n3"] in with_types
+
+    too_short = v.random_walks("n1", 3, 5, min_length=3)
+    assert too_short == [["n1", "n2", "n3"]]
+
+    import pytest
+    with pytest.raises(ValueError):
+        v.random_walks("n1", 3, 5, min_length=4)  # min_length > max_length
+

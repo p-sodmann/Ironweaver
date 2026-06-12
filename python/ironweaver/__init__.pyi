@@ -563,10 +563,10 @@ class Vertex:
         start_node_id: str,
         max_length: int,
         num_attempts: int,
-        min_length: int | None,
-        allow_revisit: bool | None,
-        include_edge_types: bool | None,
-        edge_type_field: str | None,
+        min_length: int | None = ...,
+        allow_revisit: bool | None = ...,
+        include_edge_types: bool | None = ...,
+        edge_type_field: str | None = ...,
     ) -> list[list[str]]:
         """Perform random walks from *start_node_id*.
 
@@ -579,22 +579,21 @@ class Vertex:
         num_attempts:
             Number of walk attempts. Duplicate walks are removed automatically.
         min_length:
-            Minimum walk length to include. Pass None to disable.
+            Minimum walk length to include. Defaults to no minimum.
         allow_revisit:
-            Allow visiting the same node twice. Pass None to use default (False).
+            Allow visiting the same node twice. Defaults to False.
         include_edge_types:
             If True, each walk alternates between node IDs and edge-type strings,
-            e.g. ["alice", "knows", "bob"]. Pass None to use default (False).
+            e.g. ["alice", "knows", "bob"]. Defaults to False.
         edge_type_field:
-            Attribute key used to read the edge type. Pass None to use "type".
+            Attribute key used to read the edge type. Defaults to "type".
 
         Returns a list of walks; each walk is a list of strings.
 
-        .. important::
-            All seven arguments are **positional and required**. Pass ``None``
-            for optional parameters to use their defaults::
+        Example::
 
-                walks = graph.random_walks("node1", 5, 20, 2, None, True, None)
+            walks = graph.random_walks("node1", 5, 20)
+            walks = graph.random_walks("node1", 5, 20, include_edge_types=True)
         """
         ...
 

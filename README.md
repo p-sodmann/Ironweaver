@@ -168,20 +168,22 @@ Use `bfs_search` when you only need to know *whether* a node is reachable and wa
 ### Random Walks
 
 ```python
+# Only the first three arguments are required
+walks = graph.random_walks("node1", 5, 20)   # start node, max hops, attempts
+
+# Optional keyword arguments tune the walks
 walks = graph.random_walks(
-    start_node_id="node1",   # starting node
-    max_length=5,             # maximum hops per walk
-    num_attempts=20,          # attempts; duplicate walks are removed automatically
-    min_length=2,             # minimum walk length to keep (None = no minimum)
-    allow_revisit=None,       # None uses default (False)
+    "node1", 5, 20,
+    min_length=2,             # minimum walk length to keep (default: no minimum)
+    allow_revisit=False,      # allow visiting the same node twice (default: False)
     include_edge_types=True,  # interleave edge-type strings: ["a", "knows", "b", ...]
-    edge_type_field=None,     # attribute key for edge type; None defaults to "type"
+    edge_type_field="type",   # attribute key for the edge type (default: "type")
 )
 for walk in walks:
     print(walk)
 ```
 
-All seven arguments are required; pass `None` for optional ones to use the defaults.
+Duplicate walks are removed automatically.
 
 ### Event-Driven Programming
 
@@ -339,8 +341,9 @@ filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises Valu
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
 pruned_count = graph.prune() -> int            # remove dangling edges after filter/subset
 walks = graph.random_walks(start_node_id, max_length, num_attempts,
-                            min_length, allow_revisit, include_edge_types,
-                            edge_type_field) -> list[list[str]]
+                            min_length=None, allow_revisit=False,
+                            include_edge_types=False,
+                            edge_type_field="type") -> list[list[str]]
 
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph

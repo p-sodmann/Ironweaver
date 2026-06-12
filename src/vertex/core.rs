@@ -454,7 +454,8 @@ impl Vertex {
     ///           Duplicates are automatically removed.
     ///     
     /// Raises:
-    ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length#[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None))]
+    ///     ValueError: If start_node_id doesn't exist, max_length is 0, or min_length > max_length
+    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None))]
     fn random_walks(
         &self,
         py: Python<'_>,
