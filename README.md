@@ -325,6 +325,7 @@ graph = Vertex()
 node = graph.add_node(id: str, attr: dict = None) -> Node
 node = graph.get_node(id: str) -> Node
 exists = graph.has_node(id: str) -> bool
+exists = "node1" in graph        # membership test, same as has_node
 count = graph.node_count() -> int
 
 # Edge operations  

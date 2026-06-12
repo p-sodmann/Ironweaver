@@ -180,6 +180,17 @@ def test_vertex_iter():
     assert ids == {"n1", "n2", "n3"}
 
 
+def test_vertex_contains():
+    v = build_graph()
+    assert "n1" in v
+    assert "missing" not in v
+    assert v["n1"] in v          # Node object
+    assert 42 not in v           # non-str/Node never matches
+    sub = v.filter(ids=["n1"])
+    assert "n1" in sub
+    assert "n2" not in sub
+
+
 def test_filter_no_args_raises():
     v = build_graph()
     import pytest

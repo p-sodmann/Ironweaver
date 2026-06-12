@@ -370,6 +370,14 @@ class Vertex:
     def __len__(self) -> int:
         """Return the number of nodes."""
         ...
+    def __contains__(self, key: str | Node, /) -> bool:
+        """Return True if a node ID (str) or Node is in the graph.
+
+        Example::
+
+            if "alice" in graph: ...
+        """
+        ...
     def __repr__(self) -> str: ...
     def keys(self) -> list[str]:
         """Return all node IDs."""
