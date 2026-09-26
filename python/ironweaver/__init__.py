@@ -3,8 +3,8 @@
 Core classes:
 
 * :class:`Vertex` - the graph. ``add_node`` / ``add_edge`` build it; algorithms
-  (``filter``, ``expand``, ``shortest_path_bfs``, ``shortest_path_dijkstra``,
-  ``random_walks``) return new graphs; ``save_to_json`` / ``load_from_json``
+  (``filter``, ``expand``, ``shortest_path`` with ``method="bfs"``,
+  ``"dijkstra"`` or ``"astar"``, ``random_walks``) return new graphs; ``save_to_json`` / ``load_from_json``
   and the binary variants persist it; ``to_networkx`` converts it.
 * :class:`Node` - a node with an ``attr`` dict and edges; traversals start here
   (``bfs``, ``traverse``, ``bfs_search``).

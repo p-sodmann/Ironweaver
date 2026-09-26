@@ -499,6 +499,68 @@ class Vertex:
     # Algorithms
     # ------------------------------------------------------------------
 
+    def shortest_path(
+        self,
+        source: str,
+        target: str,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+        max_depth: int | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        coords: str | list[str] | None = ...,
+        distances: str | None = ...,
+    ) -> Vertex:
+        """Find a shortest path with the chosen algorithm (see ``path_methods()``).
+
+        *method*: ``"bfs"`` (fewest edges), ``"dijkstra"`` (cheapest by the
+        *weight* edge attribute) or ``"astar"`` (cheapest, guided by an
+        estimate of the remaining cost). ``None`` picks ``"astar"`` if
+        *heuristic*, *coords* or *distances* is given, ``"dijkstra"`` if
+        *weight* is given, else ``"bfs"``.
+
+        Shared options: *weight* (default ``"weight"``), *default_weight*
+        (cost of edges without it, default 1.0), *max_cost* (for ``"bfs"``: a
+        limit on the number of edges), *direction*.
+
+        Method options (``TypeError`` if the method does not take one):
+
+        * ``bfs``: *max_depth*.
+        * ``astar``: *heuristic* (``"euclidean"``, the default, or
+          ``"manhattan"``) with *coords*, where node coordinates live: a list
+          of attribute paths, one per dimension (default ``["x", "y"]``;
+          ``"pos.lat"`` reads ``attr["pos"]["lat"]``), or one attribute holding
+          a sequence (``"pos"``). Or *distances*: a ``vertex.meta`` key holding
+          ``{node_id: estimate}`` or ``{node_id: {target_id: estimate}}``.
+          Nodes without coordinates/estimates count as 0. Estimates must not
+          overestimate the remaining cost, or the path may not be the cheapest.
+
+        The result holds copies of the path's nodes and the edges between
+        them; ``meta`` has ``nodelist`` (in order), ``cost`` (number of edges
+        for ``"bfs"``), ``method`` and, for Dijkstra/A*, ``expanded`` (nodes
+        settled).
+
+        Raises ValueError for an unknown method, a missing node, an
+        unreachable target, a negative weight or a target without
+        coordinates; TypeError for a non-numeric weight, coordinate or
+        estimate.
+
+        Example::
+
+            graph.shortest_path("a", "z")                        # bfs
+            graph.shortest_path("a", "z", weight="distance")     # dijkstra
+            graph.shortest_path("a", "z", coords="pos")          # astar
+            graph.meta["est"] = {"a": 3.0, "b": 1.5}
+            graph.shortest_path("a", "z", distances="est")       # astar
+        """
+        ...
+    @staticmethod
+    def path_methods() -> dict[str, str]:
+        """The available ``shortest_path`` methods as ``{name: description}``."""
+        ...
     def shortest_path_bfs(
         self,
         root_node_id: str,
@@ -506,7 +568,7 @@ class Vertex:
         max_depth: int | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
-        """Return a new Vertex containing only the nodes on the shortest BFS path.
+        """Shorthand for ``shortest_path(..., method="bfs")``: the path with the fewest edges.
 
         The ordered sequence of node IDs is in ``result.meta["nodelist"]``.
         *direction* selects which edges are followed: ``"out"`` (default),
@@ -525,7 +587,7 @@ class Vertex:
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
-        """Return the cheapest path between two nodes (Dijkstra).
+        """Shorthand for ``shortest_path(..., method="dijkstra")``: the cheapest path.
 
         Edge costs are read from the *weight* attribute (default ``"weight"``);
         edges without it cost *default_weight* (default 1.0). Paths costing

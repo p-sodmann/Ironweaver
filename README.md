@@ -127,6 +127,15 @@ result = graph.shortest_path_bfs('node3', 'node1', direction='both')
 # attribute; edges without it cost default_weight (1.0).
 result = graph.shortest_path_dijkstra('node1', 'node3', weight='weight')
 print(result.meta['nodelist'], result.meta['cost'])
+
+# One entry point for every algorithm: method="bfs", "dijkstra" or "astar"
+result = graph.shortest_path('node1', 'node3', method='dijkstra')
+print(graph.path_methods())
+
+# A* uses node coordinates (or precomputed estimates) to search toward the target
+graph.get_node('node1').attr_set('pos', (0.0, 0.0))
+graph.get_node('node3').attr_set('pos', (1.0, 0.0))
+result = graph.shortest_path('node1', 'node3', method='astar', coords='pos')
 ```
 
 ### Graph Expansion
@@ -367,13 +376,14 @@ These behaviours surprise people (and LLMs) most often:
   `vertex.meta["k"] = v` and `vertex.on_node_add_callbacks.append(cb)` work.
 - **Result graphs.** `node.bfs()` and `node.traverse()` return a `Vertex`
   holding the *original* node objects. `filter`, `expand`,
-  `shortest_path_bfs` and `shortest_path_dijkstra` return *copies* of the
+  `shortest_path` (and its `shortest_path_bfs` / `shortest_path_dijkstra`
+  shorthands) return *copies* of the
   nodes and edges, so changing them does not touch the source graph (a
   `filter` result does share the source's `meta` dict and callback lists).
 - **Ordered results live in `meta`.** Traversal order and paths are in
   `result.meta["nodelist"]`; `result.keys()` has no meaningful order.
 - **Shortest-path ties.** When several shortest paths exist,
-  `shortest_path_bfs` returns one of them; which one is not specified.
+  `shortest_path` returns one of them; which one is not specified.
 - **`Vertex.load_from_json(text)`** treats a string starting with `{` as JSON
   and any other string as a file path.
 
@@ -403,6 +413,15 @@ node = graph.remove_node(id: str) -> Node                           # also drops
 count = graph.remove_edge(from_id: str, to_id: str, attr: dict = None) -> int
 
 # Algorithms
+result = graph.shortest_path(source: str, target: str, method: str = None,
+                             *, weight: str = None, default_weight: float = 1.0,
+                             max_cost: float = None, direction: str = "out",
+                             **options) -> Vertex
+# method: "bfs" (option max_depth), "dijkstra", or "astar" (options heuristic=
+# "euclidean"|"manhattan" with coords=["x", "y"] | "pos" | ["pos.lat", "pos.lon"],
+# or distances="<vertex.meta key>"). None: astar if an A* option is given,
+# dijkstra if weight is given, else bfs. meta: nodelist, cost, method, expanded.
+methods = Vertex.path_methods() -> dict   # {name: description}
 result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None,
                                  direction: str = "out") -> Vertex
 # result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable

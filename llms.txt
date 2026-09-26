@@ -70,14 +70,24 @@ around = g.filter(id="bob").expand(g, direction="both")   # "out" (default), "in
 ## Paths
 
 ```python
-p = g.shortest_path_bfs("alice", "acme")               # fewest edges
-assert p.meta["nodelist"] == ["alice", "acme"]
-p = g.shortest_path_dijkstra("alice", "acme", weight="weight")   # cheapest
+p = g.shortest_path("alice", "acme")                   # method="bfs": fewest edges
+assert p.meta["nodelist"] == ["alice", "acme"] and p.meta["method"] == "bfs"
+p = g.shortest_path("alice", "acme", weight="weight")  # method="dijkstra": cheapest
 assert p.meta["nodelist"] == ["alice", "bob", "acme"] and p.meta["cost"] == 3.5
-p = g.shortest_path_bfs("acme", "alice", direction="in")   # walk edges backwards
+p = g.shortest_path("acme", "alice", method="bfs", direction="in")   # walk edges backwards
+assert list(g.path_methods()) == ["bfs", "dijkstra", "astar"]
+
+# A*: same result as Dijkstra, guided by an estimate of the remaining cost
+m = Vertex()
+m.add_node("a", {"x": 0, "y": 0}); m.add_node("b", {"x": 1, "y": 0}); m.add_node("c", {"x": 2, "y": 0})
+m.add_edge("a", "b", {"weight": 1.0}); m.add_edge("b", "c", {"weight": 1.0})
+p = m.shortest_path("a", "c", heuristic="euclidean")          # coords=["x", "y"] (default)
+assert p.meta["method"] == "astar" and p.meta["cost"] == 2.0
+m.meta["est"] = {"a": 2.0, "b": 1.0}                          # {node: estimate} or {node: {target: estimate}}
+p = m.shortest_path("a", "c", distances="est")                # estimates from vertex.meta["est"]
 ```
 
-Both raise `ValueError` if a node is missing or the target is unreachable. Options: `max_depth` (BFS), `default_weight` and `max_cost` (Dijkstra), `direction` (`"out"`, `"in"`, `"both"`).
+`shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands.
 
 ## Random walks
 
@@ -152,9 +162,9 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 
 - `node.attr`, `node.meta`, `node.edges`, `node.inverse_edges`, `edge.attr`, `edge.meta` and `vertex.nodes` return copies. `node.attr["k"] = v` and `vertex.nodes[id] = node` are silently lost. Use `attr_set`, assign a whole dict, or the add/remove methods.
 - `vertex.meta` and the `on_*_callbacks` lists are live objects.
-- `bfs` / `traverse` results share the original nodes; `filter`, `expand` and the shortest-path methods return copies (a `filter` result shares the source's `meta` and callback lists).
+- `bfs` / `traverse` results share the original nodes; `filter`, `expand` and `shortest_path*` return copies (a `filter` result shares the source's `meta` and callback lists).
 - Ordered output is in `result.meta["nodelist"]`; `keys()` is unordered.
-- With several equally short paths, `shortest_path_bfs` returns one of them (unspecified which).
+- With several equally short paths, `shortest_path` returns one of them (unspecified which).
 - `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
 
 ## More

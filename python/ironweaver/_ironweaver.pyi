@@ -157,6 +157,25 @@ class Vertex:
     def from_nodes_with_path(nodes: dict[str, Node], nodelist: list[str]) -> Vertex: ...
     def get_metadata(self) -> dict[str, Any]: ...
     def to_networkx(self) -> Any: ...
+    def shortest_path(
+        self,
+        source: str,
+        target: str,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+        max_depth: int | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        coords: str | list[str] | None = ...,
+        distances: str | None = ...,
+    ) -> Vertex:
+        """Shortest path with method "bfs", "dijkstra" or "astar"; see ``path_methods()``."""
+        ...
+    @staticmethod
+    def path_methods() -> dict[str, str]: ...
     def shortest_path_bfs(
         self,
         root_node_id: str,

@@ -110,6 +110,27 @@ def build_networkx(n_nodes: int, edges) -> nx.MultiDiGraph:
     return g
 
 
+def build_grid(side: int, seed: int):
+    """side x side grid with edges both ways between neighbours, `x`/`y` node
+    attributes and weights of 1-1.1x the Euclidean distance, like roads that
+    are a bit longer than the straight line (so the Euclidean heuristic is
+    admissible). Returns (ironweaver, networkx)."""
+    rng = random.Random(seed)
+    iw, g = Vertex(), nx.MultiDiGraph()
+    for x in range(side):
+        for y in range(side):
+            iw.add_node(f"{x},{y}", {"x": x, "y": y})
+            g.add_node(f"{x},{y}", x=x, y=y)
+    for x in range(side):
+        for y in range(side):
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if 0 <= x + dx < side and 0 <= y + dy < side:
+                    w = round(rng.uniform(1.0, 1.1), 3)
+                    iw.add_edge(f"{x},{y}", f"{x + dx},{y + dy}", {"weight": w})
+                    g.add_edge(f"{x},{y}", f"{x + dx},{y + dy}", weight=w)
+    return iw, g
+
+
 def nx_multi_source_within(g: nx.MultiDiGraph, seeds: list[str], depth: int) -> set[str]:
     """Nodes within *depth* hops of any seed (multi-source BFS)."""
     seen = set(seeds)
@@ -210,6 +231,39 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     assert abs(r_iw.meta["cost"] - path_cost(g, r_nx)) < 1e-6
     add(Result("Shortest path (Dijkstra)", "weighted by `weight` attribute", t_iw, t_nx,
                f"cost {r_iw.meta['cost']:.2f}"))
+
+    # Weighted grid: A* vs Dijkstra ------------------------------------------
+    side = max(2, int(n_nodes ** 0.5))
+    giw, gnx = build_grid(side, seed)
+    mid = side // 2
+    gs, gt = f"0,{mid}", f"{side - 1},{mid}"
+    tx, ty = side - 1, mid
+
+    def nx_euclid(u, v):
+        a, b = gnx.nodes[u], gnx.nodes[v]
+        return ((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2) ** 0.5
+
+    table = {n: ((d["x"] - tx) ** 2 + (d["y"] - ty) ** 2) ** 0.5 for n, d in gnx.nodes(data=True)}
+    giw.meta["to_target"] = table
+
+    t_iw, r_dj = best_of(lambda: giw.shortest_path(gs, gt, method="dijkstra"), repeats)
+    t_nx, r_nx = best_of(lambda: nx.dijkstra_path(gnx, gs, gt, weight="weight"), repeats)
+    cost = r_dj.meta["cost"]
+    assert abs(cost - path_cost(gnx, r_nx)) < 1e-6
+    add(Result("Grid: Dijkstra", f"{side}×{side} grid, left edge to right edge", t_iw, t_nx,
+               f"{r_dj.meta['expanded']:,} nodes expanded"))
+
+    t_iw, r_iw = best_of(lambda: giw.shortest_path(gs, gt, method="astar", heuristic="euclidean"), repeats)
+    t_nx, r_nx = best_of(lambda: nx.astar_path(gnx, gs, gt, heuristic=nx_euclid, weight="weight"), repeats)
+    assert abs(r_iw.meta["cost"] - cost) < 1e-6 and abs(path_cost(gnx, r_nx) - cost) < 1e-6
+    add(Result("Grid: A* (coordinates)", "Euclidean heuristic from `x`/`y` node attributes", t_iw, t_nx,
+               f"{r_iw.meta['expanded']:,} nodes expanded; networkx calls a Python heuristic"))
+
+    t_iw, r_iw = best_of(lambda: giw.shortest_path(gs, gt, distances="to_target"), repeats)
+    t_nx, r_nx = best_of(lambda: nx.astar_path(gnx, gs, gt, heuristic=lambda u, v: table[u], weight="weight"), repeats)
+    assert abs(r_iw.meta["cost"] - cost) < 1e-6 and abs(path_cost(gnx, r_nx) - cost) < 1e-6
+    add(Result("Grid: A* (precomputed)", "estimates from `vertex.meta` vs a dict lookup", t_iw, t_nx,
+               f"{r_iw.meta['expanded']:,} nodes expanded"))
 
     # Subgraphs ------------------------------------------------------------
     t_iw, r_iw = best_of(lambda: iw.filter(ids=subset), repeats)
