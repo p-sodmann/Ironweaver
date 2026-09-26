@@ -8,6 +8,10 @@ use std::collections::HashMap;
 use crate::Node;
 
 
+/// A directed edge from `from_node` to `to_node` with an `attr` dict.
+///
+/// Create edges with `Vertex.add_edge`. `attr` and `meta` return copies:
+/// use `attr_set` / `attr_get` to change or read single attributes.
 #[pyclass]
 pub struct Edge {
     #[pyo3(get, set)]
@@ -89,6 +93,7 @@ impl Edge {
         self.vertex = None;
     }
 
+    /// Return the edge's attributes as a dict (for JSON encoders).
     fn toJSON(&self, py: Python<'_>) -> Py<PyAny> {
         let dict = PyDict::new(py);
         for (k, v) in &self.attr {

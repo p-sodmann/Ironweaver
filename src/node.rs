@@ -8,6 +8,15 @@ use crate::Vertex;
 use crate::vertex::algorithms::bidirectional::bidirectional_bfs;
 use crate::vertex::subgraph::Direction;
 
+/// A graph node: an `id`, an `attr` dict, outgoing `edges` and incoming
+/// `inverse_edges`.
+///
+/// Create nodes with `Vertex.add_node`. The `attr`, `meta`, `edges` and
+/// `inverse_edges` properties return copies: `node.attr["k"] = v` has no
+/// effect. Use `attr_set` / `attr_get` (which fire the owning Vertex's update
+/// callbacks) or assign a whole dict (`node.attr = {...}`).
+///
+/// Traversals start here: `bfs`, `traverse` (DFS) and `bfs_search`.
 #[pyclass]
 pub struct Node {
     #[pyo3(get, set)]

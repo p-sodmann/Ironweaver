@@ -4,7 +4,21 @@ Ironweaver provides several traversal methods on both `Node` and `Vertex`.
 
 ## Node-level traversal
 
-All node-level methods start from a single node and follow outgoing edges. They return a `Vertex` with the discovered nodes and a `meta["nodelist"]` recording visit order.
+All node-level methods start from a single node and follow outgoing edges. They return a `Vertex` with the discovered nodes and a `meta["nodelist"]` recording visit order. The result holds the *original* node objects (not copies).
+
+The examples below use this graph:
+
+```python
+from ironweaver import Vertex
+
+v = Vertex()
+for name in ["root", "a", "b", "target", "z"]:
+    v.add_node(name)
+v.add_edge("root", "a", {"type": "knows", "weight": 0.9})
+v.add_edge("a", "b", {"type": "follows", "weight": 0.4})
+v.add_edge("b", "target", {"type": "knows", "weight": 0.8})
+v.add_edge("a", "z", {"type": "knows", "weight": 0.7})
+```
 
 ### DFS — `node.traverse(depth, filter, edge_filter)`
 
@@ -78,13 +92,25 @@ The `EdgeView` passed to your predicate exposes:
 
 ## Vertex-level traversal
 
-### Shortest path — `vertex.shortest_path_bfs(root, target, max_depth)`
+### Shortest path — `vertex.shortest_path_bfs(root, target, max_depth, direction)`
 
-Returns a new `Vertex` containing only the nodes along the shortest path.
+Returns a new `Vertex` containing only the nodes along the shortest path (fewest edges); the ordered path is in `meta["nodelist"]`. Raises `ValueError` if the target is unreachable. If several shortest paths exist, one of them is returned.
 
 ```python
-path = v.shortest_path_bfs("a", "z")
-path = v.shortest_path_bfs("a", "z", max_depth=10)
+path = v.shortest_path_bfs("root", "target")
+path.meta["nodelist"]                       # ['root', 'a', 'b', 'target']
+path = v.shortest_path_bfs("root", "target", max_depth=10)
+path = v.shortest_path_bfs("target", "root", direction="in")    # walk edges backwards
+path = v.shortest_path_bfs("z", "b", direction="both")          # ignore direction
+```
+
+### Weighted shortest path — `vertex.shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)`
+
+Cheapest path by the `weight` edge attribute (edges without it cost `default_weight`, 1.0 by default). The total cost is in `meta["cost"]`.
+
+```python
+path = v.shortest_path_dijkstra("root", "target", weight="weight")
+path.meta["nodelist"], path.meta["cost"]    # (['root', 'a', 'b', 'target'], 2.1)
 ```
 
 ### Random walks — `vertex.random_walks(...)`
@@ -100,6 +126,7 @@ walks = v.random_walks(
     allow_revisit=False,   # optional, default False
     include_edge_types=True,  # optional, default False
     edge_type_field="type",   # optional, default "type"
+    seed=42,               # optional, makes the walks reproducible
 )
 # walks is a list of lists, e.g. [["a", "knows", "b", "follows", "c"], ...]
 ```

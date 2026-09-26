@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use pyo3::{PyTraverseError, PyVisit};
 use crate::Node;
 
+/// An ordered list of nodes. Reserved for future use: path algorithms return
+/// a `Vertex` with the ordered ids in `meta["nodelist"]` instead.
 #[pyclass]
 pub struct Path {
     #[pyo3(get, set)]
@@ -41,6 +43,7 @@ impl Path {
         format!("Path({:?})", node_ids)
     }
 
+    /// Return the node ids in order.
     fn toJSON(&self, py: Python<'_>) -> Vec<String> {
         self.nodes
             .iter()

@@ -28,6 +28,10 @@ After installing, run:
 ```bash
 pytest
 ```
+`tests/test_docs_examples.py` executes every ```python block in `README.md`,
+`llms.txt` and `docs/*.md`, so documentation examples must run as written
+(use a ```text fence for signatures or sketches). When you change the public
+API, update `llms.txt`, the `.pyi` stubs and the docs together.
 
 ## Function Reference
 Below is a quick guide to notable functions and where to find them.

@@ -16,6 +16,10 @@ A high-performance, Rust-powered Python library for graph data structures and al
 - **Memory Efficient**: Optimized Rust implementation for large graphs
 - **LGF Parsing**: Read Labeled Graph Format files directly from Python
 
+> **Using an LLM or coding agent?** [`llms.txt`](llms.txt) is a compact,
+> fully runnable guide to the whole API (plus the gotchas) meant to be pasted
+> into a model's context.
+
 ## Installation
 Build the package from source to get the latest version:
 
@@ -146,15 +150,15 @@ print(f"Expanded nodes: {expanded.keys()}")
 
 ```python
 # BFS from a node — all reachable nodes up to depth 2
-reachable = graph["alice"].bfs(depth=2)
-print(reachable.meta["nodelist"])   # BFS discovery order
+reachable = graph["node1"].bfs(depth=2)
+print(reachable.meta["nodelist"])   # BFS discovery order: ['node1', 'node2', 'node3']
 print(reachable.keys())             # same nodes, dict order
 
 # Filter which edges to follow — the callable receives an EdgeView
-causes_only = graph["disease_a"].bfs(filter=lambda e: e.type == "causes")
+light_edges = graph["node1"].bfs(filter=lambda e: e.attr("weight") < 2.5)
 
 # DFS variant; also accepts a dict shorthand for edge attribute matching
-dfs_result = graph["alice"].traverse(depth=3, filter={"type": "knows"})
+dfs_result = graph["node1"].traverse(depth=3, filter={"weight": 1.0})
 ```
 
 ### BFS Search
@@ -163,7 +167,7 @@ dfs_result = graph["alice"].traverse(depth=3, filter={"type": "knows"})
 
 ```python
 # Returns the Node object if found, None otherwise
-target = graph["alice"].bfs_search("bob", depth=3)
+target = graph["node1"].bfs_search("node3", depth=3)
 if target is not None:
     print(f"Found: {target.id}, attrs: {target.attr}")
 else:
@@ -348,6 +352,31 @@ import("other_file.lgf")
 
 See the [LGF Documentation](docs/LGF.md) for detailed syntax and examples.
 
+## Gotchas
+
+These behaviours surprise people (and LLMs) most often:
+
+- **`node.attr`, `node.meta`, `node.edges`, `node.inverse_edges`, `edge.attr`,
+  `edge.meta` and `vertex.nodes` return copies.** Mutating the returned
+  object has no effect: `node.attr["x"] = 1` is silently lost, and so is
+  `vertex.nodes["id"] = node`. Use `node.attr_set("x", 1)` /
+  `edge.attr_set(...)`, assign a whole dict (`node.attr = {...}`), and add or
+  remove nodes and edges with `add_node` / `add_edge` / `remove_node` /
+  `remove_edge`.
+- **`vertex.meta` and the `on_*_callbacks` lists are live** Python objects:
+  `vertex.meta["k"] = v` and `vertex.on_node_add_callbacks.append(cb)` work.
+- **Result graphs.** `node.bfs()` and `node.traverse()` return a `Vertex`
+  holding the *original* node objects. `filter`, `expand`,
+  `shortest_path_bfs` and `shortest_path_dijkstra` return *copies* of the
+  nodes and edges, so changing them does not touch the source graph (a
+  `filter` result does share the source's `meta` dict and callback lists).
+- **Ordered results live in `meta`.** Traversal order and paths are in
+  `result.meta["nodelist"]`; `result.keys()` has no meaningful order.
+- **Shortest-path ties.** When several shortest paths exist,
+  `shortest_path_bfs` returns one of them; which one is not specified.
+- **`Vertex.load_from_json(text)`** treats a string starting with `{` as JSON
+  and any other string as a file path.
+
 ## API Reference
 
 ### Core Classes
@@ -355,7 +384,7 @@ See the [LGF Documentation](docs/LGF.md) for detailed syntax and examples.
 #### `Vertex`
 The main graph container that holds nodes and provides graph-level operations.
 
-```python
+```text
 # Create empty graph
 graph = Vertex()
 
@@ -410,11 +439,11 @@ loaded = Vertex.load_from_binary(file_path: str) -> Vertex
 #### `Node`
 Represents individual vertices in the graph with attributes and edges.
 
-```python
-# Access node properties
+```text
+# Access node properties (attr, meta and edges return copies, see Gotchas)
 id = node.id        # Node identifier
-attrs = node.attr   # Node attributes dict
-edges = node.edges  # List of outgoing edges
+attrs = node.attr   # Node attributes dict (a copy)
+edges = node.edges  # List of outgoing edges (a copy)
 
 # Traversal — result.meta["nodelist"] contains visit order
 reachable = node.traverse(depth: int = None) -> Vertex   # DFS
@@ -424,8 +453,9 @@ bfs_result = node.bfs(depth: int = None) -> Vertex       # BFS
 # Search: returns the Node if found, None otherwise
 found = node.bfs_search(target_id: str, depth: int = None) -> Node | None
 
-# Attribute mutation that fires on_update_callbacks
-node.attr_set(key, value)   # use this; direct node.attr[key] = value bypasses callbacks
+# Changing attributes: node.attr[key] = value is silently lost (attr is a copy)
+node.attr_set(key, value)   # sets one key and fires on_update_callbacks
+node.attr = {...}           # replaces the whole dict (no callbacks)
 
 # Append to a list attribute (creates the list if the key is missing)
 node.attr_list_append("tags", "urgent")
@@ -435,11 +465,11 @@ node.attr_list_append("tags", "reviewed")   # node.attr["tags"] == ["urgent", "r
 #### `Edge`
 Represents connections between nodes with optional attributes.
 
-```python
+```text
 # Access edge properties
 from_node = edge.from_node  # Source node
 to_node = edge.to_node      # Target node
-attrs = edge.attr           # Edge attributes dict
+attrs = edge.attr           # Edge attributes dict (a copy; use edge.attr_set)
 ```
 
 #### `Path`

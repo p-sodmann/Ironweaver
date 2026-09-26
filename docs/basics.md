@@ -62,6 +62,12 @@ G = v.to_networkx()   # convert to networkx.DiGraph
 
 A node has an `id`, a dict of `attr`, outgoing `edges`, and `inverse_edges`.
 
+> **Copies, not live views:** `node.attr`, `node.meta`, `node.edges` and
+> `node.inverse_edges` (and `edge.attr`, `edge.meta`, `vertex.nodes`) return
+> a *copy* each time. `node.attr["k"] = v` is silently lost — use
+> `node.attr_set("k", v)` or assign a whole dict (`node.attr = {...}`).
+> `vertex.meta` and the `on_*_callbacks` lists, in contrast, are live.
+
 ```python
 node = v.add_node("x", attr={"label": "hello"})
 
@@ -69,6 +75,7 @@ node.id                      # "x"
 node.attr                    # {"label": "hello"}
 node.attr_get("label")       # "hello"
 node.attr_set("label", "hi") # fires on_node_update_callbacks
+node.attr["label"] = "lost"  # no effect: node.attr is a copy
 node.attr_list_append("tags", "new")
 
 node.edges                   # outgoing edges
@@ -83,6 +90,7 @@ node.vertex                  # back-reference to the owning Vertex
 An edge connects two nodes and carries its own `attr` dict.
 
 ```python
+v.add_node("y")
 e = v.add_edge("x", "y", attr={"type": "follows", "weight": 1.0})
 
 e.from_node                  # Node "x"
