@@ -505,6 +505,15 @@ python benchmarks/compare_networkx.py                      # default sizes
 python benchmarks/compare_networkx.py --sizes 50000:250000 --repeats 5
 ```
 
+For memory use (resident graph size, peak RSS while loading and saving JSON,
+file sizes; Linux or `psutil`), `benchmarks/compare_networkx_memory.py` writes
+`performance_results/networkx_memory.md`:
+
+```bash
+python benchmarks/compare_networkx_memory.py               # 10k and 100k nodes
+python benchmarks/compare_networkx_memory.py --sizes 20000:100000 --repeats 5
+```
+
 ## Contributing
 
 Contributions are welcome! Please see our contributing guidelines for more information.
