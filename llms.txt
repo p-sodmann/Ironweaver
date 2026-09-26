@@ -1,0 +1,165 @@
+# IronWeaver
+
+> Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict and edges, `Edge`s are directed and carry an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
+
+Install from source: `pip install maturin && pip install -e .` — then `from ironweaver import Vertex`.
+
+## Build a graph
+
+```python
+from ironweaver import Vertex
+
+g = Vertex()
+g.add_node("alice", {"type": "person", "age": 30})   # attr dict is optional
+g.add_node("bob", {"type": "person", "age": 25})
+g.add_node("acme", {"type": "company"})
+g.add_edge("alice", "bob", {"type": "knows", "weight": 1.0})
+g.add_edge("bob", "acme", {"type": "works_at", "weight": 2.0})
+g.add_edge("alice", "acme", {"type": "works_at", "weight": 5.0})
+
+alice = g["alice"]                    # or g.get_node("alice"); KeyError if missing
+assert "bob" in g and g.has_node("bob")
+assert g.node_count() == 3 and len(g) == 3
+assert sorted(g.keys()) == ["acme", "alice", "bob"]
+assert [e.to_node.id for e in alice.edges] == ["bob", "acme"]      # outgoing
+assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # incoming
+```
+
+`add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
+
+## Read and change attributes
+
+```python
+assert alice.attr_get("age") == 30
+alice.attr_set("age", 31)             # fires vertex.on_node_update_callbacks
+alice.attr_list_append("tags", "vip") # creates the list if missing
+alice.attr = {**alice.attr, "city": "Berlin"}   # replace the whole dict
+edge = alice.edges[0]
+edge.attr_set("weight", 1.5)          # fires vertex.on_edge_update_callbacks
+assert edge.attr_get("weight") == 1.5
+```
+
+## Traverse from a node
+
+Results are new `Vertex` objects holding the original nodes; the visit order is in `meta["nodelist"]`.
+
+```python
+r = alice.bfs()                                    # breadth-first, all reachable
+assert r.meta["nodelist"] == ["alice", "bob", "acme"]
+r = alice.bfs(depth=1)                             # at most one hop
+r = alice.traverse(depth=2)                        # depth-first (pre-order)
+r = alice.bfs(filter={"type": "knows"})            # follow edges whose attr matches
+r = alice.bfs(filter=lambda e: e.attr("weight", 0) < 3)   # callable gets an EdgeView
+assert alice.bfs_search("acme", depth=2) is g["acme"]     # Node or None
+```
+
+## Filter and expand (results contain copies of nodes and edges)
+
+```python
+people = g.filter(lambda n: n.type == "person")    # predicate gets a NodeView
+assert sorted(people.keys()) == ["alice", "bob"]
+assert sorted(g.filter(type="company").keys()) == ["acme"]   # attribute equality
+sub = g.filter(ids=["alice", "bob"])               # or filter(id="alice")
+bigger = g.filter(id="bob").expand(g, depth=1)     # add neighbours from g
+assert sorted(bigger.keys()) == ["acme", "bob"]
+around = g.filter(id="bob").expand(g, direction="both")   # "out" (default), "in", "both"
+```
+
+`NodeView` offers `n.id`, `n.type`, `n.attr(key, default)`, `n.has_attr(key)`, `n.degree`, `n.in_degree`, `n.has_edge_to(id)`, `n.neighbor_ids`. `EdgeView` offers `e.type`, `e.attr(key, default)`, `e.has_attr(key)`, `e.from_node`, `e.to_node`.
+
+## Paths
+
+```python
+p = g.shortest_path_bfs("alice", "acme")               # fewest edges
+assert p.meta["nodelist"] == ["alice", "acme"]
+p = g.shortest_path_dijkstra("alice", "acme", weight="weight")   # cheapest
+assert p.meta["nodelist"] == ["alice", "bob", "acme"] and p.meta["cost"] == 3.5
+p = g.shortest_path_bfs("acme", "alice", direction="in")   # walk edges backwards
+```
+
+Both raise `ValueError` if a node is missing or the target is unreachable. Options: `max_depth` (BFS), `default_weight` and `max_cost` (Dijkstra), `direction` (`"out"`, `"in"`, `"both"`).
+
+## Random walks
+
+```python
+walks = g.random_walks("alice", 3, 100, seed=42)     # start, max_length, attempts
+assert all(w[0] == "alice" for w in walks)           # list of id lists, deduplicated
+walks = g.random_walks("alice", 3, 100, include_edge_types=True, seed=1)
+# -> e.g. [["alice", "knows", "bob", "works_at", "acme"], ...]
+walks = g.random_walks(None, 3, 50, stratified=True, seed=1)   # spread over all nodes
+```
+
+Other options: `min_length`, `allow_revisit` (default False), `edge_type_field` (default `"type"`).
+
+## Remove
+
+```python
+g.add_node("temp")
+g.add_edge("temp", "alice")
+g.remove_edge("temp", "alice")          # returns the number of edges removed
+g.remove_node("temp")                   # also removes its edges; KeyError if missing
+```
+
+## Save and load
+
+```python
+text = g.save_to_json()                 # compact JSON string; pretty=True to indent
+g.save_to_json("graph.json")
+g2 = Vertex.load_from_json("graph.json")      # a path, a JSON string, or a dict
+g2 = Vertex.load_from_json(text)
+g.save_to_binary("graph.bin")                 # faster, smaller
+g3 = Vertex.load_from_binary("graph.bin")
+assert sorted(g3.keys()) == sorted(g.keys())
+```
+
+## Callbacks
+
+```python
+events = []
+g.on_node_add_callbacks.append(lambda vertex, node: events.append(("add", node.id)))
+g.on_node_update_callbacks.append(
+    lambda vertex, node, key, new, old: events.append((node.id, key, old, new)))
+g.add_node("carol")
+g["carol"].attr_set("age", 40)
+assert events == [("add", "carol"), ("carol", "age", None, 40)]
+```
+
+Also `on_edge_add_callbacks (vertex, edge)` and `on_edge_update_callbacks (vertex, edge, key, new, old)`. A callback returning `False` stops later callbacks in the same list.
+
+## Analysis and conversion
+
+```python
+meta = g.get_metadata()                 # node_count, edge_count, average_degree, node_ids
+nxg = g.to_networkx()                   # networkx.DiGraph with node/edge attributes
+```
+
+## LGF text format
+
+```python
+from ironweaver import parse_lgf
+
+lg = parse_lgf("""
+alice Person
+  age = 30
+  -knows-> bob
+bob Person
+""")
+assert lg["alice"].attr == {"labels": ["Person"], "age": 30}   # labels, not "type"
+assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
+```
+
+## Gotchas
+
+- `node.attr`, `node.meta`, `node.edges`, `node.inverse_edges`, `edge.attr`, `edge.meta` and `vertex.nodes` return copies. `node.attr["k"] = v` and `vertex.nodes[id] = node` are silently lost. Use `attr_set`, assign a whole dict, or the add/remove methods.
+- `vertex.meta` and the `on_*_callbacks` lists are live objects.
+- `bfs` / `traverse` results share the original nodes; `filter`, `expand` and the shortest-path methods return copies (a `filter` result shares the source's `meta` and callback lists).
+- Ordered output is in `result.meta["nodelist"]`; `keys()` is unordered.
+- With several equally short paths, `shortest_path_bfs` returns one of them (unspecified which).
+- `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
+
+## More
+
+- [README.md](README.md): overview and examples
+- [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
+- [python/ironweaver/__init__.pyi](python/ironweaver/__init__.pyi): full typed API with docstrings
+- [AGENTS.md](AGENTS.md): source layout for working on the library itself

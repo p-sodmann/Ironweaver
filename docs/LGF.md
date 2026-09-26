@@ -7,8 +7,16 @@ The Labeled Graph Format (LGF) is a human-readable text format for representing 
 ```python
 from ironweaver import parse_lgf, parse_lgf_file
 
+lgf_text = """
+alice Person
+  name = "Alice"
+  -knows-> bob
+bob Person
+"""
+
 # Parse from string
 graph = parse_lgf(lgf_text)
+graph["alice"].attr   # {'labels': ['Person'], 'name': 'Alice'}
 
 # Parse from file
 graph = parse_lgf_file("graph.lgf")
@@ -247,6 +255,8 @@ print(f"Loaded {graph.node_count()} nodes")
 ### Working with Parsed Graphs
 
 Once parsed, LGF graphs are standard IronWeaver `Vertex` objects with full API support:
+
+Assuming `social_network.lgf` contains the complex example above:
 
 ```python
 # Parse LGF

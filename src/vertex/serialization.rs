@@ -1,99 +1,102 @@
 // vertex/serialization.rs
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
-use crate::serialization::{py_to_json, SerializableGraph};
-use super::subgraph::wire_vertex;
+use pyo3::types::{PyAny, PyDict, PyString};
+use std::fs::File;
+use std::io::BufWriter;
+use crate::serialization::{dict_to_json, GraphView, LoadGraph};
 use crate::gc_pause::GcPause;
 use super::Vertex;
 
-/// Save graph to JSON file (when file_path is provided) or return JSON string (when file_path is None)
-pub fn save_to_json(vertex: &Vertex, py: Python<'_>, file_path: Option<String>) -> PyResult<Py<PyAny>> {
-    let serializable_graph = SerializableGraph::from_vertex(py, vertex)?;
-    
+fn runtime_error(context: &str, e: impl std::fmt::Display) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}: {}", context, e))
+}
+
+/// Save graph to JSON file (when file_path is provided) or return JSON string (when file_path is None).
+/// Output is compact unless `pretty` is true.
+pub fn save_to_json(
+    vertex: &Vertex,
+    py: Python<'_>,
+    file_path: Option<String>,
+    pretty: bool,
+) -> PyResult<Py<PyAny>> {
+    let view = GraphView::new(py, vertex, false);
+
     match file_path {
         Some(path) => {
-            serializable_graph.save_to_json(&path)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("Failed to save graph to JSON: {}", e)
-                ))?;
+            let json = view.to_json(pretty).map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
+            py.allow_threads(|| std::fs::write(&path, json))
+                .map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
             Ok(py.None())
         }
         None => {
-            let json_string = serializable_graph.to_json_string()
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("Failed to serialize graph to JSON: {}", e)
-                ))?;
-            Ok(json_string.into_pyobject(py)?.into_any().unbind())
+            let json = view.to_json(pretty).map_err(|e| runtime_error("Failed to serialize graph to JSON", e))?;
+            // The serializer only ever writes valid UTF-8
+            let text = std::str::from_utf8(&json).map_err(|e| runtime_error("Failed to serialize graph to JSON", e))?;
+            Ok(PyString::new(py, text).into_any().unbind())
         }
     }
 }
 
+fn save_binary(vertex: &Vertex, py: Python<'_>, file_path: &str, half: bool) -> PyResult<()> {
+    let view = GraphView::new(py, vertex, half);
+    let file = File::create(file_path).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
+    let mut writer = BufWriter::new(file);
+    view.write_binary(&mut writer)
+        .and_then(|_| Ok(std::io::Write::flush(&mut writer)?))
+        .map_err(|e| runtime_error("Failed to save graph to binary", e))
+}
+
 pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
-    let serializable_graph = SerializableGraph::from_vertex(py, vertex)?;
-    serializable_graph.save_to_binary(&file_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Failed to save graph to binary: {}", e)
-        ))?;
-    Ok(())
+    save_binary(vertex, py, &file_path, false)
 }
 
 pub fn save_to_binary_f16(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
-    let serializable_graph = SerializableGraph::from_vertex(py, vertex)?;
-    serializable_graph.save_to_binary_f16(&file_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Failed to save graph to binary: {}", e)
-        ))?;
-    Ok(())
+    save_binary(vertex, py, &file_path, true)
 }
 
 /// Load graph from JSON file (when source is a string path) or from JSON string/dict (when source is a dict or JSON string)
 pub fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<Vertex>> {
-    let serializable_graph = if let Ok(path) = source.extract::<String>() {
-        // Try to parse as JSON string first, if that fails treat as file path
-        if path.trim().starts_with('{') {
+    // Holds the document bytes when they don't come from a Python str
+    let owned: Vec<u8>;
+
+    let bytes: &[u8] = if let Ok(text) = source.downcast::<PyString>() {
+        // Borrow the string's UTF-8 buffer instead of copying it
+        let text = text.to_str()?;
+        if text.trim_start().starts_with('{') {
             // Looks like a JSON string
-            SerializableGraph::from_json_string(&path)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("Failed to parse JSON string: {}", e)
-                ))?
+            text.as_bytes()
         } else {
             // Treat as file path
-            SerializableGraph::load_from_json(&path)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("Failed to load graph from JSON file: {}", e)
-                ))?
+            owned = py
+                .allow_threads(|| std::fs::read(text))
+                .map_err(|e| runtime_error("Failed to load graph from JSON file", e))?;
+            &owned
         }
     } else if let Ok(dict) = source.downcast::<PyDict>() {
-        // Convert the Python dict straight into the graph structs
-        let value = py_to_json(dict.as_any())?;
-        serde_json::from_value::<SerializableGraph>(value)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("Failed to parse dict as graph: {}", e)
-            ))?
+        // Encode the dict as JSON bytes and use the same fast parser
+        owned = dict_to_json(dict.as_any()).map_err(|e| runtime_error("Failed to parse dict as graph", e))?;
+        &owned
     } else {
         return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
             "source must be a file path (str), JSON string (str), or dict"
         ));
     };
-    
+
+    let graph = py
+        .allow_threads(|| LoadGraph::from_json_slice(bytes))
+        .map_err(|e| runtime_error("Failed to parse graph JSON", e))?;
     let _gc = GcPause::new(py);
-    let vertex = Py::new(py, serializable_graph.to_vertex(py)?)?;
-    // Loaded nodes/edges get the vertex back-reference and fire the
-    // vertex-level update callbacks, like incrementally built graphs.
-    wire_vertex(py, &vertex);
-    Ok(vertex)
+    graph.into_vertex(py)
 }
 
 pub fn load_from_binary(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex>> {
-    let serializable_graph = SerializableGraph::load_from_binary(&file_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Failed to load graph from binary: {}", e)
-        ))?;
+    let bytes = py
+        .allow_threads(|| std::fs::read(&file_path))
+        .map_err(|e| runtime_error("Failed to load graph from binary", e))?;
+    let graph = py
+        .allow_threads(|| LoadGraph::from_binary_slice(&bytes))
+        .map_err(|e| runtime_error("Failed to load graph from binary", e))?;
     let _gc = GcPause::new(py);
-    let vertex = Py::new(py, serializable_graph.to_vertex(py)?)?;
-    // Loaded nodes/edges get the vertex back-reference and fire the
-    // vertex-level update callbacks, like incrementally built graphs.
-    wire_vertex(py, &vertex);
-    Ok(vertex)
+    graph.into_vertex(py)
 }

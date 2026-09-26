@@ -28,6 +28,10 @@ After installing, run:
 ```bash
 pytest
 ```
+`tests/test_docs_examples.py` executes every ```python block in `README.md`,
+`llms.txt` and `docs/*.md`, so documentation examples must run as written
+(use a ```text fence for signatures or sketches). When you change the public
+API, update `llms.txt`, the `.pyi` stubs and the docs together.
 
 ## Function Reference
 Below is a quick guide to notable functions and where to find them.
@@ -75,12 +79,20 @@ Below is a quick guide to notable functions and where to find them.
   - `expand.rs`: `expand`
   - `filter.rs`: `filter`
   - `random_walks.rs`: `random_walks`
+  - `bidirectional.rs`: `bidirectional_bfs` (used by `shortest_path_bfs` and
+    `Node.bfs_search` for library-built graphs; relies on `edges` /
+    `inverse_edges` being in sync), `is_library_built`
   - `shortest_path_bfs.rs`: `shortest_path_bfs`
   - `shortest_path_dijkstra.rs`: `shortest_path_dijkstra`
 
 - **src/serialization.rs**
-  - `SerializableGraph` helpers including `from_vertex`, `to_vertex`,
-    `save_to_json`, `load_from_json`, `save_to_binary`, `save_to_binary_f16`, `load_from_binary`.
+  - On-disk format (JSON via sonic-rs, binary via bincode); legacy files in
+    `tests/data/` must keep loading.
+  - Saving: `GraphView` streams the live graph into the serializer
+    (`to_json`, `write_binary`); `PyValue` encodes Python values.
+  - Loading: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
+    borrowed structs, `LoadGraph::into_vertex` builds the Python objects;
+    `dict_to_json` handles dict input.
 
 - **src/observed_dictionary.rs**
   - `ObservedDictionary::new`, `__setitem__`, `__getitem__`.

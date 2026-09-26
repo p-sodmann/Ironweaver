@@ -1,5 +1,6 @@
 // vertex/algorithms/mod.rs
 
+pub(crate) mod bidirectional;
 mod shortest_path_bfs;
 mod shortest_path_dijkstra;
 mod expand;

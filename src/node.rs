@@ -5,7 +5,18 @@ use pyo3::class::basic::CompareOp;
 use pyo3::{PyTraverseError, PyVisit};
 use crate::Edge;
 use crate::Vertex;
+use crate::vertex::algorithms::bidirectional::bidirectional_bfs;
+use crate::vertex::subgraph::Direction;
 
+/// A graph node: an `id`, an `attr` dict, outgoing `edges` and incoming
+/// `inverse_edges`.
+///
+/// Create nodes with `Vertex.add_node`. The `attr`, `meta`, `edges` and
+/// `inverse_edges` properties return copies: `node.attr["k"] = v` has no
+/// effect. Use `attr_set` / `attr_get` (which fire the owning Vertex's update
+/// callbacks) or assign a whole dict (`node.attr = {...}`).
+///
+/// Traversals start here: `bfs`, `traverse` (DFS) and `bfs_search`.
 #[pyclass]
 pub struct Node {
     #[pyo3(get, set)]
@@ -147,6 +158,15 @@ impl Node {
         edge_filter: Option<Py<PyAny>>,
     ) -> PyResult<Option<Py<Node>>> {
         let self_handle: Py<Node> = slf.into();
+
+        // A node created by a Vertex can look the target up and search from
+        // both ends at once (its graph keeps edges/inverse_edges in sync).
+        if let Some(target) = vertex_node(py, &self_handle, &target_id) {
+            let path = bidirectional_bfs(py, &self_handle, &target, depth, Direction::Out, |py, edge| {
+                edge_matches_filter(py, edge, &filter, &edge_filter)
+            })?;
+            return Ok(path.map(|_| target));
+        }
         bfs_search_iterative(py, self_handle, target_id, depth, &filter, &edge_filter)
     }
 
@@ -232,6 +252,14 @@ impl Node {
 /// Python callbacks invoked afterwards may freely mutate the node.
 pub(crate) fn out_edges(py: Python<'_>, node: &Py<Node>) -> Vec<Py<Edge>> {
     node.borrow(py).edges.iter().map(|e| e.clone_ref(py)).collect()
+}
+
+/// Look `id` up in the Vertex that owns `node`, if it has one. The Vertex
+/// borrow is released before returning.
+fn vertex_node(py: Python<'_>, node: &Py<Node>, id: &str) -> Option<Py<Node>> {
+    let vertex = node.borrow(py).vertex.as_ref()?.clone_ref(py);
+    let vertex = vertex.bind(py).downcast::<Vertex>().ok()?.borrow();
+    vertex.nodes.get(id).map(|n| n.clone_ref(py))
 }
 
 /// Target node of an edge.

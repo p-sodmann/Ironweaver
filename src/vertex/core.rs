@@ -14,6 +14,16 @@ use super::callbacks;
 use super::manipulation;
 use super::serialization;
 
+/// A directed graph: a collection of `Node`s, keyed by id, connected by `Edge`s.
+///
+/// Build it with `add_node(id, attr=None)` / `add_edge(from_id, to_id, attr=None)`,
+/// look nodes up with `graph[id]` or `get_node(id)`, and use the algorithms
+/// (`filter`, `expand`, `shortest_path_bfs`, `shortest_path_dijkstra`,
+/// `random_walks`, ...) which return new `Vertex` objects.
+///
+/// `nodes` returns a copy of the id -> Node mapping (add/remove nodes with the
+/// methods, not by editing that dict). `meta` is a live dict for your own
+/// graph-level data, and the `on_*_callbacks` lists are live too.
 #[pyclass]
 pub struct Vertex {
     #[pyo3(get, set)]
@@ -44,7 +54,10 @@ impl Vertex {
         }
     }
 
-    /// Create a new graph with existing nodes
+    /// Create a graph from an existing ``{id: Node}`` mapping.
+    ///
+    /// The node objects are shared, not copied, and keep their edges (which
+    /// may point to nodes outside the new graph; see ``prune``).
     #[staticmethod]
     pub fn from_nodes(py: Python<'_>, nodes: HashMap<String, Py<Node>>) -> Self {
         Vertex {
@@ -101,6 +114,7 @@ impl Vertex {
             .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(key))
     }
 
+    /// Return the ids of all nodes (unordered).
     fn keys(&self) -> Vec<String> {
         self.nodes.keys().cloned().collect()
     }
@@ -110,6 +124,8 @@ impl Vertex {
         format!("Vertex({})", keys.join(", "))
     }
 
+    /// Return a ``{id: Node}`` dict (for JSON encoders). Use ``save_to_json``
+    /// to serialize the whole graph.
     fn toJSON(&self, py: Python<'_>) -> Py<PyAny> {
         let dict = PyDict::new(py);
         for (node_id, node) in &self.nodes {
@@ -248,15 +264,16 @@ impl Vertex {
     ///
     /// Args:
     ///     file_path (str, optional): Path to save the graph to. If None, returns JSON string.
+    ///     pretty (bool, optional): Indent the output. Defaults to False (compact JSON).
     ///     
     /// Returns:
     ///     None if file_path is provided, or str (JSON) if file_path is None
     ///     
     /// Raises:
     ///     RuntimeError: If saving/serialization fails
-    #[pyo3(signature = (file_path=None))]
-    fn save_to_json(&self, py: Python<'_>, file_path: Option<String>) -> PyResult<Py<PyAny>> {
-        serialization::save_to_json(self, py, file_path)
+    #[pyo3(signature = (file_path=None, pretty=false))]
+    fn save_to_json(&self, py: Python<'_>, file_path: Option<String>, pretty: bool) -> PyResult<Py<PyAny>> {
+        serialization::save_to_json(self, py, file_path, pretty)
     }
 
     /// Save the graph to a binary file (more efficient for large graphs)

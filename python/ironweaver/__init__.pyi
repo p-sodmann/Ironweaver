@@ -279,7 +279,13 @@ class Node:
         filter: dict[str, Any] | Callable[[EdgeView], bool] | None = ...,
         edge_filter: Callable[[EdgeView], bool] | None = ...,
     ) -> Node | None:
-        """Search for *target_id* using BFS. Returns the Node if found, None otherwise."""
+        """Search for *target_id* using BFS. Returns the Node if found, None otherwise.
+
+        For nodes that belong to a Vertex the search runs from both ends at
+        once (bidirectional BFS), which is much faster on large graphs.
+        *filter* / *edge_filter* are applied to every edge either side
+        follows; *depth* bounds the path length.
+        """
         ...
     def attr_get(self, key: str) -> Any | None:
         """Return attr[key], or None if the key does not exist."""
@@ -443,11 +449,14 @@ class Vertex:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save_to_json(self, file_path: str | None = ...) -> str | None:
+    def save_to_json(self, file_path: str | None = ..., pretty: bool = ...) -> str | None:
         """Serialize to JSON.
 
         If *file_path* is given, writes to that path and returns None.
         If *file_path* is None, returns the JSON string.
+        Output is compact by default; pass ``pretty=True`` for indented JSON.
+        Raises RuntimeError if a value cannot be serialized or the file
+        cannot be written.
         """
         ...
     def save_to_binary(self, file_path: str) -> None:
@@ -502,6 +511,8 @@ class Vertex:
         The ordered sequence of node IDs is in ``result.meta["nodelist"]``.
         *direction* selects which edges are followed: ``"out"`` (default),
         ``"in"`` (walk edges backwards) or ``"both"`` (ignore direction).
+        The search runs from both ends at once (bidirectional BFS). If several
+        shortest paths exist, which one is returned is not specified.
         Raises ValueError if either node is missing or the target is unreachable.
         """
         ...

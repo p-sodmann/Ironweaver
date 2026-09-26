@@ -1,3 +1,32 @@
+"""IronWeaver: a Rust-powered directed graph library for Python.
+
+Core classes:
+
+* :class:`Vertex` - the graph. ``add_node`` / ``add_edge`` build it; algorithms
+  (``filter``, ``expand``, ``shortest_path_bfs``, ``shortest_path_dijkstra``,
+  ``random_walks``) return new graphs; ``save_to_json`` / ``load_from_json``
+  and the binary variants persist it; ``to_networkx`` converts it.
+* :class:`Node` - a node with an ``attr`` dict and edges; traversals start here
+  (``bfs``, ``traverse``, ``bfs_search``).
+* :class:`Edge` - a directed edge with an ``attr`` dict.
+* :class:`NodeView` / :class:`EdgeView` - read-only views passed to filter
+  lambdas.
+* :func:`parse_lgf` / :func:`parse_lgf_file` - read the Labeled Graph Format.
+
+Quick example::
+
+    from ironweaver import Vertex
+    g = Vertex()
+    g.add_node("a", {"type": "person"})
+    g.add_node("b")
+    g.add_edge("a", "b", {"type": "knows"})
+    g["a"].bfs().meta["nodelist"]            # ['a', 'b']
+
+Note: ``node.attr``, ``node.edges``, ``edge.attr`` and ``vertex.nodes`` return
+copies; use ``node.attr_set(key, value)`` to change an attribute. See
+``llms.txt`` and ``docs/`` in the repository for the full guide.
+"""
+
 # Import the Rust extension module classes
 from typing import Callable, Iterable
 
