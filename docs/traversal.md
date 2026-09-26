@@ -92,26 +92,73 @@ The `EdgeView` passed to your predicate exposes:
 
 ## Vertex-level traversal
 
-### Shortest path — `vertex.shortest_path_bfs(root, target, max_depth, direction)`
+### Shortest paths — `vertex.shortest_path(source, target, method=None, ...)`
 
-Returns a new `Vertex` containing only the nodes along the shortest path (fewest edges); the ordered path is in `meta["nodelist"]`. Raises `ValueError` if the target is unreachable. If several shortest paths exist, one of them is returned.
+One method, several algorithms. `method` picks one; `Vertex.path_methods()` lists them with a description:
 
-```python
-path = v.shortest_path_bfs("root", "target")
-path.meta["nodelist"]                       # ['root', 'a', 'b', 'target']
-path = v.shortest_path_bfs("root", "target", max_depth=10)
-path = v.shortest_path_bfs("target", "root", direction="in")    # walk edges backwards
-path = v.shortest_path_bfs("z", "b", direction="both")          # ignore direction
-```
+| `method` | Finds | Method-specific options |
+|---|---|---|
+| `"bfs"` | fewest edges (bidirectional BFS) | `max_depth` |
+| `"dijkstra"` | cheapest by edge weight | – |
+| `"astar"` | cheapest by edge weight, guided by a heuristic | `heuristic`, `coords`, `distances` |
 
-### Weighted shortest path — `vertex.shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)`
+With `method=None` it picks `"astar"` if `heuristic`, `coords` or `distances` is given, `"dijkstra"` if `weight` is given, and `"bfs"` otherwise. Options shared by the weighted methods: `weight` (edge attribute, default `"weight"`), `default_weight` (cost of edges without it, default 1.0), `max_cost`, and `direction` (`"out"`, `"in"`, `"both"`). An option a method doesn't accept raises `TypeError`.
 
-Cheapest path by the `weight` edge attribute (edges without it cost `default_weight`, 1.0 by default). The total cost is in `meta["cost"]`.
+The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, one of them is returned.
 
 ```python
-path = v.shortest_path_dijkstra("root", "target", weight="weight")
-path.meta["nodelist"], path.meta["cost"]    # (['root', 'a', 'b', 'target'], 2.1)
+path = v.shortest_path("root", "target")                     # bfs: fewest edges
+path.meta["nodelist"]                                        # ['root', 'a', 'b', 'target']
+path = v.shortest_path("root", "target", weight="weight")    # dijkstra: cheapest
+path.meta["cost"]                                            # 2.1
+path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth=10)
 ```
+
+`shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands for `method="bfs"` and `method="dijkstra"`.
+
+#### A* — `method="astar"`
+
+A* finds the same cheapest path as Dijkstra, but an estimate of the remaining distance to the target steers the search, so far fewer nodes are settled on spatial graphs (maps, grids, road networks). The estimate must never be larger than the real remaining cost (it may be smaller); otherwise the path returned may not be the cheapest. Tell it where the estimate comes from:
+
+**Node coordinates** — `heuristic="euclidean"` (default) or `"manhattan"`, and `coords` says where each node keeps its coordinates:
+
+| `coords` | Node attributes |
+|---|---|
+| `["x", "y"]` (default) | one attribute per dimension: `{"x": 1, "y": 2}` |
+| `"pos"` | one attribute holding a tuple or list: `{"pos": (1, 2)}` |
+| `["pos.lat", "pos.lon"]` | keys inside a dict attribute: `{"pos": {"lat": 1, "lon": 2}}` |
+
+```python
+grid = Vertex()
+for x in range(10):
+    for y in range(10):
+        grid.add_node(f"{x},{y}", {"x": x, "y": y, "pos": (x, y)})
+for x in range(10):
+    for y in range(10):
+        for nx_, ny_ in ((x + 1, y), (x, y + 1)):
+            if nx_ < 10 and ny_ < 10:
+                grid.add_edge(f"{x},{y}", f"{nx_},{ny_}", {"weight": 1.0})
+
+path = grid.shortest_path("0,0", "9,9", heuristic="manhattan")      # coords=["x", "y"]
+path.meta["cost"], path.meta["expanded"]                            # (18.0, 19)
+path = grid.shortest_path("0,0", "9,9", method="astar", coords="pos")
+grid.shortest_path("0,0", "9,9", method="dijkstra").meta["expanded"]  # 100
+```
+
+**Precomputed distances in the graph** — `distances="key"` reads `vertex.meta["key"]`, either `{node_id: estimate}` (estimates to one target) or `{node_id: {target_id: estimate}}` (to several targets). `vertex.meta` is live, so compute the table once and reuse it:
+
+```python
+grid.meta["to_corner"] = {
+    n: (9 - grid[n].attr_get("x")) + (9 - grid[n].attr_get("y")) for n in grid.keys()
+}
+path = grid.shortest_path("0,0", "9,9", distances="to_corner")
+```
+
+Nodes without coordinates or without a table entry get estimate 0 (always safe, just less guided). The target itself must have coordinates.
+
+#### Adding a path algorithm
+
+Algorithms live in `src/vertex/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated query (source and target nodes, direction, edge costs, `max_cost`, options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`), best-first search (`best_first.rs`) and result building — are reusable. See the comment at the top of `mod.rs`.
 
 ### Random walks — `vertex.random_walks(...)`
 

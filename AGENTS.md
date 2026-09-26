@@ -56,7 +56,8 @@ Below is a quick guide to notable functions and where to find them.
     `get_node`, `has_node`, `node_count`, `prune`.
   - IO: `save_to_json`, `save_to_binary`, `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
   - Analysis: `get_metadata`, `to_networkx`.
-  - Algorithms: `shortest_path_bfs`, `shortest_path_dijkstra`, `expand`, `filter`, `random_walks`.
+  - Algorithms: `shortest_path` (+ `path_methods`; `shortest_path_bfs` /
+    `shortest_path_dijkstra` are shorthands), `expand`, `filter`, `random_walks`.
   - GC support: `__traverse__` / `__clear__` (also on `Node`, `Edge`, `Path`).
 
 - **src/vertex/analysis.rs**
@@ -79,11 +80,20 @@ Below is a quick guide to notable functions and where to find them.
   - `expand.rs`: `expand`
   - `filter.rs`: `filter`
   - `random_walks.rs`: `random_walks`
-  - `bidirectional.rs`: `bidirectional_bfs` (used by `shortest_path_bfs` and
+  - `bidirectional.rs`: `bidirectional_bfs` (used by the `bfs` path method and
     `Node.bfs_search` for library-built graphs; relies on `edges` /
     `inverse_edges` being in sync), `is_library_built`
-  - `shortest_path_bfs.rs`: `shortest_path_bfs`
-  - `shortest_path_dijkstra.rs`: `shortest_path_dijkstra`
+
+- **src/vertex/pathfinding/** (everything behind `Vertex.shortest_path`)
+  - `mod.rs`: `shortest_path` entry point, `PathMethod` + the `METHODS`
+    registry, `PathQuery` / `Options` / `PathResult`, result building. The
+    comment at its top is the recipe for adding an algorithm (one file, one
+    `METHODS` entry, then stubs, docs/traversal.md, llms.txt, tests).
+  - `bfs.rs`, `dijkstra.rs`, `astar.rs`: one `METHOD` each.
+  - `best_first.rs`: best-first search shared by Dijkstra and A* (nodes keyed
+    by pointer, reopening for admissible heuristics, `expanded` count).
+  - `cost.rs`: `EdgeCost` (weight attribute, default, validation).
+  - `heuristic.rs`: `Heuristic` (none, node coordinates, `vertex.meta` table).
 
 - **src/serialization.rs**
   - On-disk format (JSON via sonic-rs, binary via bincode); legacy files in

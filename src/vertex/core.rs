@@ -9,6 +9,7 @@ use crate::{Edge, Node};
 
 // Import the helper modules as sibling modules
 use super::algorithms;
+use super::pathfinding;
 use super::analysis;
 use super::callbacks;
 use super::manipulation;
@@ -18,7 +19,7 @@ use super::serialization;
 ///
 /// Build it with `add_node(id, attr=None)` / `add_edge(from_id, to_id, attr=None)`,
 /// look nodes up with `graph[id]` or `get_node(id)`, and use the algorithms
-/// (`filter`, `expand`, `shortest_path_bfs`, `shortest_path_dijkstra`,
+/// (`filter`, `expand`, `shortest_path` with method "bfs", "dijkstra" or "astar",
 /// `random_walks`, ...) which return new `Vertex` objects.
 ///
 /// `nodes` returns a copy of the id -> Node mapping (add/remove nodes with the
@@ -365,7 +366,11 @@ impl Vertex {
         max_depth: Option<usize>,
         direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
-        algorithms::shortest_path_bfs(self, py, root_node_id, target_node_id, max_depth, direction)
+        let options = PyDict::new(py);
+        options.set_item("max_depth", max_depth)?;
+        pathfinding::shortest_path(
+            self, py, root_node_id, target_node_id, Some("bfs"), None, None, None, direction, Some(options),
+        )
     }
 
     /// Find the cheapest path between two nodes using Dijkstra's algorithm
@@ -396,9 +401,70 @@ impl Vertex {
         max_cost: Option<f64>,
         direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
-        algorithms::shortest_path_dijkstra(
-            self, py, root_node_id, target_node_id, weight, default_weight, max_cost, direction,
+        pathfinding::shortest_path(
+            self, py, root_node_id, target_node_id, Some("dijkstra"), weight, default_weight, max_cost,
+            direction, None,
         )
+    }
+
+    /// Find a shortest path between two nodes with the chosen algorithm
+    ///
+    /// Args:
+    ///     source (str): ID of the start node
+    ///     target (str): ID of the end node
+    ///     method (str, optional): "bfs" (fewest edges), "dijkstra" (cheapest by
+    ///         edge weight) or "astar" (cheapest, guided by a heuristic); see
+    ///         `Vertex.path_methods()`. None picks "astar" if heuristic, coords or
+    ///         distances is given, "dijkstra" if weight is given, else "bfs".
+    ///     weight (str, optional): Edge attribute holding the edge cost. Defaults to "weight".
+    ///     default_weight (float, optional): Cost of edges without that attribute. Defaults to 1.0.
+    ///     max_cost (float, optional): Ignore paths more expensive than this (for "bfs": more edges).
+    ///     direction (str, optional): "out" (default), "in" or "both".
+    ///     **options: Method-specific options:
+    ///         bfs: max_depth (int).
+    ///         astar: heuristic ("euclidean" default, or "manhattan") with coords, where
+    ///             node coordinates live: a list of attribute paths, one per dimension
+    ///             (default ["x", "y"]; "pos.lat" reads attr["pos"]["lat"]), or one
+    ///             attribute holding a sequence ("pos"). Or distances="<key>":
+    ///             precomputed estimates in vertex.meta[key], either {node_id: estimate}
+    ///             or {node_id: {target_id: estimate}}. Nodes without coordinates or
+    ///             estimates count as 0. Estimates must not overestimate the remaining
+    ///             cost, or the path may not be the cheapest.
+    ///
+    /// Returns:
+    ///     Vertex: The path's nodes (copies) and the edges between them, with
+    ///         meta["nodelist"] (path in order), meta["cost"] (total weight, or
+    ///         number of edges for "bfs"), meta["method"] and, for "dijkstra" and
+    ///         "astar", meta["expanded"] (nodes settled)
+    ///
+    /// Raises:
+    ///     ValueError: Unknown method, missing node, unreachable target, negative
+    ///         weight, or target without coordinates
+    ///     TypeError: Option not accepted by the method, or a non-numeric weight,
+    ///         coordinate or estimate
+    #[pyo3(signature = (source, target, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None, **options))]
+    #[allow(clippy::too_many_arguments)]
+    fn shortest_path(
+        &self,
+        py: Python<'_>,
+        source: String,
+        target: String,
+        method: Option<&str>,
+        weight: Option<String>,
+        default_weight: Option<f64>,
+        max_cost: Option<f64>,
+        direction: Option<&str>,
+        options: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<Vertex>> {
+        pathfinding::shortest_path(
+            self, py, source, target, method, weight, default_weight, max_cost, direction, options,
+        )
+    }
+
+    /// The available `shortest_path` methods, as {name: description}
+    #[staticmethod]
+    fn path_methods(py: Python<'_>) -> PyResult<Py<PyDict>> {
+        pathfinding::path_methods(py)
     }
 
     /// Expand the current vertex by adding neighbor nodes from a source vertex
