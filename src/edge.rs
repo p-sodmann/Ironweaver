@@ -3,6 +3,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use pyo3::class::basic::CompareOp;
+use pyo3::{PyTraverseError, PyVisit};
 use std::collections::HashMap;
 use crate::Node;
 
@@ -63,6 +64,29 @@ impl Edge {
         let from_id = self.from_node.bind(py).getattr("id").ok().and_then(|obj| obj.extract::<String>().ok()).unwrap_or("?".to_string());
         let to_id = self.to_node.bind(py).getattr("id").ok().and_then(|obj| obj.extract::<String>().ok()).unwrap_or("?".to_string());
         Ok(format!("{}: {} --> {}", typ, from_id, to_id))
+    }
+
+    // Garbage-collector support (see Node::__traverse__).
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        visit.call(&self.from_node)?;
+        visit.call(&self.to_node)?;
+        for v in self.attr.values().chain(self.meta.values()) {
+            visit.call(v)?;
+        }
+        for cb in self.watched_by.iter().chain(self.on_meta_change_callbacks.iter()) {
+            visit.call(cb)?;
+        }
+        visit.call(&self.on_update_callbacks)?;
+        visit.call(&self.vertex)?;
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.attr.clear();
+        self.meta.clear();
+        self.watched_by.clear();
+        self.on_meta_change_callbacks.clear();
+        self.vertex = None;
     }
 
     fn toJSON(&self, py: Python<'_>) -> Py<PyAny> {

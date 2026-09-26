@@ -450,7 +450,9 @@ def _node_bfs_search(self, target_id, depth=None, filter=None, edge_filter=None)
 
 
 def _setup_traversal_methods():
-    Node._original_traverse = Node.traverse
+    # The Rust method is exposed as ``_traverse`` because the name ``traverse``
+    # collides with the generated symbol for the GC hook ``__traverse__``.
+    Node._original_traverse = Node._traverse
     Node._original_bfs = Node.bfs
     Node._original_bfs_search = Node.bfs_search
 

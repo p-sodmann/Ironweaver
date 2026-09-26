@@ -11,7 +11,7 @@ Python-level wrappers applied in ironweaver/__init__.py at import time.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator, final
+from typing import Any, Callable, Iterator, Literal, final
 
 @final
 class ObservedDictionary:
@@ -137,8 +137,10 @@ class Vertex:
     def toJSON(self) -> dict[str, Any]: ...
     def has_node(self, id: str) -> bool: ...
     def node_count(self) -> int: ...
-    def add_node(self, id: str, attr: dict[str, Any] | None) -> Node: ...
-    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None) -> Edge: ...
+    def add_node(self, id: str, attr: dict[str, Any] | None = ...) -> Node: ...
+    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> Edge: ...
+    def remove_node(self, id: str) -> Node: ...
+    def remove_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> int: ...
     def get_node(self, id: str) -> Node: ...
     def save_to_json(self, file_path: str | None = ...) -> str | None: ...
     def save_to_binary(self, file_path: str) -> None: ...
@@ -160,10 +162,27 @@ class Vertex:
         root_node_id: str,
         target_node_id: str,
         max_depth: int | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
         """Ordered path is in ``result.meta["nodelist"]``. Raises ValueError if unreachable."""
         ...
-    def expand(self, source_vertex: Vertex, depth: int | None = ...) -> Vertex: ...
+    def shortest_path_dijkstra(
+        self,
+        root_node_id: str,
+        target_node_id: str,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Vertex:
+        """Path in ``result.meta["nodelist"]``, total cost in ``result.meta["cost"]``."""
+        ...
+    def expand(
+        self,
+        source_vertex: Vertex,
+        depth: int | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Vertex: ...
     def filter(
         self,
         predicate: Callable[[Any], bool] | None = ...,
@@ -185,6 +204,7 @@ class Vertex:
         include_edge_types: bool | None = ...,
         edge_type_field: str | None = ...,
         stratified: bool | None = ...,
+        seed: int | None = ...,
     ) -> list[list[str]]: ...
 
 __all__ = ["ObservedDictionary", "Edge", "Node", "Path", "Vertex"]

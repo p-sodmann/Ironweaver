@@ -110,3 +110,75 @@ pub fn prune(vertex: &Vertex, py: Python<'_>) -> PyResult<usize> {
 
     Ok(removed)
 }
+
+/// Remove a node and every edge incident to it. Neighbours' `edges` /
+/// `inverse_edges` lists are updated so that no dangling edges remain.
+/// Returns the removed node, detached from the graph.
+pub fn remove_node(vertex: &mut Vertex, py: Python<'_>, id: &str) -> PyResult<Py<Node>> {
+    let node = vertex.nodes.remove(id).ok_or_else(|| {
+        pyo3::exceptions::PyKeyError::new_err(format!("Node with id '{}' not found", id))
+    })?;
+
+    let (out_edges, in_edges) = {
+        let mut n = node.borrow_mut(py);
+        n.vertex = None;
+        (std::mem::take(&mut n.edges), std::mem::take(&mut n.inverse_edges))
+    };
+    for edge in &out_edges {
+        let target = edge.borrow(py).to_node.clone_ref(py);
+        if !target.is(&node) {
+            target.borrow_mut(py).inverse_edges.retain(|e| !e.is(edge));
+        }
+    }
+    for edge in &in_edges {
+        let source = edge.borrow(py).from_node.clone_ref(py);
+        if !source.is(&node) {
+            source.borrow_mut(py).edges.retain(|e| !e.is(edge));
+        }
+    }
+    Ok(node)
+}
+
+/// Remove edges from `from_id` to `to_id`. If `attr` is given, only edges
+/// whose attributes equal every given key/value pair are removed.
+/// Returns the number of edges removed.
+pub fn remove_edge(
+    vertex: &Vertex,
+    py: Python<'_>,
+    from_id: &str,
+    to_id: &str,
+    attr: Option<HashMap<String, Py<PyAny>>>,
+) -> PyResult<usize> {
+    let lookup = |id: &str| {
+        vertex.nodes.get(id).map(|n| n.clone_ref(py)).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("Node with id '{}' not found", id))
+        })
+    };
+    let from_node = lookup(from_id)?;
+    let to_node = lookup(to_id)?;
+
+    let candidates: Vec<Py<Edge>> = from_node.borrow(py).edges.iter().map(|e| e.clone_ref(py)).collect();
+    let mut doomed: Vec<Py<Edge>> = Vec::new();
+    'edges: for edge in candidates {
+        if !edge.borrow(py).to_node.is(&to_node) {
+            continue;
+        }
+        if let Some(filter) = &attr {
+            for (key, expected) in filter {
+                let value = edge.borrow(py).attr.get(key).map(|v| v.clone_ref(py));
+                match value {
+                    Some(v) if v.bind(py).eq(expected.bind(py))? => {}
+                    _ => continue 'edges,
+                }
+            }
+        }
+        doomed.push(edge);
+    }
+
+    if !doomed.is_empty() {
+        let is_doomed = |e: &Py<Edge>| doomed.iter().any(|d| d.is(e));
+        from_node.borrow_mut(py).edges.retain(|e| !is_doomed(e));
+        to_node.borrow_mut(py).inverse_edges.retain(|e| !is_doomed(e));
+    }
+    Ok(doomed.len())
+}

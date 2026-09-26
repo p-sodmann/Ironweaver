@@ -2,6 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::{PyTraverseError, PyVisit};
 use std::collections::HashMap;
 
 use crate::{Edge, Node};
@@ -76,6 +77,23 @@ impl Vertex {
         })
     }
 
+    // Garbage-collector support (see Node::__traverse__).
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        for n in self.nodes.values() {
+            visit.call(n)?;
+        }
+        visit.call(&self.meta)?;
+        visit.call(&self.on_node_add_callbacks)?;
+        visit.call(&self.on_edge_add_callbacks)?;
+        visit.call(&self.on_node_update_callbacks)?;
+        visit.call(&self.on_edge_update_callbacks)?;
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.nodes.clear();
+    }
+
     fn __getitem__(&self, py: Python<'_>, key: String) -> PyResult<Py<Node>> {
         self.nodes
             .get(&key)
@@ -88,16 +106,7 @@ impl Vertex {
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
-        let keys: Vec<String> = self
-            .nodes
-            .values()
-            .filter_map(|n| {
-                n.bind(py)
-                    .getattr("id")
-                    .ok()
-                    .and_then(|o| o.extract::<String>().ok())
-            })
-            .collect();
+        let keys: Vec<String> = self.nodes.values().map(|n| n.borrow(py).id.clone()).collect();
         format!("Vertex({})", keys.join(", "))
     }
 
@@ -140,6 +149,7 @@ impl Vertex {
     ///     
     /// Raises:
     ///     ValueError: If a node with the same ID already exists
+    #[pyo3(signature = (id, attr=None))]
     fn add_node(
         mut slf: PyRefMut<'_, Self>,
         py: Python<'_>,
@@ -185,6 +195,7 @@ impl Vertex {
     ///     
     /// Raises:
     ///     ValueError: If either node doesn't exist
+    #[pyo3(signature = (from_id, to_id, attr=None))]
     fn add_edge(
         mut slf: PyRefMut<'_, Self>,
         py: Python<'_>,
@@ -320,21 +331,57 @@ impl Vertex {
     ///     root_node_id (str): ID of the source node to start the search from
     ///     target_node_id (str): ID of the target node to find
     ///     max_depth (int, optional): Maximum depth to search. If None, searches indefinitely.
+    ///     direction (str, optional): "out" (default) follows outgoing edges, "in" follows
+    ///         incoming edges, "both" ignores edge direction.
     ///     
     /// Returns:
     ///     Vertex: A new vertex containing only the nodes in the shortest path from source to target
     ///     
     /// Raises:
     ///     ValueError: If either source or target node doesn't exist, or if target is not reachable within max_depth
-    #[pyo3(signature = (root_node_id, target_node_id, max_depth=None))]
+    #[pyo3(signature = (root_node_id, target_node_id, max_depth=None, direction=None))]
     fn shortest_path_bfs(
         &self,
         py: Python<'_>,
         root_node_id: String,
         target_node_id: String,
         max_depth: Option<usize>,
+        direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
-        algorithms::shortest_path_bfs(self, py, root_node_id, target_node_id, max_depth)
+        algorithms::shortest_path_bfs(self, py, root_node_id, target_node_id, max_depth, direction)
+    }
+
+    /// Find the cheapest path between two nodes using Dijkstra's algorithm
+    ///
+    /// Args:
+    ///     root_node_id (str): ID of the source node
+    ///     target_node_id (str): ID of the target node
+    ///     weight (str, optional): Edge attribute holding the edge cost. Defaults to "weight".
+    ///     default_weight (float, optional): Cost of edges without that attribute. Defaults to 1.0.
+    ///     max_cost (float, optional): Ignore paths more expensive than this.
+    ///     direction (str, optional): "out" (default), "in" or "both".
+    ///
+    /// Returns:
+    ///     Vertex: The nodes on the cheapest path (and the edges between them), with
+    ///         meta["nodelist"] holding the path in order and meta["cost"] its total cost
+    ///
+    /// Raises:
+    ///     ValueError: If a node doesn't exist, the target is unreachable, or a weight is negative
+    ///     TypeError: If a weight attribute is not a number
+    #[pyo3(signature = (root_node_id, target_node_id, weight=None, default_weight=None, max_cost=None, direction=None))]
+    fn shortest_path_dijkstra(
+        &self,
+        py: Python<'_>,
+        root_node_id: String,
+        target_node_id: String,
+        weight: Option<String>,
+        default_weight: Option<f64>,
+        max_cost: Option<f64>,
+        direction: Option<&str>,
+    ) -> PyResult<Py<Vertex>> {
+        algorithms::shortest_path_dijkstra(
+            self, py, root_node_id, target_node_id, weight, default_weight, max_cost, direction,
+        )
     }
 
     /// Expand the current vertex by adding neighbor nodes from a source vertex
@@ -342,20 +389,23 @@ impl Vertex {
     /// Args:
     ///     source_vertex (Vertex): The source vertex to expand from (contains the full graph)
     ///     depth (int, optional): Maximum depth to traverse for expansion. Defaults to 1.
+    ///     direction (str, optional): "out" (default) follows outgoing edges, "in" follows
+    ///         incoming edges, "both" ignores edge direction.
     ///     
     /// Returns:
     ///     Vertex: A new vertex containing the original nodes plus neighbors found within the specified depth
     ///     
     /// Raises:
     ///     ValueError: If expansion fails
-    #[pyo3(signature = (source_vertex, depth=None))]
+    #[pyo3(signature = (source_vertex, depth=None, direction=None))]
     fn expand(
         &self,
         py: Python<'_>,
         source_vertex: &Vertex,
         depth: Option<usize>,
+        direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
-        algorithms::expand(self, py, source_vertex, depth)
+        algorithms::expand(self, py, source_vertex, depth, direction)
     }
 
     /// Create a new vertex containing only the specified nodes and their connecting edges
@@ -393,13 +443,10 @@ impl Vertex {
         } else if !filters.is_empty() {
             let mut matches = Vec::new();
             for (node_id, node) in &self.nodes {
-                let node_ref = node.bind(py);
-                let attrs: HashMap<String, Py<PyAny>> =
-                    node_ref.getattr("attr")?.extract().unwrap_or_default();
-
                 let mut all_match = true;
                 for (key, value) in &filters {
-                    match attrs.get(key) {
+                    let node_val = node.borrow(py).attr.get(key).map(|v| v.clone_ref(py));
+                    match node_val {
                         Some(node_val) => {
                             if !node_val.bind(py).eq(value.bind(py))? {
                                 all_match = false;
@@ -426,6 +473,43 @@ impl Vertex {
 
         algorithms::filter(self, py, node_ids)
     }
+    /// Remove a node and all edges attached to it
+    ///
+    /// Args:
+    ///     id (str): ID of the node to remove
+    ///
+    /// Returns:
+    ///     Node: The removed node (with its edge lists emptied)
+    ///
+    /// Raises:
+    ///     KeyError: If no node with the given ID exists
+    fn remove_node(&mut self, py: Python<'_>, id: &str) -> PyResult<Py<Node>> {
+        manipulation::remove_node(self, py, id)
+    }
+
+    /// Remove the edge(s) from one node to another
+    ///
+    /// Args:
+    ///     from_id (str): ID of the source node
+    ///     to_id (str): ID of the target node
+    ///     attr (dict, optional): Only remove edges whose attributes match all of these pairs
+    ///
+    /// Returns:
+    ///     int: The number of edges removed
+    ///
+    /// Raises:
+    ///     ValueError: If either node doesn't exist
+    #[pyo3(signature = (from_id, to_id, attr=None))]
+    fn remove_edge(
+        &self,
+        py: Python<'_>,
+        from_id: &str,
+        to_id: &str,
+        attr: Option<HashMap<String, Py<PyAny>>>,
+    ) -> PyResult<usize> {
+        manipulation::remove_edge(self, py, from_id, to_id, attr)
+    }
+
     /// Remove edges and inverse_edges that reference nodes not present in the vertex.
     ///
     /// This is useful after filtering or subsetting the graph, when edges may still
@@ -454,6 +538,8 @@ impl Vertex {
     ///         (the start node when start_node_id is None, and each step) is weighted by
     ///         1 / (1 + times_visited), steering walks towards least-visited nodes.
     ///         Visit counts persist across all attempts of one call. Defaults to False.
+    ///     seed (int, optional): Seed for the random number generator. The same seed and
+    ///         arguments always produce the same walks. Defaults to a random seed.
     ///
     /// Returns:
     ///     list: A list of lists. If include_edge_types is False, each inner list contains node IDs.
@@ -463,7 +549,7 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If start_node_id doesn't exist, is None without stratified=True,
     ///         max_length is 0, or min_length > max_length
-    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None, stratified=None))]
+    #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None, stratified=None, seed=None))]
     fn random_walks(
         &self,
         py: Python<'_>,
@@ -475,6 +561,7 @@ impl Vertex {
         include_edge_types: Option<bool>,
         edge_type_field: Option<String>,
         stratified: Option<bool>,
+        seed: Option<u64>,
     ) -> PyResult<Py<PyList>> {
         algorithms::random_walks(
             self,
@@ -487,6 +574,7 @@ impl Vertex {
             include_edge_types,
             edge_type_field,
             stratified,
+            seed,
         )
     }
 }

@@ -115,6 +115,14 @@ path_nx = result.to_networkx()
 nx.draw(path_nx, with_labels=True, node_color='orange')
 plt.title("Shortest Path from node1 to node3")
 plt.show()
+
+# Ignore edge direction, or walk edges backwards
+result = graph.shortest_path_bfs('node3', 'node1', direction='both')
+
+# Weighted shortest path (Dijkstra). Costs come from the "weight" edge
+# attribute; edges without it cost default_weight (1.0).
+result = graph.shortest_path_dijkstra('node1', 'node3', weight='weight')
+print(result.meta['nodelist'], result.meta['cost'])
 ```
 
 ### Graph Expansion
@@ -129,7 +137,7 @@ print(f"Filtered nodes: {filtered_graph.keys()}")
 print(f"Expanded nodes: {expanded.keys()}")
 ```
 
-> **Note:** `expand` follows **outgoing** edges only. Nodes that have edges *pointing into* the seed nodes are not pulled in.
+> **Note:** by default `expand` follows **outgoing** edges only, so nodes that have edges *pointing into* the seed nodes are not pulled in. Pass `direction="in"` to follow incoming edges, or `direction="both"` for both.
 
 
 ### BFS / DFS Traversal
@@ -198,6 +206,13 @@ walks = graph.random_walks(None, 5, 50, stratified=True)
 
 # Fixed start, but steps still favour least-visited nodes
 walks = graph.random_walks("node1", 5, 50, stratified=True)
+```
+
+Pass `seed=` to get reproducible walks. Walks run in native code with the GIL
+released, and non-stratified walks are spread across all CPU cores:
+
+```python
+walks = graph.random_walks("node1", 10, 100_000, allow_revisit=True, seed=42)
 ```
 
 ### Event-Driven Programming
@@ -348,10 +363,19 @@ count = graph.node_count() -> int
 # Edge operations  
 edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 
+# Removal (neighbours' edge lists are kept consistent)
+node = graph.remove_node(id: str) -> Node                           # also drops its edges
+count = graph.remove_edge(from_id: str, to_id: str, attr: dict = None) -> int
+
 # Algorithms
-result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None) -> Vertex
+result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None,
+                                 direction: str = "out") -> Vertex
 # result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable
-expanded = graph.expand(source: Vertex, depth: int = 1) -> Vertex
+result = graph.shortest_path_dijkstra(start: str, end: str, weight: str = "weight",
+                                      default_weight: float = 1.0, max_cost: float = None,
+                                      direction: str = "out") -> Vertex
+# result.meta["cost"] holds the total path cost
+expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
 pruned_count = graph.prune() -> int            # remove dangling edges after filter/subset
@@ -359,7 +383,7 @@ walks = graph.random_walks(start_node_id, max_length, num_attempts,
                             min_length=None, allow_revisit=False,
                             include_edge_types=False,
                             edge_type_field="type",
-                            stratified=False) -> list[list[str]]
+                            stratified=False, seed=None) -> list[list[str]]
 # stratified=True biases every choice towards least-visited nodes;
 # start_node_id may then be None to sample starts across the whole graph
 

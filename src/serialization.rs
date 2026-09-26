@@ -1,11 +1,13 @@
 // serialization.rs
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString};
+use pyo3::types::{
+    PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString, PyTuple,
+};
 use serde::{Deserialize, Serialize};
 use half::f16;
 use serde::ser::{SerializeStruct, Serializer as _};
 use bincode::Options;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
@@ -53,37 +55,119 @@ pub struct SerializableGraph {
     pub metadata: HashMap<String, SerializableValue>,
 }
 
+/// Dictionary keys are serialized as strings; non-string keys use `str(key)`.
+fn dict_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
+    match key.downcast::<PyString>() {
+        Ok(s) => Ok(s.to_str()?.to_owned()),
+        Err(_) => key.str()?.extract(),
+    }
+}
+
+fn attr_map(py: Python<'_>, map: &HashMap<String, Py<PyAny>>) -> PyResult<HashMap<String, SerializableValue>> {
+    let mut out = HashMap::with_capacity(map.len());
+    for (key, value) in map {
+        out.insert(key.clone(), SerializableValue::from_bound(value.bind(py))?);
+    }
+    Ok(out)
+}
+
+/// Convert a Python object to a `serde_json::Value` directly (used to load a
+/// graph from a dict without a `json.dumps` + parse round trip).
+pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    use serde_json::Value;
+    if obj.is_none() {
+        Ok(Value::Null)
+    } else if let Ok(b) = obj.downcast::<PyBool>() {
+        Ok(Value::Bool(b.is_true()))
+    } else if let Ok(i) = obj.downcast::<PyInt>() {
+        match i.extract::<i64>() {
+            Ok(v) => Ok(Value::from(v)),
+            Err(_) => Ok(Value::from(i.extract::<f64>()?)),
+        }
+    } else if let Ok(f) = obj.downcast::<PyFloat>() {
+        Ok(serde_json::Number::from_f64(f.value()).map(Value::Number).unwrap_or(Value::Null))
+    } else if let Ok(s) = obj.downcast::<PyString>() {
+        Ok(Value::String(s.to_str()?.to_owned()))
+    } else if let Ok(dict) = obj.downcast::<PyDict>() {
+        let mut map = serde_json::Map::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            map.insert(dict_key(&k)?, py_to_json(&v)?);
+        }
+        Ok(Value::Object(map))
+    } else if let Ok(list) = obj.downcast::<PyList>() {
+        list.iter().map(|v| py_to_json(&v)).collect::<PyResult<Vec<_>>>().map(Value::Array)
+    } else if let Ok(tuple) = obj.downcast::<PyTuple>() {
+        tuple.iter().map(|v| py_to_json(&v)).collect::<PyResult<Vec<_>>>().map(Value::Array)
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "Unsupported value in graph dict: {}",
+            obj.get_type().name()?
+        )))
+    }
+}
+
 impl SerializableValue {
     /// Convert Python object to SerializableValue
     pub fn from_python(py: Python<'_>, obj: &Py<PyAny>) -> PyResult<Self> {
-        let bound = obj.bind(py);
-        
+        Self::from_bound(obj.bind(py))
+    }
+
+    /// Convert a bound Python object to SerializableValue.
+    ///
+    /// Dispatches on the concrete Python type (checking `bool` before `int`,
+    /// since `bool` is an `int` subclass) instead of trying a chain of
+    /// extractions.
+    pub fn from_bound(bound: &Bound<'_, PyAny>) -> PyResult<Self> {
         if bound.is_none() {
             Ok(SerializableValue::None)
-        } else if let Ok(s) = bound.extract::<String>() {
-            Ok(SerializableValue::String(s))
-        } else if let Ok(i) = bound.extract::<i64>() {
-            Ok(SerializableValue::Int(i))
-        } else if let Ok(f) = bound.extract::<f64>() {
-            Ok(SerializableValue::Float(f))
-        } else if let Ok(b) = bound.extract::<bool>() {
-            Ok(SerializableValue::Bool(b))
-        } else if let Ok(list) = bound.extract::<Vec<Py<PyAny>>>() {
-            let mut serializable_list = Vec::new();
-            for item in list {
-                serializable_list.push(Self::from_python(py, &item)?);
+        } else if let Ok(b) = bound.downcast::<PyBool>() {
+            Ok(SerializableValue::Bool(b.is_true()))
+        } else if let Ok(i) = bound.downcast::<PyInt>() {
+            match i.extract::<i64>() {
+                Ok(v) => Ok(SerializableValue::Int(v)),
+                // Out of i64 range: keep the magnitude as a float
+                Err(_) => Ok(SerializableValue::Float(i.extract::<f64>()?)),
             }
-            Ok(SerializableValue::List(serializable_list))
-        } else if bound.hasattr("keys")? {
-            // Treat as dictionary
-            let mut serializable_dict = HashMap::new();
-            let dict = bound.downcast::<pyo3::types::PyDict>()?;
+        } else if let Ok(f) = bound.downcast::<PyFloat>() {
+            Ok(SerializableValue::Float(f.value()))
+        } else if let Ok(s) = bound.downcast::<PyString>() {
+            Ok(SerializableValue::String(s.to_str()?.to_owned()))
+        } else if let Ok(list) = bound.downcast::<PyList>() {
+            let mut items = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                items.push(Self::from_bound(&item)?);
+            }
+            Ok(SerializableValue::List(items))
+        } else if let Ok(tuple) = bound.downcast::<PyTuple>() {
+            let mut items = Vec::with_capacity(tuple.len());
+            for item in tuple.iter() {
+                items.push(Self::from_bound(&item)?);
+            }
+            Ok(SerializableValue::List(items))
+        } else if let Ok(dict) = bound.downcast::<PyDict>() {
+            let mut map = HashMap::with_capacity(dict.len());
             for (key, value) in dict.iter() {
-                let key_str = key.extract::<String>()?;
-                let value_py = value.into();
-                serializable_dict.insert(key_str, Self::from_python(py, &value_py)?);
+                map.insert(dict_key(&key)?, Self::from_bound(&value)?);
             }
-            Ok(SerializableValue::Dict(serializable_dict))
+            Ok(SerializableValue::Dict(map))
+        } else if bound.hasattr("tolist")? {
+            // numpy arrays and numpy scalars (e.g. embeddings): one bulk
+            // conversion to native Python values instead of element-wise
+            // access through the sequence protocol.
+            Self::from_bound(&bound.call_method0("tolist")?)
+        } else if let Ok(mapping) = bound.downcast::<PyMapping>() {
+            let mut map = HashMap::new();
+            for item in mapping.items()?.iter() {
+                let (key, value): (Bound<'_, PyAny>, Bound<'_, PyAny>) = item.extract()?;
+                map.insert(dict_key(&key)?, Self::from_bound(&value)?);
+            }
+            Ok(SerializableValue::Dict(map))
+        } else if let Ok(seq) = bound.downcast::<PySequence>() {
+            let mut items = Vec::new();
+            for item in seq.try_iter()? {
+                items.push(Self::from_bound(&item?)?);
+            }
+            Ok(SerializableValue::List(items))
         } else {
             // Fallback: convert to string representation
             Ok(SerializableValue::String(bound.str()?.extract()?))
@@ -150,85 +234,54 @@ impl SerializableGraph {
 
         // First pass: collect all nodes and their basic info
         for (node_id, node_py) in &vertex.nodes {
-            let node_ref = node_py.bind(py);
-            
-            // Extract node attributes
-            let attr_py: HashMap<String, Py<PyAny>> = node_ref.getattr("attr")?.extract()?;
-            let mut serializable_attr = HashMap::new();
-            for (key, value) in attr_py {
-                serializable_attr.insert(key, SerializableValue::from_python(py, &value)?);
-            }
-
-            // Extract node meta
-            let meta_py: HashMap<String, Py<PyAny>> = node_ref.getattr("meta")?.extract()?;
-            let mut serializable_meta = HashMap::new();
-            for (key, value) in meta_py {
-                serializable_meta.insert(key, SerializableValue::from_python(py, &value)?);
-            }
+            let node = node_py.borrow(py);
 
             // We'll fill in edge_ids and inverse_edge_ids in the second pass
             let serializable_node = SerializableNode {
                 id: node_id.clone(),
-                attr: serializable_attr,
-                meta: serializable_meta,
+                attr: attr_map(py, &node.attr)?,
+                meta: attr_map(py, &node.meta)?,
                 edge_ids: Vec::new(),
                 inverse_edge_ids: Vec::new(),
             };
-            
+
             serializable_nodes.insert(node_id.clone(), serializable_node);
         }
 
         // Second pass: collect all edges and update node edge references
-        for (_node_id, node_py) in &vertex.nodes {
-            let node_ref = node_py.bind(py);
-            let edges: Vec<Py<Edge>> = node_ref.getattr("edges")?.extract()?;
-            
-            for edge_py in edges {
-                let edge_ref = edge_py.bind(py);
-                
+        for node_py in vertex.nodes.values() {
+            let node = node_py.borrow(py);
+
+            for edge_py in &node.edges {
+                let edge = edge_py.borrow(py);
+
                 // Extract edge information
-                let from_node: Py<Node> = edge_ref.getattr("from_node")?.extract()?;
-                let to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                let from_id = from_node.bind(py).getattr("id")?.extract::<String>()?;
-                let to_id = to_node.bind(py).getattr("id")?.extract::<String>()?;
-                
+                let from_id = edge.from_node.borrow(py).id.clone();
+                let to_id = edge.to_node.borrow(py).id.clone();
+
                 // Generate unique edge ID
                 let edge_id = format!("edge_{}_{}_to_{}", edge_counter, from_id, to_id);
                 edge_counter += 1;
-                
-                // Extract edge attributes
-                let attr_py: HashMap<String, Py<PyAny>> = edge_ref.getattr("attr")?.extract()?;
-                let mut serializable_attr = HashMap::new();
-                for (key, value) in attr_py {
-                    serializable_attr.insert(key, SerializableValue::from_python(py, &value)?);
-                }
-                
-                // Extract edge meta
-                let meta_py: HashMap<String, Py<PyAny>> = edge_ref.getattr("meta")?.extract()?;
-                let mut serializable_meta = HashMap::new();
-                for (key, value) in meta_py {
-                    serializable_meta.insert(key, SerializableValue::from_python(py, &value)?);
-                }
-                
-                let serializable_edge = SerializableEdge {
-                    id: edge_id.clone(),
-                    from_id: from_id.clone(),
-                    to_id: to_id.clone(),
-                    attr: serializable_attr,
-                    meta: serializable_meta,
-                };
-                
-                serializable_edges.insert(edge_id.clone(), serializable_edge);
-                
+
                 // Add edge ID to the source node
                 if let Some(node) = serializable_nodes.get_mut(&from_id) {
                     node.edge_ids.push(edge_id.clone());
                 }
-                
+
                 // Add edge ID to the target node's inverse_edge_ids
                 if let Some(node) = serializable_nodes.get_mut(&to_id) {
-                    node.inverse_edge_ids.push(edge_id);
+                    node.inverse_edge_ids.push(edge_id.clone());
                 }
+
+                let serializable_edge = SerializableEdge {
+                    id: edge_id.clone(),
+                    from_id,
+                    to_id,
+                    attr: attr_map(py, &edge.attr)?,
+                    meta: attr_map(py, &edge.meta)?,
+                };
+
+                serializable_edges.insert(edge_id, serializable_edge);
             }
         }
 
@@ -237,8 +290,7 @@ impl SerializableGraph {
         let meta_dict = vertex.meta.bind(py);
         for (key, value) in meta_dict.iter() {
             let key_str = key.extract::<String>()?;
-            let value_py = value.into();
-            vertex_meta.insert(key_str, SerializableValue::from_python(py, &value_py)?);
+            vertex_meta.insert(key_str, SerializableValue::from_bound(&value)?);
         }
 
         // Add some metadata
@@ -260,7 +312,6 @@ impl SerializableGraph {
 
     /// Convert SerializableGraph back to a Vertex
     pub fn to_vertex(&self, py: Python<'_>) -> PyResult<Vertex> {
-        let mut nodes_map = HashMap::new();
         let mut python_nodes = HashMap::new();
         
         // First pass: create all nodes without edges
@@ -289,15 +340,13 @@ impl SerializableGraph {
                 vertex: None,
             })?;
             
-            python_nodes.insert(node_id.clone(), node.clone_ref(py));
-            nodes_map.insert(node_id.clone(), node);
+            python_nodes.insert(node_id.clone(), node);
         }
         
-        // Second pass: create edges and assign them to nodes
-        let mut node_edges: HashMap<String, Vec<Py<Edge>>> = HashMap::new();
-        let mut node_inverse_edges: HashMap<String, Vec<Py<Edge>>> = HashMap::new();
-        
-        for serializable_edge in self.edges.values() {
+        // Second pass: create all edges
+        let mut python_edges: HashMap<&str, Py<Edge>> = HashMap::with_capacity(self.edges.len());
+
+        for (edge_key, serializable_edge) in &self.edges {
             let from_node = python_nodes.get(&serializable_edge.from_id)
                 .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
                     format!("From node {} not found", serializable_edge.from_id)
@@ -306,19 +355,19 @@ impl SerializableGraph {
                 .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
                     format!("To node {} not found", serializable_edge.to_id)
                 ))?;
-            
+
             // Convert edge attributes back to Python
             let mut python_attr = HashMap::new();
             for (key, value) in &serializable_edge.attr {
                 python_attr.insert(key.clone(), value.to_python(py)?);
             }
-            
+
             // Convert edge meta back to Python
             let mut python_meta = HashMap::new();
             for (key, value) in &serializable_edge.meta {
                 python_meta.insert(key.clone(), value.to_python(py)?);
             }
-            
+
             let edge = Py::new(py, Edge {
                 id: Some(serializable_edge.id.clone()),
                 from_node: from_node.clone_ref(py),
@@ -330,33 +379,47 @@ impl SerializableGraph {
                 on_update_callbacks: PyList::empty(py).into(),
                 vertex: None,
             })?;
-            
-            // Add edge to the from_node's edge list
-            node_edges.entry(serializable_edge.from_id.clone())
-                .or_insert_with(Vec::new)
-                .push(edge.clone_ref(py));
-                
-            // Add edge to the to_node's inverse_edge list
-            node_inverse_edges.entry(serializable_edge.to_id.clone())
-                .or_insert_with(Vec::new)
-                .push(edge);
+
+            python_edges.insert(edge_key.as_str(), edge);
         }
-        
-        // Third pass: update nodes with their edges and inverse_edges
-        for (node_id, edges) in node_edges {
-            if let Some(node_py) = python_nodes.get(&node_id) {
-                let mut node_ref = node_py.bind(py).borrow_mut();
-                node_ref.edges = edges;
+
+        // Third pass: attach edges to nodes in their saved order (edge_ids /
+        // inverse_edge_ids), so edge order survives a save/load round trip.
+        let mut attached: HashSet<&str> = HashSet::with_capacity(python_edges.len());
+        for (node_id, serializable_node) in &self.nodes {
+            let node_py = &python_nodes[node_id];
+            let mut node_ref = node_py.bind(py).borrow_mut();
+            for edge_id in &serializable_node.edge_ids {
+                if let Some(edge) = python_edges.get(edge_id.as_str()) {
+                    if self.edges[edge_id].from_id == *node_id {
+                        node_ref.edges.push(edge.clone_ref(py));
+                        attached.insert(edge_id.as_str());
+                    }
+                }
+            }
+            for edge_id in &serializable_node.inverse_edge_ids {
+                if let Some(edge) = python_edges.get(edge_id.as_str()) {
+                    if self.edges[edge_id].to_id == *node_id {
+                        node_ref.inverse_edges.push(edge.clone_ref(py));
+                    }
+                }
             }
         }
-        
-        for (node_id, inverse_edges) in node_inverse_edges {
-            if let Some(node_py) = python_nodes.get(&node_id) {
-                let mut node_ref = node_py.bind(py).borrow_mut();
-                node_ref.inverse_edges = inverse_edges;
+
+        // Edges not listed in their source node's edge_ids (hand-written or
+        // older files) are still attached.
+        for (edge_id, edge) in &python_edges {
+            if !attached.contains(edge_id) {
+                let e = &self.edges[*edge_id];
+                python_nodes[&e.from_id].borrow_mut(py).edges.push(edge.clone_ref(py));
+                let to = &python_nodes[&e.to_id];
+                let already = to.borrow(py).inverse_edges.iter().any(|x| x.is(edge));
+                if !already {
+                    to.borrow_mut(py).inverse_edges.push(edge.clone_ref(py));
+                }
             }
         }
-        
+
         // Convert vertex meta back to Python
         let vertex_meta_dict = PyDict::new(py);
         for (key, value) in &self.meta {
@@ -452,12 +515,10 @@ impl SerializableGraph {
     }
 
     /// Save graph to binary using f16 for floats
-    pub fn save_to_binary_f16<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        let mut graph = self.clone();
-        graph.convert_floats_to_f16();
-        graph.save_to_binary(path)
+    /// Consumes the graph so the conversion happens in place, without a copy.
+    pub fn save_to_binary_f16<P: AsRef<Path>>(mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+        self.convert_floats_to_f16();
+        self.save_to_binary(path)
     }
 }
 
-// Add chrono for timestamps
-use chrono;

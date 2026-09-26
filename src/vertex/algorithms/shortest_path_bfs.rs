@@ -1,56 +1,61 @@
 // vertex/algorithms/shortest_path_bfs.rs
 
 use pyo3::prelude::*;
-use std::collections::HashMap;
-use crate::{Node, Edge};
+use pyo3::types::PyDict;
+use std::collections::{HashMap, HashSet, VecDeque};
 use super::super::core::Vertex;
+use super::super::subgraph::{build_subgraph, neighbors, Direction};
+
+/// Build the result vertex for a path: the path nodes, every edge between
+/// them, and `meta["nodelist"]` holding the path in root -> target order.
+pub(crate) fn path_vertex(
+    py: Python<'_>,
+    vertex: &Vertex,
+    path_ids: Vec<String>,
+) -> PyResult<Py<Vertex>> {
+    let path_set: HashSet<String> = path_ids.iter().cloned().collect();
+    let meta = PyDict::new(py);
+    meta.set_item("nodelist", path_ids)?;
+    build_subgraph(py, vertex, &path_set, meta.into(), false)
+}
 
 pub fn shortest_path_bfs(
     vertex: &Vertex,
     py: Python<'_>,
     root_node_id: String,
     target_node_id: String,
-    max_depth: Option<usize>
+    max_depth: Option<usize>,
+    direction: Option<&str>,
 ) -> PyResult<Py<Vertex>> {
-    use std::collections::{VecDeque, HashMap as StdHashMap};
-    
+    let direction = Direction::parse(direction)?;
+
     // Get the root node
     let root_node = vertex.nodes.get(&root_node_id)
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
             format!("Root node with id '{}' not found", root_node_id)
         ))?
         .clone_ref(py);
-    
+
     // Check if target exists in the graph
     if !vertex.nodes.contains_key(&target_node_id) {
         return Err(pyo3::exceptions::PyValueError::new_err(
             format!("Target node with id '{}' not found", target_node_id)
         ));
     }
-    
+
     // Check if root is the target
     if root_node_id == target_node_id {
-        let mut path_nodes = HashMap::<String, Py<Node>>::new();
-        
-        // Create a new node with no edges (since it's just a single node path)
-        let original_node_ref = root_node.bind(py);
-        let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
-        let new_node = Py::new(py, Node::new(py, root_node_id.clone(), Some(attr), Some(Vec::new())))?;
-        let nodelist = vec![root_node_id.clone()];
-        path_nodes.insert(root_node_id, new_node);
-
-        let result_vertex = Vertex::from_nodes_with_path(py, path_nodes, nodelist)?;
-        return Py::new(py, result_vertex);
+        return path_vertex(py, vertex, vec![root_node_id]);
     }
 
-    let mut visited = std::collections::HashSet::<String>::new();
+    let mut visited = HashSet::<String>::new();
     let mut queue = VecDeque::new();
-    let mut parent_map = StdHashMap::<String, String>::new();
-    
+    let mut parent_map = HashMap::<String, String>::new();
+
     // Initialize queue with root node
     visited.insert(root_node_id.clone());
     queue.push_back((root_node, 0));
-    
+
     // Perform BFS from the root node
     while let Some((current_node, current_depth)) = queue.pop_front() {
         // Check depth limit
@@ -60,80 +65,33 @@ pub fn shortest_path_bfs(
             }
         }
 
-        // Get edges from current node
-        let current_ref = current_node.bind(py);
-        let edges: Vec<Py<Edge>> = current_ref.getattr("edges")?.extract()?;
-        let current_id = current_ref.getattr("id")?.extract::<String>()?;
-        
-        for edge in edges {
-            let edge_ref = edge.bind(py);
-            let to_node_actual: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-            let to_node_ref = to_node_actual.bind(py);
-            let to_id = to_node_ref.getattr("id")?.extract::<String>()?;
-            
+        let current_id = current_node.borrow(py).id.clone();
+
+        for (_edge, neighbor) in neighbors(py, &current_node, direction) {
+            let to_id = neighbor.borrow(py).id.clone();
+
             // If not visited, mark and enqueue
-            if !visited.contains(&to_id) {
-                visited.insert(to_id.clone());
+            if visited.insert(to_id.clone()) {
                 parent_map.insert(to_id.clone(), current_id.clone());
-                queue.push_back((to_node_actual, current_depth + 1));
-                
+
                 // If this is our target, reconstruct the path
                 if to_id == target_node_id {
-                    // Reconstruct the path from target back to root
-                    let mut path_ids = Vec::new();
-                    let mut current = target_node_id.clone();
-                    path_ids.push(current.clone());
-                    
-                    // Trace back through parents to build the path
-                    while let Some(parent) = parent_map.get(&current) {
+                    let mut path_ids = vec![to_id];
+                    while let Some(parent) = parent_map.get(path_ids.last().unwrap()) {
                         path_ids.push(parent.clone());
-                        current = parent.clone();
                     }
-                    
-                    // Create new vertex with path nodes, filtering edges to only include path connections
-                    let mut path_nodes = HashMap::<String, Py<Node>>::new();
-                    let path_set: std::collections::HashSet<String> = path_ids.iter().cloned().collect();
-                    
-                    for path_id in &path_ids {
-                        if let Some(original_node) = vertex.nodes.get(path_id) {
-                            let original_node_ref = original_node.bind(py);
-                            
-                            // Get original attributes
-                            let attr: HashMap<String, Py<PyAny>> = original_node_ref.getattr("attr")?.extract().unwrap_or_default();
-                            
-                            // Get original edges and filter to only include edges to other path nodes
-                            let original_edges: Vec<Py<Edge>> = original_node_ref.getattr("edges")?.extract().unwrap_or_default();
-                            let mut filtered_edges = Vec::new();
-                            
-                            for edge in original_edges {
-                                let edge_ref = edge.bind(py);
-                                let edge_to_node: Py<Node> = edge_ref.getattr("to_node")?.extract()?;
-                                let edge_to_node_ref = edge_to_node.bind(py);
-                                let edge_to_id = edge_to_node_ref.getattr("id")?.extract::<String>()?;
-                                
-                                // Only include edge if target is also in the path
-                                if path_set.contains(&edge_to_id) {
-                                    filtered_edges.push(edge.clone_ref(py));
-                                }
-                            }
-                            
-                            // Create new node with filtered edges
-                            let new_node = Py::new(py, Node::new(py, path_id.clone(), Some(attr), Some(filtered_edges)))?;
-                            path_nodes.insert(path_id.clone(), new_node);
-                        }
-                    }
-                    
                     path_ids.reverse(); // built target→root; reverse to root→target
-                    let result_vertex = Vertex::from_nodes_with_path(py, path_nodes, path_ids)?;
-                    return Py::new(py, result_vertex);
+                    return path_vertex(py, vertex, path_ids);
                 }
+
+                queue.push_back((neighbor, current_depth + 1));
             }
         }
     }
-    
+
     // Target not found within max_depth
     Err(pyo3::exceptions::PyValueError::new_err(
-        format!("Target node '{}' not reachable from '{}' within max_depth {:?}", 
+        format!("Target node '{}' not reachable from '{}' within max_depth {:?}",
                 target_node_id, root_node_id, max_depth)
     ))
 }

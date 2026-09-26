@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::{PyTraverseError, PyVisit};
 use crate::Node;
 
 #[pyclass]
@@ -14,6 +15,17 @@ impl Path {
         Path {
             nodes: nodes.unwrap_or_default(),
         }
+    }
+
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        for n in &self.nodes {
+            visit.call(n)?;
+        }
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.nodes.clear();
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
