@@ -459,6 +459,15 @@ The library includes comprehensive performance testing for various graph operati
 
 See the `performance_results/` directory for detailed benchmarks.
 
+To compare against networkx on your machine (writes
+`performance_results/networkx_comparison.md` with a timing table):
+
+```bash
+pip install networkx
+python benchmarks/compare_networkx.py                      # default sizes
+python benchmarks/compare_networkx.py --sizes 50000:250000 --repeats 5
+```
+
 ## Contributing
 
 Contributions are welcome! Please see our contributing guidelines for more information.
