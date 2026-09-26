@@ -248,15 +248,16 @@ impl Vertex {
     ///
     /// Args:
     ///     file_path (str, optional): Path to save the graph to. If None, returns JSON string.
+    ///     pretty (bool, optional): Indent the output. Defaults to False (compact JSON).
     ///     
     /// Returns:
     ///     None if file_path is provided, or str (JSON) if file_path is None
     ///     
     /// Raises:
     ///     RuntimeError: If saving/serialization fails
-    #[pyo3(signature = (file_path=None))]
-    fn save_to_json(&self, py: Python<'_>, file_path: Option<String>) -> PyResult<Py<PyAny>> {
-        serialization::save_to_json(self, py, file_path)
+    #[pyo3(signature = (file_path=None, pretty=false))]
+    fn save_to_json(&self, py: Python<'_>, file_path: Option<String>, pretty: bool) -> PyResult<Py<PyAny>> {
+        serialization::save_to_json(self, py, file_path, pretty)
     }
 
     /// Save the graph to a binary file (more efficient for large graphs)

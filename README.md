@@ -248,11 +248,16 @@ print(f"Graph metadata: {graph.meta}")
 ### Persistence
 
 ```python
+import json
+
 # Save to a file
 graph.save_to_json("my_graph.json")
 
 # Save to a string (omit the path — returns the JSON string instead of writing a file)
 json_str = graph.save_to_json()
+
+# Output is compact by default; pass pretty=True for indented, human-readable JSON
+graph.save_to_json("my_graph.json", pretty=True)
 
 # Save to binary format (more efficient for large graphs)
 graph.save_to_binary("my_graph.bin")
@@ -262,6 +267,7 @@ graph.save_to_binary_f16("my_graph_f16.bin")
 # Load from a file path, a raw JSON string, or a plain dict
 loaded_graph = Vertex.load_from_json("my_graph.json")   # file path
 loaded_graph = Vertex.load_from_json(json_str)           # JSON string
+loaded_graph = Vertex.load_from_json(json.loads(json_str))  # plain dict
 print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
@@ -394,6 +400,7 @@ metadata = graph.get_metadata() -> dict
 # Persistence
 graph.save_to_json("path.json")              # write to file
 json_str = graph.save_to_json()              # no arg → returns JSON string
+json_str = graph.save_to_json(pretty=True)   # indented (default: compact)
 graph.save_to_binary(file_path: str)
 graph.save_to_binary_f16(file_path: str)
 loaded = Vertex.load_from_json(source)       # file path, JSON string, or dict

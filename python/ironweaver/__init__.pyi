@@ -443,11 +443,14 @@ class Vertex:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save_to_json(self, file_path: str | None = ...) -> str | None:
+    def save_to_json(self, file_path: str | None = ..., pretty: bool = ...) -> str | None:
         """Serialize to JSON.
 
         If *file_path* is given, writes to that path and returns None.
         If *file_path* is None, returns the JSON string.
+        Output is compact by default; pass ``pretty=True`` for indented JSON.
+        Raises RuntimeError if a value cannot be serialized or the file
+        cannot be written.
         """
         ...
     def save_to_binary(self, file_path: str) -> None:

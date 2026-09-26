@@ -79,8 +79,13 @@ Below is a quick guide to notable functions and where to find them.
   - `shortest_path_dijkstra.rs`: `shortest_path_dijkstra`
 
 - **src/serialization.rs**
-  - `SerializableGraph` helpers including `from_vertex`, `to_vertex`,
-    `save_to_json`, `load_from_json`, `save_to_binary`, `save_to_binary_f16`, `load_from_binary`.
+  - On-disk format (JSON via sonic-rs, binary via bincode); legacy files in
+    `tests/data/` must keep loading.
+  - Saving: `GraphView` streams the live graph into the serializer
+    (`to_json`, `write_binary`); `PyValue` encodes Python values.
+  - Loading: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
+    borrowed structs, `LoadGraph::into_vertex` builds the Python objects;
+    `dict_to_json` handles dict input.
 
 - **src/observed_dictionary.rs**
   - `ObservedDictionary::new`, `__setitem__`, `__getitem__`.

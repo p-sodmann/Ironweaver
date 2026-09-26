@@ -1,0 +1,125 @@
+{
+  "nodes": {
+    "c": {
+      "id": "c",
+      "attr": {},
+      "meta": {},
+      "edge_ids": [],
+      "inverse_edge_ids": [
+        "edge_1_a_to_c"
+      ]
+    },
+    "b": {
+      "id": "b",
+      "attr": {
+        "name": {
+          "String": "beta"
+        }
+      },
+      "meta": {},
+      "edge_ids": [
+        "edge_2_b_to_a"
+      ],
+      "inverse_edge_ids": [
+        "edge_0_a_to_b"
+      ]
+    },
+    "a": {
+      "id": "a",
+      "attr": {
+        "tags": {
+          "List": [
+            {
+              "String": "x"
+            },
+            {
+              "Int": 2
+            },
+            "None"
+          ]
+        },
+        "nested": {
+          "Dict": {
+            "k": {
+              "Int": 3
+            }
+          }
+        },
+        "flag": {
+          "Bool": true
+        },
+        "name": {
+          "String": "alpha"
+        },
+        "score": {
+          "Float": 1.5
+        }
+      },
+      "meta": {
+        "note": {
+          "String": "m"
+        }
+      },
+      "edge_ids": [
+        "edge_0_a_to_b",
+        "edge_1_a_to_c"
+      ],
+      "inverse_edge_ids": [
+        "edge_2_b_to_a"
+      ]
+    }
+  },
+  "edges": {
+    "edge_0_a_to_b": {
+      "id": "edge_0_a_to_b",
+      "from_id": "a",
+      "to_id": "b",
+      "attr": {
+        "weight": {
+          "Float": 0.25
+        },
+        "type": {
+          "String": "knows"
+        }
+      },
+      "meta": {}
+    },
+    "edge_2_b_to_a": {
+      "id": "edge_2_b_to_a",
+      "from_id": "b",
+      "to_id": "a",
+      "attr": {},
+      "meta": {}
+    },
+    "edge_1_a_to_c": {
+      "id": "edge_1_a_to_c",
+      "from_id": "a",
+      "to_id": "c",
+      "attr": {
+        "type": {
+          "String": "likes"
+        }
+      },
+      "meta": {}
+    }
+  },
+  "meta": {
+    "title": {
+      "String": "legacy"
+    }
+  },
+  "metadata": {
+    "node_count": {
+      "Int": 3
+    },
+    "edge_count": {
+      "Int": 3
+    },
+    "timestamp": {
+      "String": "2026-09-26T08:25:19.346808902+00:00"
+    },
+    "version": {
+      "String": "1.0"
+    }
+  }
+}
