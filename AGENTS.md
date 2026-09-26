@@ -75,6 +75,9 @@ Below is a quick guide to notable functions and where to find them.
   - `expand.rs`: `expand`
   - `filter.rs`: `filter`
   - `random_walks.rs`: `random_walks`
+  - `bidirectional.rs`: `bidirectional_bfs` (used by `shortest_path_bfs` and
+    `Node.bfs_search` for library-built graphs; relies on `edges` /
+    `inverse_edges` being in sync), `is_library_built`
   - `shortest_path_bfs.rs`: `shortest_path_bfs`
   - `shortest_path_dijkstra.rs`: `shortest_path_dijkstra`
 

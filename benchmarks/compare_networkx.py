@@ -196,14 +196,14 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     t_nx, r_nx = best_of(lambda: nx.has_path(g, src, dst), repeats)
     assert (r_iw is not None) == r_nx
     add(Result("BFS search", f"find `{dst}` from `{src}`", t_iw, t_nx,
-               "networkx `has_path` uses bidirectional BFS"))
+               "both use bidirectional BFS"))
 
     # Paths ----------------------------------------------------------------
     t_iw, r_iw = best_of(lambda: iw.shortest_path_bfs(src, dst), repeats)
     t_nx, r_nx = best_of(lambda: nx.shortest_path(g, src, dst), repeats)
     assert len(r_iw.meta["nodelist"]) == len(r_nx)
     add(Result("Shortest path (unweighted)", "BFS shortest path", t_iw, t_nx,
-               f"{len(r_nx) - 1} hops; networkx uses bidirectional BFS"))
+               f"{len(r_nx) - 1} hops; both use bidirectional BFS"))
 
     t_iw, r_iw = best_of(lambda: iw.shortest_path_dijkstra(src, dst, weight="weight"), repeats)
     t_nx, r_nx = best_of(lambda: nx.dijkstra_path(g, src, dst, weight="weight"), repeats)

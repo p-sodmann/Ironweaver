@@ -253,8 +253,8 @@ def test_dijkstra_picks_cheapest_path():
     # a->c->d (2 + 1) is cheaper than a->b->d (1 + 5); d->e has default 1.0
     assert path.meta["nodelist"] == ["a", "c", "d", "e"]
     assert path.meta["cost"] == pytest.approx(4.0)
-    # BFS would take the first-found hop-equal route instead
-    assert g.shortest_path_bfs("a", "e").meta["nodelist"] == ["a", "b", "d", "e"]
+    # BFS ignores weights: it returns one of the two 3-hop routes
+    assert g.shortest_path_bfs("a", "e").meta["nodelist"] in (["a", "b", "d", "e"], ["a", "c", "d", "e"])
 
 
 def test_dijkstra_limits_and_errors():

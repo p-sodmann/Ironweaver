@@ -5,6 +5,7 @@ use pyo3::types::PyDict;
 use std::collections::{HashMap, HashSet, VecDeque};
 use super::super::core::Vertex;
 use super::super::subgraph::{build_subgraph, neighbors, Direction};
+use super::bidirectional::{bidirectional_bfs, is_library_built};
 
 /// Build the result vertex for a path: the path nodes, every edge between
 /// them, and `meta["nodelist"]` holding the path in root -> target order.
@@ -48,6 +49,21 @@ pub fn shortest_path_bfs(
         return path_vertex(py, vertex, vec![root_node_id]);
     }
 
+    // Graphs built through the library keep edges/inverse_edges in sync, so
+    // they can be searched from both ends at once.
+    if is_library_built(py, &root_node) {
+        let target_node = vertex.nodes[&target_node_id].clone_ref(py);
+        let path = bidirectional_bfs(py, &root_node, &target_node, max_depth, direction, |_, _| Ok(true))?;
+        return match path {
+            Some(nodes) => {
+                let path_ids = nodes.iter().map(|n| n.borrow(py).id.clone()).collect();
+                path_vertex(py, vertex, path_ids)
+            }
+            None => Err(not_reachable(&root_node_id, &target_node_id, max_depth)),
+        };
+    }
+
+    // Hand-built graphs: one-sided BFS over outgoing/incoming lists only
     let mut visited = HashSet::<String>::new();
     let mut queue = VecDeque::new();
     let mut parent_map = HashMap::<String, String>::new();
@@ -90,8 +106,12 @@ pub fn shortest_path_bfs(
     }
 
     // Target not found within max_depth
-    Err(pyo3::exceptions::PyValueError::new_err(
-        format!("Target node '{}' not reachable from '{}' within max_depth {:?}",
-                target_node_id, root_node_id, max_depth)
+    Err(not_reachable(&root_node_id, &target_node_id, max_depth))
+}
+
+fn not_reachable(root: &str, target: &str, max_depth: Option<usize>) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "Target node '{}' not reachable from '{}' within max_depth {:?}",
+        target, root, max_depth
     ))
 }

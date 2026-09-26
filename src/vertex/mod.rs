@@ -5,7 +5,7 @@ mod callbacks;
 mod manipulation;
 mod serialization;
 mod analysis;
-mod algorithms;
+pub(crate) mod algorithms;
 pub(crate) mod subgraph;
 
 pub use core::Vertex;

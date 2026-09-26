@@ -31,6 +31,15 @@ impl Direction {
             ))),
         }
     }
+
+    /// The direction that walks the same edges backwards.
+    pub fn reversed(self) -> Self {
+        match self {
+            Direction::Out => Direction::In,
+            Direction::In => Direction::Out,
+            Direction::Both => Direction::Both,
+        }
+    }
 }
 
 /// Neighbours of `node` reachable along one edge in `direction`, as
