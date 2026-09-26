@@ -2,7 +2,9 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
-use crate::serialization::SerializableGraph;
+use crate::serialization::{py_to_json, SerializableGraph};
+use super::subgraph::wire_vertex;
+use crate::gc_pause::GcPause;
 use super::Vertex;
 
 /// Save graph to JSON file (when file_path is provided) or return JSON string (when file_path is None)
@@ -63,10 +65,9 @@ pub fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<
                 ))?
         }
     } else if let Ok(dict) = source.downcast::<PyDict>() {
-        // Convert Python dict to JSON string, then parse
-        let json_module = py.import("json")?;
-        let json_string: String = json_module.call_method1("dumps", (dict,))?.extract()?;
-        SerializableGraph::from_json_string(&json_string)
+        // Convert the Python dict straight into the graph structs
+        let value = py_to_json(dict.as_any())?;
+        serde_json::from_value::<SerializableGraph>(value)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 format!("Failed to parse dict as graph: {}", e)
             ))?
@@ -76,8 +77,12 @@ pub fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<
         ));
     };
     
-    let vertex = serializable_graph.to_vertex(py)?;
-    Py::new(py, vertex)
+    let _gc = GcPause::new(py);
+    let vertex = Py::new(py, serializable_graph.to_vertex(py)?)?;
+    // Loaded nodes/edges get the vertex back-reference and fire the
+    // vertex-level update callbacks, like incrementally built graphs.
+    wire_vertex(py, &vertex);
+    Ok(vertex)
 }
 
 pub fn load_from_binary(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex>> {
@@ -85,6 +90,10 @@ pub fn load_from_binary(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             format!("Failed to load graph from binary: {}", e)
         ))?;
-    let vertex = serializable_graph.to_vertex(py)?;
-    Py::new(py, vertex)
+    let _gc = GcPause::new(py);
+    let vertex = Py::new(py, serializable_graph.to_vertex(py)?)?;
+    // Loaded nodes/edges get the vertex back-reference and fire the
+    // vertex-level update callbacks, like incrementally built graphs.
+    wire_vertex(py, &vertex);
+    Ok(vertex)
 }

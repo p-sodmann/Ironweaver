@@ -3,6 +3,7 @@ mod node;
 mod edge;
 mod observed_dictionary;
 mod path;
+mod gc_pause;
 mod vertex;
 pub mod serialization;
 pub use vertex::Vertex;

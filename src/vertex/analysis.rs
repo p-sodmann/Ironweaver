@@ -1,8 +1,9 @@
 // vertex/analysis.rs
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyDict, PyList};
 use super::Vertex;
+use crate::gc_pause::GcPause;
 
 pub fn get_metadata(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
@@ -11,12 +12,7 @@ pub fn get_metadata(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
     dict.set_item("node_count", vertex.nodes.len())?;
     
     // Count edges
-    let mut edge_count = 0;
-    for node_py in vertex.nodes.values() {
-        let node_ref = node_py.bind(py);
-        let edges: Vec<Py<crate::Edge>> = node_ref.getattr("edges")?.extract()?;
-        edge_count += edges.len();
-    }
+    let edge_count: usize = vertex.nodes.values().map(|n| n.borrow(py).edges.len()).sum();
     dict.set_item("edge_count", edge_count)?;
     
     // Calculate average degree
@@ -41,70 +37,36 @@ pub fn to_networkx(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
             "NetworkX is not available. Please install it with: pip install networkx"
         ))?;
     
+    let _gc = GcPause::new(py);
+
     // Create a new directed graph
     let digraph = networkx.call_method0("DiGraph")?;
-    
-    // Add all nodes first
-    for (node_id, _) in &vertex.nodes {
-        digraph.call_method1("add_node", (node_id,))?;
-    }
-    
-    // Then add node attributes
+
+    // Build (id, attr) and (from, to, attr) lists and hand them to networkx
+    // in two bulk calls instead of several Python calls per node and edge.
+    let node_items = PyList::empty(py);
+    let edge_items = PyList::empty(py);
     for (node_id, node_py) in &vertex.nodes {
-        let node_ref = node_py.bind(py);
-        
-        // Get node attributes and add them to the NetworkX node
-        if let Ok(attr) = node_ref.getattr("attr") {
-            // Get the nodes dict from the graph
-            let nodes_dict = digraph.getattr("nodes")?;
-            let node_dict = nodes_dict.get_item(node_id)?;
-            
-            // Extract attributes from the Python dict and add them to NetworkX node
-            if let Ok(attr_dict) = attr.downcast::<PyDict>() {
-                for item in attr_dict.items() {
-                    let (key, value) = item.extract::<(String, Py<PyAny>)>()?;
-                    node_dict.set_item(key, value)?;
-                }
+        let node = node_py.borrow(py);
+        let attr = PyDict::new(py);
+        for (k, v) in &node.attr {
+            attr.set_item(k, v)?;
+        }
+        node_items.append((node_id, attr))?;
+
+        for edge_py in &node.edges {
+            let edge = edge_py.borrow(py);
+            let to_id = edge.to_node.borrow(py).id.clone();
+            let attr = PyDict::new(py);
+            for (k, v) in &edge.attr {
+                attr.set_item(k, v)?;
             }
+            edge_items.append((node_id, to_id, attr))?;
         }
     }
-    
-    // Add all edges with their attributes
-    for (node_id, node_py) in &vertex.nodes {
-        let node_ref = node_py.bind(py);
-        
-        // Get edges from this node
-        if let Ok(edges) = node_ref.getattr("edges") {
-            if let Ok(edges_vec) = edges.extract::<Vec<Py<PyAny>>>() {
-                for edge_py in edges_vec {
-                    let edge_ref = edge_py.bind(py);
-                    
-                    // Get target node
-                    if let Ok(to_node) = edge_ref.getattr("to_node") {
-                        if let Ok(to_id) = to_node.getattr("id").and_then(|id| id.extract::<String>()) {
-                            // Add edge first
-                            digraph.call_method1("add_edge", (node_id, &to_id))?;
-                            
-                            // Then add edge attributes
-                            if let Ok(edge_attr) = edge_ref.getattr("attr") {
-                                // Get the edges dict from the graph
-                                let edges_dict = digraph.getattr("edges")?;
-                                let edge_dict = edges_dict.get_item((node_id, &to_id))?;
-                                
-                                // Extract attributes from the Python dict and add them to NetworkX edge
-                                if let Ok(attr_dict) = edge_attr.downcast::<PyDict>() {
-                                    for item in attr_dict.items() {
-                                        let (key, value) = item.extract::<(String, Py<PyAny>)>()?;
-                                        edge_dict.set_item(key, value)?;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
+
+    digraph.call_method1("add_nodes_from", (node_items,))?;
+    digraph.call_method1("add_edges_from", (edge_items,))?;
+
     Ok(digraph.into())
 }

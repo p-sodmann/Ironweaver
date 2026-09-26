@@ -36,7 +36,8 @@ Below is a quick guide to notable functions and where to find them.
   - `attach_embeddings_from_meta` – copy embeddings from `vertex.meta` to nodes.
 
 - **src/node.rs**
-  - `Node::new`, `__repr__`, `traverse`, `bfs`, `bfs_search`,
+  - `Node::new`, `__repr__`, `traverse` (exposed to Python as `_traverse`
+    and wrapped in `__init__.py`), `bfs`, `bfs_search`,
     `attr_get`, `attr_set`, `attr_list_append`.
 
 - **src/edge.rs**
@@ -47,17 +48,25 @@ Below is a quick guide to notable functions and where to find them.
 
 - **src/vertex/core.rs**
   - Constructors: `new`, `from_nodes`, `from_nodes_with_path`.
-  - Graph methods: `add_node`, `add_edge`, `get_node`, `has_node`,
-    `node_count`.
+  - Graph methods: `add_node`, `add_edge`, `remove_node`, `remove_edge`,
+    `get_node`, `has_node`, `node_count`, `prune`.
   - IO: `save_to_json`, `save_to_binary`, `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
   - Analysis: `get_metadata`, `to_networkx`.
-  - Algorithms: `shortest_path_bfs`, `expand`, `filter`, `random_walks`.
+  - Algorithms: `shortest_path_bfs`, `shortest_path_dijkstra`, `expand`, `filter`, `random_walks`.
+  - GC support: `__traverse__` / `__clear__` (also on `Node`, `Edge`, `Path`).
 
 - **src/vertex/analysis.rs**
   - `get_metadata`, `to_networkx`.
 
 - **src/vertex/manipulation.rs**
-  - `add_node`, `add_edge`, `get_node`.
+  - `add_node`, `add_edge`, `get_node`, `prune`, `remove_node`, `remove_edge`.
+
+- **src/vertex/subgraph.rs**
+  - `build_subgraph` (shared by filter/expand/shortest paths), `wire_vertex`,
+    `neighbors`, `Direction`.
+
+- **src/gc_pause.rs**
+  - `GcPause` guard that pauses Python's cyclic GC during bulk object creation.
 
 - **src/vertex/serialization.rs**
   - `save_to_json`, `save_to_binary`, `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
@@ -67,6 +76,7 @@ Below is a quick guide to notable functions and where to find them.
   - `filter.rs`: `filter`
   - `random_walks.rs`: `random_walks`
   - `shortest_path_bfs.rs`: `shortest_path_bfs`
+  - `shortest_path_dijkstra.rs`: `shortest_path_dijkstra`
 
 - **src/serialization.rs**
   - `SerializableGraph` helpers including `from_vertex`, `to_vertex`,

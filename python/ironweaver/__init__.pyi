@@ -10,7 +10,7 @@ This file describes every symbol available after::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator, final
+from typing import Any, Callable, Iterator, Literal, final
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -408,11 +408,26 @@ class Vertex:
     # Mutation
     # ------------------------------------------------------------------
 
-    def add_node(self, id: str, attr: dict[str, Any] | None) -> Node:
+    def add_node(self, id: str, attr: dict[str, Any] | None = ...) -> Node:
         """Add a node and return it. Raises ValueError if *id* already exists."""
         ...
-    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None) -> Edge:
+    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> Edge:
         """Add a directed edge and return it. Raises ValueError if either node is missing."""
+        ...
+    def remove_node(self, id: str) -> Node:
+        """Remove a node and every edge attached to it; return the removed node.
+
+        Neighbours' ``edges`` / ``inverse_edges`` are updated, so no dangling
+        edges remain. Raises KeyError if the node does not exist.
+        """
+        ...
+    def remove_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> int:
+        """Remove edges from *from_id* to *to_id* and return how many were removed.
+
+        If *attr* is given, only edges whose attributes match every key/value
+        pair are removed, e.g. ``g.remove_edge("a", "b", {"type": "knows"})``.
+        Raises ValueError if either node does not exist.
+        """
         ...
     def get_node(self, id: str) -> Node:
         """Return the node. Raises KeyError if not found."""
@@ -480,20 +495,54 @@ class Vertex:
         root_node_id: str,
         target_node_id: str,
         max_depth: int | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
         """Return a new Vertex containing only the nodes on the shortest BFS path.
 
         The ordered sequence of node IDs is in ``result.meta["nodelist"]``.
+        *direction* selects which edges are followed: ``"out"`` (default),
+        ``"in"`` (walk edges backwards) or ``"both"`` (ignore direction).
         Raises ValueError if either node is missing or the target is unreachable.
         """
         ...
-    def expand(self, source_vertex: Vertex, depth: int | None = ...) -> Vertex:
+    def shortest_path_dijkstra(
+        self,
+        root_node_id: str,
+        target_node_id: str,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Vertex:
+        """Return the cheapest path between two nodes (Dijkstra).
+
+        Edge costs are read from the *weight* attribute (default ``"weight"``);
+        edges without it cost *default_weight* (default 1.0). Paths costing
+        more than *max_cost* are ignored. The ordered node IDs are in
+        ``result.meta["nodelist"]`` and the total cost in ``result.meta["cost"]``.
+
+        Raises ValueError if a node is missing, the target is unreachable, or a
+        weight is negative; TypeError if a weight is not a number.
+
+        Example::
+
+            path = graph.shortest_path_dijkstra("a", "z", weight="distance")
+            path.meta["nodelist"], path.meta["cost"]
+        """
+        ...
+    def expand(
+        self,
+        source_vertex: Vertex,
+        depth: int | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Vertex:
         """Expand this subgraph by pulling neighbour nodes from *source_vertex*.
 
         *depth* defaults to 1 (one hop).
 
-        Only **outgoing** edges are followed during expansion; nodes that point
-        *into* the seed nodes are not included.
+        By default only **outgoing** edges are followed; nodes that point
+        *into* the seed nodes are not included. Pass ``direction="in"`` to
+        follow incoming edges instead, or ``direction="both"`` for both.
 
         Example::
 
@@ -568,6 +617,7 @@ class Vertex:
         include_edge_types: bool | None = ...,
         edge_type_field: str | None = ...,
         stratified: bool | None = ...,
+        seed: int | None = ...,
     ) -> list[list[str]]:
         """Perform random walks from *start_node_id*.
 
@@ -596,6 +646,12 @@ class Vertex:
             by ``1 / (1 + times_visited)``, steering walks towards the
             least-visited nodes. Visit counts persist across all attempts of
             one call. Defaults to False.
+        seed:
+            Seed for the random number generator. The same seed and arguments
+            always produce the same walks. Defaults to a random seed.
+
+        Walks run in native code without holding the GIL; non-stratified walks
+        are spread over all CPU cores.
 
         Returns a list of walks; each walk is a list of strings.
 
@@ -604,6 +660,7 @@ class Vertex:
             walks = graph.random_walks("node1", 5, 20)
             walks = graph.random_walks("node1", 5, 20, include_edge_types=True)
             walks = graph.random_walks(None, 5, 50, stratified=True)
+            walks = graph.random_walks("node1", 5, 20, seed=42)  # reproducible
         """
         ...
 
