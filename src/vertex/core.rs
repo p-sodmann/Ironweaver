@@ -1,18 +1,19 @@
 // vertex/core.rs
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
-use std::collections::HashMap;
 
+use crate::data::{AttrMap, EdgeData, NodeData, PyAttrs, PyGraph};
+use crate::errors::graph_error;
 use crate::{Edge, Node};
 
 // Import the helper modules as sibling modules
 use super::algorithms;
-use super::pathfinding;
 use super::analysis;
-use super::callbacks;
+use super::callbacks::fire;
 use super::manipulation;
+use super::pathfinding;
 use super::serialization;
 
 /// A directed graph: a collection of `Node`s, keyed by id, connected by `Edge`s.
@@ -22,13 +23,13 @@ use super::serialization;
 /// (`filter`, `expand`, `shortest_path` with method "bfs", "dijkstra" or "astar",
 /// `random_walks`, ...) which return new `Vertex` objects.
 ///
-/// `nodes` returns a copy of the id -> Node mapping (add/remove nodes with the
-/// methods, not by editing that dict). `meta` is a live dict for your own
-/// graph-level data, and the `on_*_callbacks` lists are live too.
+/// The graph data lives in Rust (`ironweaver_core::Graph`); `Node` and `Edge`
+/// objects are handles into it. `nodes` returns a new id -> Node dict (add/remove
+/// nodes with the methods, not by editing that dict). `meta` is a live dict for
+/// your own graph-level data, and the `on_*_callbacks` lists are live too.
 #[pyclass]
 pub struct Vertex {
-    #[pyo3(get, set)]
-    pub nodes: HashMap<String, Py<Node>>,
+    pub graph: PyGraph,
     #[pyo3(get, set)]
     pub meta: Py<PyDict>,
     #[pyo3(get, set)]
@@ -41,61 +42,94 @@ pub struct Vertex {
     pub on_edge_update_callbacks: Py<PyList>,
 }
 
+impl Vertex {
+    /// A Vertex around `graph` with an empty `meta` and no callbacks.
+    pub fn with_graph(py: Python<'_>, graph: PyGraph) -> Self {
+        Vertex {
+            graph,
+            meta: PyDict::new(py).into(),
+            on_node_add_callbacks: PyList::empty(py).into(),
+            on_edge_add_callbacks: PyList::empty(py).into(),
+            on_node_update_callbacks: PyList::empty(py).into(),
+            on_edge_update_callbacks: PyList::empty(py).into(),
+        }
+    }
+
+    /// Copy the given nodes (which may come from several vertices) and the
+    /// edges between nodes of the same source vertex into a new graph.
+    fn copy_nodes(py: Python<'_>, nodes: &Bound<'_, PyDict>) -> PyResult<PyGraph> {
+        use std::collections::HashMap;
+        let mut graph = PyGraph::with_capacity(nodes.len(), 0);
+        let mut copied = Vec::with_capacity(nodes.len());
+        let mut map = HashMap::with_capacity(nodes.len());
+        for (key, node) in nodes.iter() {
+            let id: String = key.extract()?;
+            let node = node.downcast::<Node>()?.get();
+            let source = node.vertex.try_borrow(py)?;
+            let data = source
+                .graph
+                .node(node.ix)
+                .ok_or_else(|| graph_error(ironweaver_core::GraphError::Stale))?
+                .data
+                .copy(py)?;
+            let new = graph.add_node(id, data).map_err(graph_error)?;
+            map.insert((node.vertex.as_ptr() as usize, node.ix), new);
+            copied.push((node.vertex.clone_ref(py), node.ix, new));
+        }
+        for (vertex, old, new) in copied {
+            let source = vertex.try_borrow(py)?;
+            let key = vertex.as_ptr() as usize;
+            for &e in source.graph.node(old).expect("checked above").out_edges() {
+                let edge = source.graph.edge(e).expect("listed edges are live");
+                if let Some(&to) = map.get(&(key, edge.target())) {
+                    graph.add_edge(new, to, edge.data.copy(py)?).map_err(graph_error)?;
+                }
+            }
+        }
+        Ok(graph)
+    }
+}
+
 #[pymethods]
 impl Vertex {
     #[new]
     fn new(py: Python<'_>) -> Self {
-        Vertex {
-            nodes: HashMap::new(),
-            meta: PyDict::new(py).into(),
-            on_node_add_callbacks: PyList::empty(py).into(),
-            on_edge_add_callbacks: PyList::empty(py).into(),
-            on_node_update_callbacks: PyList::empty(py).into(),
-            on_edge_update_callbacks: PyList::empty(py).into(),
-        }
+        Vertex::with_graph(py, PyGraph::new())
     }
 
-    /// Create a graph from an existing ``{id: Node}`` mapping.
+    /// Create a graph from an ``{id: Node}`` mapping.
     ///
-    /// The node objects are shared, not copied, and keep their edges (which
-    /// may point to nodes outside the new graph; see ``prune``).
+    /// The nodes are copied (with their ``attr`` / ``meta``), together with
+    /// the edges between them.
     #[staticmethod]
-    pub fn from_nodes(py: Python<'_>, nodes: HashMap<String, Py<Node>>) -> Self {
-        Vertex {
-            nodes,
-            meta: PyDict::new(py).into(),
-            on_node_add_callbacks: PyList::empty(py).into(),
-            on_edge_add_callbacks: PyList::empty(py).into(),
-            on_node_update_callbacks: PyList::empty(py).into(),
-            on_edge_update_callbacks: PyList::empty(py).into(),
-        }
+    pub fn from_nodes(py: Python<'_>, nodes: &Bound<'_, PyDict>) -> PyResult<Self> {
+        Ok(Vertex::with_graph(py, Vertex::copy_nodes(py, nodes)?))
     }
 
-    /// Create a new graph with existing nodes and traversal path
+    /// Like ``from_nodes``, and stores ``nodelist`` in ``meta["nodelist"]``.
     #[staticmethod]
-    pub fn from_nodes_with_path(
-        py: Python<'_>,
-        nodes: HashMap<String, Py<Node>>,
-        nodelist: Vec<String>,
-    ) -> PyResult<Self> {
-        let meta = PyDict::new(py);
-        meta.set_item("nodelist", nodelist)?;
-
-        Ok(Vertex {
-            nodes,
-            meta: meta.into(),
-            on_node_add_callbacks: PyList::empty(py).into(),
-            on_edge_add_callbacks: PyList::empty(py).into(),
-            on_node_update_callbacks: PyList::empty(py).into(),
-            on_edge_update_callbacks: PyList::empty(py).into(),
-        })
+    pub fn from_nodes_with_path(py: Python<'_>, nodes: &Bound<'_, PyDict>, nodelist: Vec<String>) -> PyResult<Self> {
+        let vertex = Vertex::from_nodes(py, nodes)?;
+        vertex.meta.bind(py).set_item("nodelist", nodelist)?;
+        Ok(vertex)
     }
 
-    // Garbage-collector support (see Node::__traverse__).
+    // Garbage-collector support: attribute values may reference the graph's
+    // own nodes, edges or the vertex (cycles through the handles).
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        for n in self.nodes.values() {
-            visit.call(n)?;
+        let mut result = Ok(());
+        let mut call = |obj: &Py<PyAny>| {
+            if result.is_ok() {
+                result = visit.call(obj);
+            }
+        };
+        for (_, node) in self.graph.nodes() {
+            node.data.visit(&mut call);
         }
+        for (_, edge) in self.graph.edges() {
+            edge.data.visit(&mut call);
+        }
+        result?;
         visit.call(&self.meta)?;
         visit.call(&self.on_node_add_callbacks)?;
         visit.call(&self.on_edge_add_callbacks)?;
@@ -105,34 +139,44 @@ impl Vertex {
     }
 
     fn __clear__(&mut self) {
-        self.nodes.clear();
+        self.graph = PyGraph::new();
     }
 
-    fn __getitem__(&self, py: Python<'_>, key: String) -> PyResult<Py<Node>> {
-        self.nodes
-            .get(&key)
-            .map(|n| n.clone_ref(py))
-            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(key))
+    fn __getitem__(slf: &Bound<'_, Self>, key: String) -> PyResult<Py<Node>> {
+        let ix = slf.try_borrow()?.graph.node_ix(&key);
+        match ix {
+            Some(ix) => Node::handle(slf.py(), &slf.clone().unbind(), ix),
+            None => Err(pyo3::exceptions::PyKeyError::new_err(key)),
+        }
     }
 
-    /// Return the ids of all nodes (unordered).
+    /// Return the ids of all nodes (in graph order).
     fn keys(&self) -> Vec<String> {
-        self.nodes.keys().cloned().collect()
+        self.graph.nodes().map(|(_, n)| n.id().to_string()).collect()
     }
 
-    fn __repr__(&self, py: Python<'_>) -> String {
-        let keys: Vec<String> = self.nodes.values().map(|n| n.borrow(py).id.clone()).collect();
+    fn __repr__(&self) -> String {
+        let keys: Vec<&str> = self.graph.nodes().map(|(_, n)| n.id()).collect();
         format!("Vertex({})", keys.join(", "))
+    }
+
+    /// A new ``{id: Node}`` dict of all nodes.
+    #[getter]
+    fn nodes<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
+        let py = slf.py();
+        let handle = slf.clone().unbind();
+        let dict = PyDict::new(py);
+        for (ix, node) in slf.try_borrow()?.graph.nodes() {
+            dict.set_item(node.id(), Node::handle(py, &handle, ix)?)?;
+        }
+        Ok(dict)
     }
 
     /// Return a ``{id: Node}`` dict (for JSON encoders). Use ``save_to_json``
     /// to serialize the whole graph.
-    fn toJSON(&self, py: Python<'_>) -> Py<PyAny> {
-        let dict = PyDict::new(py);
-        for (node_id, node) in &self.nodes {
-            dict.set_item(node_id, node).unwrap();
-        }
-        dict.into()
+    #[allow(non_snake_case)]
+    fn toJSON<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
+        Vertex::nodes(slf)
     }
 
     /// Check if a node with the given ID exists
@@ -142,8 +186,8 @@ impl Vertex {
     ///     
     /// Returns:
     ///     bool: True if the node exists, False otherwise
-    fn has_node(&self, id: String) -> bool {
-        self.nodes.contains_key(&id)
+    fn has_node(&self, id: &str) -> bool {
+        self.graph.contains_node(id)
     }
 
     /// Get the number of nodes in the graph
@@ -151,10 +195,9 @@ impl Vertex {
     /// Returns:
     ///     int: The number of nodes
     fn node_count(&self) -> usize {
-        self.nodes.len()
+        self.graph.node_count()
     }
 
-    // Manipulation methods
     /// Add a new node to the graph
     ///
     /// Args:
@@ -167,36 +210,18 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If a node with the same ID already exists
     #[pyo3(signature = (id, attr=None))]
-    fn add_node(
-        mut slf: PyRefMut<'_, Self>,
-        py: Python<'_>,
-        id: String,
-        attr: Option<HashMap<String, Py<PyAny>>>,
-    ) -> PyResult<Py<Node>> {
-        // First create the node
-        let node = manipulation::add_node(&mut slf, py, id, attr)?;
-
-        // Collect the callback lists before consuming slf
-        let update_cbs = slf.on_node_update_callbacks.clone_ref(py);
-        let add_cbs = slf.on_node_add_callbacks.clone_ref(py);
-        let py_self: Py<Self> = slf.into();
-
-        // Link the vertex's on_node_update_callbacks to the new node so that
-        // future attr_set calls on the node fire the vertex-level callbacks.
-        // Also store a back-reference to the vertex so callbacks can access it.
-        {
-            let mut node_ref = node.bind(py).borrow_mut();
-            node_ref.on_update_callbacks = update_cbs;
-            node_ref.vertex = Some(py_self.clone_ref(py).into_any());
-        }
-
-        callbacks::fire_node_add_callbacks(
-            py,
-            add_cbs.bind(py),
-            py_self.into_any(),
-            node.clone_ref(py),
-        )?;
-
+    fn add_node(slf: &Bound<'_, Self>, id: String, attr: Option<Bound<'_, PyDict>>) -> PyResult<Py<Node>> {
+        let py = slf.py();
+        let data = NodeData::new(PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());
+        let (ix, callbacks) = {
+            let mut v = slf.try_borrow_mut()?;
+            let ix = v.graph.add_node(id, data).map_err(graph_error)?;
+            (ix, v.on_node_add_callbacks.clone_ref(py))
+        };
+        let vertex = slf.clone().unbind();
+        let node = Node::handle(py, &vertex, ix)?;
+        let args = PyTuple::new(py, [vertex.into_any(), node.clone_ref(py).into_any()])?;
+        fire(callbacks.bind(py), args)?;
         Ok(node)
     }
 
@@ -213,36 +238,24 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If either node doesn't exist
     #[pyo3(signature = (from_id, to_id, attr=None))]
-    fn add_edge(
-        mut slf: PyRefMut<'_, Self>,
-        py: Python<'_>,
-        from_id: String,
-        to_id: String,
-        attr: Option<HashMap<String, Py<PyAny>>>,
-    ) -> PyResult<Py<Edge>> {
-        let edge = manipulation::add_edge(&mut slf, py, from_id, to_id, attr)?;
-
-        // Collect the callback lists before consuming slf
-        let update_cbs = slf.on_edge_update_callbacks.clone_ref(py);
-        let add_cbs = slf.on_edge_add_callbacks.clone_ref(py);
-        let py_self: Py<Self> = slf.into();
-
-        // Link the vertex's on_edge_update_callbacks to the new edge so that
-        // future attr_set calls on the edge fire the vertex-level callbacks.
-        // Also store a back-reference to the vertex so callbacks can access it.
-        {
-            let mut edge_ref = edge.bind(py).borrow_mut();
-            edge_ref.on_update_callbacks = update_cbs;
-            edge_ref.vertex = Some(py_self.clone_ref(py).into_any());
-        }
-
-        callbacks::fire_edge_add_callbacks(
-            py,
-            add_cbs.bind(py),
-            py_self.into_any(),
-            edge.clone_ref(py),
-        )?;
-
+    fn add_edge(slf: &Bound<'_, Self>, from_id: &str, to_id: &str, attr: Option<Bound<'_, PyDict>>) -> PyResult<Py<Edge>> {
+        let py = slf.py();
+        let data = EdgeData::new(None, PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());
+        let (ix, callbacks) = {
+            let mut v = slf.try_borrow_mut()?;
+            let lookup = |id: &str| {
+                v.graph.node_ix(id).ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!("Node with id '{}' not found", id))
+                })
+            };
+            let (from, to) = (lookup(from_id)?, lookup(to_id)?);
+            let ix = v.graph.add_edge(from, to, data).map_err(graph_error)?;
+            (ix, v.on_edge_add_callbacks.clone_ref(py))
+        };
+        let vertex = slf.clone().unbind();
+        let edge = Edge::handle(py, &vertex, ix)?;
+        let args = PyTuple::new(py, [vertex.into_any(), edge.clone_ref(py).into_any()])?;
+        fire(callbacks.bind(py), args)?;
         Ok(edge)
     }
 
@@ -256,8 +269,11 @@ impl Vertex {
     ///     
     /// Raises:
     ///     KeyError: If no node with the given ID exists
-    fn get_node(&self, py: Python<'_>, id: String) -> PyResult<Py<Node>> {
-        manipulation::get_node(self, py, id)
+    fn get_node(slf: &Bound<'_, Self>, id: &str) -> PyResult<Py<Node>> {
+        let ix = slf.try_borrow()?.graph.node_ix(id).ok_or_else(|| {
+            pyo3::exceptions::PyKeyError::new_err(format!("Node with id '{}' not found", id))
+        })?;
+        Node::handle(slf.py(), &slf.clone().unbind(), ix)
     }
 
     // Serialization methods
@@ -391,6 +407,7 @@ impl Vertex {
     ///     ValueError: If a node doesn't exist, the target is unreachable, or a weight is negative
     ///     TypeError: If a weight attribute is not a number
     #[pyo3(signature = (root_node_id, target_node_id, weight=None, default_weight=None, max_cost=None, direction=None))]
+    #[allow(clippy::too_many_arguments)]
     fn shortest_path_dijkstra(
         &self,
         py: Python<'_>,
@@ -505,69 +522,23 @@ impl Vertex {
     ///     ValueError: If any of the specified node IDs don't exist in the vertex or
     ///                 no filter criteria are provided
     #[pyo3(signature = (**kwargs))]
-    fn filter(
-        &self,
-        py: Python<'_>,
-        kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<Vertex>> {
-        let kwargs = kwargs.ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(
-                "Must specify ids, id, or attribute filters",
-            )
-        })?;
-
-        let mut filters: HashMap<String, Py<PyAny>> = kwargs.extract()?;
-
-        // Determine which node IDs to include based on the provided keyword arguments
-        let node_ids: Vec<String> = if let Some(ids_any) = filters.remove("ids") {
-            ids_any.extract(py)?
-        } else if let Some(id_any) = filters.remove("id") {
-            vec![id_any.extract(py)?]
-        } else if !filters.is_empty() {
-            let mut matches = Vec::new();
-            for (node_id, node) in &self.nodes {
-                let mut all_match = true;
-                for (key, value) in &filters {
-                    let node_val = node.borrow(py).attr.get(key).map(|v| v.clone_ref(py));
-                    match node_val {
-                        Some(node_val) => {
-                            if !node_val.bind(py).eq(value.bind(py))? {
-                                all_match = false;
-                                break;
-                            }
-                        }
-                        None => {
-                            all_match = false;
-                            break;
-                        }
-                    }
-                }
-
-                if all_match {
-                    matches.push(node_id.clone());
-                }
-            }
-            matches
-        } else {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Must specify ids, id, or attribute filters",
-            ));
-        };
-
-        algorithms::filter(self, py, node_ids)
+    fn filter(&self, py: Python<'_>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Py<Vertex>> {
+        algorithms::filter(self, py, kwargs)
     }
+
     /// Remove a node and all edges attached to it
     ///
     /// Args:
     ///     id (str): ID of the node to remove
     ///
     /// Returns:
-    ///     Node: The removed node (with its edge lists emptied)
+    ///     Node: The removed node, detached: a copy in a new one-node Vertex
+    ///         (same id, attr and meta, no edges)
     ///
     /// Raises:
     ///     KeyError: If no node with the given ID exists
-    fn remove_node(&mut self, py: Python<'_>, id: &str) -> PyResult<Py<Node>> {
-        manipulation::remove_node(self, py, id)
+    fn remove_node(slf: &Bound<'_, Self>, id: &str) -> PyResult<Py<Node>> {
+        manipulation::remove_node(slf, id)
     }
 
     /// Remove the edge(s) from one node to another
@@ -584,24 +555,23 @@ impl Vertex {
     ///     ValueError: If either node doesn't exist
     #[pyo3(signature = (from_id, to_id, attr=None))]
     fn remove_edge(
-        &self,
-        py: Python<'_>,
+        slf: &Bound<'_, Self>,
         from_id: &str,
         to_id: &str,
-        attr: Option<HashMap<String, Py<PyAny>>>,
+        attr: Option<AttrMap>,
     ) -> PyResult<usize> {
-        manipulation::remove_edge(self, py, from_id, to_id, attr)
+        manipulation::remove_edge(slf, from_id, to_id, attr)
     }
 
-    /// Remove edges and inverse_edges that reference nodes not present in the vertex.
+    /// Remove edges that reference nodes not present in the vertex.
     ///
-    /// This is useful after filtering or subsetting the graph, when edges may still
-    /// point to nodes that are no longer part of the vertex.
+    /// Kept for compatibility: edges always connect two nodes of their own
+    /// graph, so there is never anything to remove.
     ///
     /// Returns:
-    ///     int: The number of edges removed
-    fn prune(&self, py: Python<'_>) -> PyResult<usize> {
-        manipulation::prune(self, py)
+    ///     int: The number of edges removed (always 0)
+    fn prune(&self) -> usize {
+        0
     }
 
     /// Perform multiple random walks from a starting node
@@ -633,6 +603,7 @@ impl Vertex {
     ///     ValueError: If start_node_id doesn't exist, is None without stratified=True,
     ///         max_length is 0, or min_length > max_length
     #[pyo3(signature = (start_node_id, max_length, num_attempts, min_length=None, allow_revisit=None, include_edge_types=None, edge_type_field=None, stratified=None, seed=None))]
+    #[allow(clippy::too_many_arguments)]
     fn random_walks(
         &self,
         py: Python<'_>,

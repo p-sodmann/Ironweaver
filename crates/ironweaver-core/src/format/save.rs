@@ -1,0 +1,368 @@
+// format/save.rs
+
+use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct, Serializer};
+use serde::Serialize;
+use std::io::Write;
+
+use bincode::Options;
+
+use crate::{Attrs, Edge, Graph, GraphError, Node, Record, Value};
+
+/// Encoders for the tagged `Value` representation, for codecs that encode
+/// their own value types without building `Value`s first.
+pub mod tagged {
+    use half::f16;
+    use serde::{Serialize, Serializer};
+
+    const ENUM: &str = "Value";
+    // Variant indices of `Value` (part of the binary format)
+    const STRING: u32 = 0;
+    const INT: u32 = 1;
+    const FLOAT: u32 = 2;
+    const HALF: u32 = 3;
+    const BOOL: u32 = 4;
+    const NONE: u32 = 5;
+    const LIST: u32 = 6;
+    const DICT: u32 = 7;
+
+    pub fn string<S: Serializer>(s: S, v: &str) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, STRING, "String", v)
+    }
+
+    pub fn int<S: Serializer>(s: S, v: i64) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, INT, "Int", &v)
+    }
+
+    /// A float; at half precision if `half`.
+    pub fn float<S: Serializer>(s: S, v: f64, half: bool) -> Result<S::Ok, S::Error> {
+        if half {
+            s.serialize_newtype_variant(ENUM, HALF, "Half", &f16::from_f64(v))
+        } else {
+            s.serialize_newtype_variant(ENUM, FLOAT, "Float", &v)
+        }
+    }
+
+    pub fn half<S: Serializer>(s: S, v: f16) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, HALF, "Half", &v)
+    }
+
+    pub fn bool<S: Serializer>(s: S, v: bool) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, BOOL, "Bool", &v)
+    }
+
+    pub fn none<S: Serializer>(s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_unit_variant(ENUM, NONE, "None")
+    }
+
+    /// A list; `items` must serialize as a sequence of tagged values.
+    pub fn list<S: Serializer, T: Serialize + ?Sized>(s: S, items: &T) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, LIST, "List", items)
+    }
+
+    /// A dict; `entries` must serialize as a map of string keys to tagged values.
+    pub fn dict<S: Serializer, T: Serialize + ?Sized>(s: S, entries: &T) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, DICT, "Dict", entries)
+    }
+}
+
+/// Encodes the payloads of a `Graph<N, E>` while it is written. Every method
+/// must write a map of string keys to tagged values (see [`tagged`]).
+pub trait Codec<N, E> {
+    fn node_attr<S: Serializer>(&self, node: &N, s: S) -> Result<S::Ok, S::Error>;
+    fn node_meta<S: Serializer>(&self, node: &N, s: S) -> Result<S::Ok, S::Error>;
+    fn edge_attr<S: Serializer>(&self, edge: &E, s: S) -> Result<S::Ok, S::Error>;
+    fn edge_meta<S: Serializer>(&self, edge: &E, s: S) -> Result<S::Ok, S::Error>;
+    /// The graph-level `meta` map.
+    fn graph_meta<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error>;
+}
+
+/// A `Value` in the tagged encoding, floats optionally at half precision.
+struct Tagged<'a> {
+    value: &'a Value,
+    half: bool,
+}
+
+impl Serialize for Tagged<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let half = self.half;
+        match self.value {
+            Value::String(v) => tagged::string(s, v),
+            Value::Int(v) => tagged::int(s, *v),
+            Value::Float(v) => tagged::float(s, *v, half),
+            Value::Half(v) => tagged::half(s, *v),
+            Value::Bool(v) => tagged::bool(s, *v),
+            Value::None => tagged::none(s),
+            Value::List(items) => tagged::list(s, &TaggedList { items, half }),
+            Value::Dict(map) => tagged::dict(s, &TaggedMap { map, half }),
+        }
+    }
+}
+
+struct TaggedList<'a> {
+    items: &'a [Value],
+    half: bool,
+}
+
+impl Serialize for TaggedList<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut seq = s.serialize_seq(Some(self.items.len()))?;
+        for value in self.items {
+            seq.serialize_element(&Tagged { value, half: self.half })?;
+        }
+        seq.end()
+    }
+}
+
+struct TaggedMap<'a> {
+    map: &'a Attrs,
+    half: bool,
+}
+
+impl Serialize for TaggedMap<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(self.map.len()))?;
+        for (k, value) in self.map {
+            map.serialize_entry(k, &Tagged { value, half: self.half })?;
+        }
+        map.end()
+    }
+}
+
+/// Codec for `Graph<Record, Record>`.
+pub struct RecordCodec<'a> {
+    /// Graph-level meta.
+    pub meta: &'a Attrs,
+    /// Store floats at half precision.
+    pub half: bool,
+}
+
+impl RecordCodec<'_> {
+    fn attrs<S: Serializer>(&self, map: &Attrs, s: S) -> Result<S::Ok, S::Error> {
+        TaggedMap { map, half: self.half }.serialize(s)
+    }
+}
+
+impl Codec<Record, Record> for RecordCodec<'_> {
+    fn node_attr<S: Serializer>(&self, node: &Record, s: S) -> Result<S::Ok, S::Error> {
+        self.attrs(&node.attr, s)
+    }
+    fn node_meta<S: Serializer>(&self, node: &Record, s: S) -> Result<S::Ok, S::Error> {
+        self.attrs(&node.meta, s)
+    }
+    fn edge_attr<S: Serializer>(&self, edge: &Record, s: S) -> Result<S::Ok, S::Error> {
+        self.attrs(&edge.attr, s)
+    }
+    fn edge_meta<S: Serializer>(&self, edge: &Record, s: S) -> Result<S::Ok, S::Error> {
+        self.attrs(&edge.meta, s)
+    }
+    fn graph_meta<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.attrs(self.meta, s)
+    }
+}
+
+/// Serializable view of a whole graph.
+///
+/// Edges are numbered in node order, then in each node's outgoing-edge
+/// order, and get the id `edge_{n}_{from}_to_{to}`. Each node's `edge_ids` /
+/// `inverse_edge_ids` list its outgoing / incoming edges in order.
+pub struct GraphWriter<'a, N, E, C> {
+    graph: &'a Graph<N, E>,
+    codec: &'a C,
+    /// Edge id by edge slot (empty for slots without an edge).
+    ids: Vec<String>,
+}
+
+impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
+    pub fn new(graph: &'a Graph<N, E>, codec: &'a C) -> Self {
+        let mut ids = vec![String::new(); graph.edge_bound()];
+        let mut n = 0usize;
+        for (_, node) in graph.nodes() {
+            for &e in node.out_edges() {
+                let to = graph.node(graph.edge_ref(e).target()).expect("live edge target");
+                ids[e.slot()] = format!("edge_{}_{}_to_{}", n, node.id(), to.id());
+                n += 1;
+            }
+        }
+        GraphWriter { graph, codec, ids }
+    }
+
+    /// Render the graph as JSON bytes (always valid UTF-8).
+    pub fn to_json(&self, pretty: bool) -> Result<Vec<u8>, GraphError> {
+        let bytes = if pretty { sonic_rs::to_vec_pretty(self) } else { sonic_rs::to_vec(self) };
+        bytes.map_err(|e| GraphError::Format(e.to_string()))
+    }
+
+    /// Write the graph with bincode (fixed-width integer encoding).
+    pub fn write_binary<W: Write>(&self, writer: W) -> Result<(), GraphError> {
+        let options = bincode::DefaultOptions::new().with_fixint_encoding();
+        self.serialize(&mut bincode::Serializer::new(writer, options))
+            .map_err(|e| GraphError::Format(e.to_string()))
+    }
+}
+
+struct IdList<'a> {
+    ids: &'a [String],
+    edges: &'a [crate::EdgeIx],
+}
+
+impl Serialize for IdList<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut seq = s.serialize_seq(Some(self.edges.len()))?;
+        for e in self.edges {
+            seq.serialize_element(&self.ids[e.slot()])?;
+        }
+        seq.end()
+    }
+}
+
+struct NodeView<'a, N, E, C> {
+    writer: &'a GraphWriter<'a, N, E, C>,
+    node: &'a Node<N>,
+}
+
+struct NodesMap<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
+
+struct EdgeView<'a, N, E, C> {
+    writer: &'a GraphWriter<'a, N, E, C>,
+    id: &'a str,
+    edge: &'a Edge<E>,
+}
+
+struct EdgesMap<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
+
+struct GraphMeta<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
+
+struct Metadata {
+    node_count: usize,
+    edge_count: usize,
+}
+
+impl Serialize for Metadata {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let entries: [(&str, Value); 4] = [
+            ("version", Value::String("1.0".to_string())),
+            ("node_count", Value::Int(self.node_count as i64)),
+            ("edge_count", Value::Int(self.edge_count as i64)),
+            ("timestamp", Value::String(timestamp)),
+        ];
+        let mut map = s.serialize_map(Some(entries.len()))?;
+        for (k, value) in &entries {
+            map.serialize_entry(k, &Tagged { value, half: false })?;
+        }
+        map.end()
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for NodeView<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (codec, ids) = (self.writer.codec, &self.writer.ids);
+        let data = &self.node.data;
+        let mut st = s.serialize_struct("SerializableNode", 5)?;
+        st.serialize_field("id", self.node.id())?;
+        st.serialize_field("attr", &NodePart::<N, E, C> { codec, data, meta: false, _e: std::marker::PhantomData })?;
+        st.serialize_field("meta", &NodePart::<N, E, C> { codec, data, meta: true, _e: std::marker::PhantomData })?;
+        st.serialize_field("edge_ids", &IdList { ids, edges: self.node.out_edges() })?;
+        st.serialize_field("inverse_edge_ids", &IdList { ids, edges: self.node.in_edges() })?;
+        st.end()
+    }
+}
+
+struct NodePart<'a, N, E, C> {
+    codec: &'a C,
+    data: &'a N,
+    meta: bool,
+    _e: std::marker::PhantomData<fn(&E)>,
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for NodePart<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if self.meta {
+            self.codec.node_meta(self.data, s)
+        } else {
+            self.codec.node_attr(self.data, s)
+        }
+    }
+}
+
+struct EdgePart<'a, N, E, C> {
+    codec: &'a C,
+    data: &'a E,
+    meta: bool,
+    _n: std::marker::PhantomData<fn(&N)>,
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for EdgePart<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if self.meta {
+            self.codec.edge_meta(self.data, s)
+        } else {
+            self.codec.edge_attr(self.data, s)
+        }
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for NodesMap<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let writer = self.0;
+        let mut map = s.serialize_map(Some(writer.graph.node_count()))?;
+        for (_, node) in writer.graph.nodes() {
+            map.serialize_entry(node.id(), &NodeView { writer, node })?;
+        }
+        map.end()
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for EdgeView<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let graph = self.writer.graph;
+        let codec = self.writer.codec;
+        let data = &self.edge.data;
+        let from = graph.node(self.edge.source()).expect("live edge source");
+        let to = graph.node(self.edge.target()).expect("live edge target");
+        let mut st = s.serialize_struct("SerializableEdge", 5)?;
+        st.serialize_field("id", self.id)?;
+        st.serialize_field("from_id", from.id())?;
+        st.serialize_field("to_id", to.id())?;
+        st.serialize_field("attr", &EdgePart::<N, E, C> { codec, data, meta: false, _n: std::marker::PhantomData })?;
+        st.serialize_field("meta", &EdgePart::<N, E, C> { codec, data, meta: true, _n: std::marker::PhantomData })?;
+        st.end()
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for EdgesMap<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let writer = self.0;
+        let graph = writer.graph;
+        let mut map = s.serialize_map(Some(graph.edge_count()))?;
+        // Numbering order: nodes in order, each node's outgoing edges in order
+        for (_, node) in graph.nodes() {
+            for &e in node.out_edges() {
+                let id = writer.ids[e.slot()].as_str();
+                map.serialize_entry(id, &EdgeView { writer, id, edge: graph.edge_ref(e) })?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for GraphMeta<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.codec.graph_meta(s)
+    }
+}
+
+impl<N, E, C: Codec<N, E>> Serialize for GraphWriter<'_, N, E, C> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut st = s.serialize_struct("SerializableGraph", 4)?;
+        st.serialize_field("nodes", &NodesMap(self))?;
+        st.serialize_field("edges", &EdgesMap(self))?;
+        st.serialize_field("meta", &GraphMeta(self))?;
+        st.serialize_field(
+            "metadata",
+            &Metadata { node_count: self.graph.node_count(), edge_count: self.graph.edge_count() },
+        )?;
+        st.end()
+    }
+}
+

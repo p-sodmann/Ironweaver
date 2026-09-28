@@ -1,13 +1,15 @@
-// vertex/algorithms/random_walks.rs
+// random_walks.rs
+//
+// Random walks over a compact adjacency index built once per call; the walks
+// themselves never touch the graph (so callers may run them without holding
+// any lock on it, e.g. with the Python GIL released).
 
-use pyo3::prelude::*;
-use pyo3::types::PyList;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use super::super::core::Vertex;
-use crate::gc_pause::GcPause;
+
+use crate::{Attributes, Graph, GraphError, Lookup};
 
 /// Number of walk attempts handled by one RNG stream in uniform mode. Chunks
 /// are processed in parallel; because the chunking (and each chunk's seed) is
@@ -15,19 +17,58 @@ use crate::gc_pause::GcPause;
 /// walks.
 const CHUNK: usize = 256;
 
-// A walk as indices into `WalkIndex::ids` / `WalkIndex::types`.
-struct Walk {
+/// Parameters of a batch of random walks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WalkOptions {
+    /// Maximum number of nodes per walk (> 0).
+    pub max_length: usize,
+    /// Number of walks attempted.
+    pub num_attempts: usize,
+    /// Walks with fewer nodes are dropped (default 1).
+    pub min_length: usize,
+    /// Whether a walk may visit a node twice (default false).
+    pub allow_revisit: bool,
+    /// Interleave edge types with node ids in the output (default false).
+    pub include_edge_types: bool,
+    /// Edge attribute holding the edge type (default `"type"`; edges
+    /// without a string there are `"unknown"`).
+    pub edge_type_field: String,
+    /// Weight every choice by `1 / (1 + times visited)`, steering walks
+    /// towards the least-visited nodes; visit counts persist across the
+    /// attempts. Without a start node, each walk's start is sampled that way
+    /// too (default false).
+    pub stratified: bool,
+    /// Seed for the RNG; the same seed and options give the same walks
+    /// (default: random).
+    pub seed: Option<u64>,
+}
+
+impl WalkOptions {
+    pub fn new(max_length: usize, num_attempts: usize) -> Self {
+        WalkOptions {
+            max_length,
+            num_attempts,
+            min_length: 1,
+            allow_revisit: false,
+            include_edge_types: false,
+            edge_type_field: "type".to_string(),
+            stratified: false,
+            seed: None,
+        }
+    }
+}
+
+/// A walk as indices into `WalkIndex::ids` / `WalkIndex::types`.
+pub struct Walk {
     nodes: Vec<u32>,
     edges: Vec<u32>, // Edge type indices between nodes
 }
 
-/// Compact, GIL-free adjacency representation of the graph built once per
-/// call. Walks run entirely on this index.
+/// Compact adjacency representation of the graph, built once per call.
 struct WalkIndex {
-    /// Node ids; the first `n_real` entries are the vertex's own nodes, the
-    /// rest are edge targets that are not part of the vertex (walks may step
-    /// onto them and end there, as before).
+    /// Node ids in graph order.
     ids: Vec<String>,
+    /// Number of nodes that may be sampled as a start (all of them).
     n_real: usize,
     /// Outgoing neighbours as (target index, edge type index).
     adj: Vec<Vec<(u32, u32)>>,
@@ -35,40 +76,36 @@ struct WalkIndex {
 }
 
 impl WalkIndex {
-    fn build(py: Python<'_>, vertex: &Vertex, include_edges: bool, type_field: &str) -> Self {
-        let mut ids: Vec<String> = vertex.nodes.keys().cloned().collect();
-        let n_real = ids.len();
-        let mut index: HashMap<String, u32> =
-            ids.iter().enumerate().map(|(i, id)| (id.clone(), i as u32)).collect();
+    fn build<N, E: Attributes>(g: &Graph<N, E>, include_edges: bool, type_field: &str) -> Result<Self, E::Error> {
+        let mut dense = vec![u32::MAX; g.node_bound()];
+        let mut ids = Vec::with_capacity(g.node_count());
+        for (i, (ix, node)) in g.nodes().enumerate() {
+            dense[ix.slot()] = i as u32;
+            ids.push(node.id().to_owned());
+        }
         let mut types: Vec<String> = Vec::new();
         let mut type_index: HashMap<String, u32> = HashMap::new();
-        let mut adj: Vec<Vec<(u32, u32)>> = Vec::with_capacity(n_real);
+        let mut adj: Vec<Vec<(u32, u32)>> = Vec::with_capacity(ids.len());
 
-        for i in 0..n_real {
-            let node = vertex.nodes[&ids[i]].borrow(py);
-            let mut out = Vec::with_capacity(node.edges.len());
-            for edge in &node.edges {
-                let e = edge.borrow(py);
-                let to_id = e.to_node.borrow(py).id.clone();
-                let target = match index.get(&to_id) {
-                    Some(&t) => t,
-                    None => {
-                        let t = ids.len() as u32;
-                        ids.push(to_id.clone());
-                        index.insert(to_id, t);
-                        t
-                    }
-                };
+        for (_, node) in g.nodes() {
+            let mut out = Vec::with_capacity(node.out_edges().len());
+            for &e in node.out_edges() {
+                let edge = g.edge_ref(e);
+                let target = dense[edge.target().slot()];
                 let type_idx = if include_edges {
-                    let name = e
-                        .attr
-                        .get(type_field)
-                        .and_then(|v| v.extract::<String>(py).ok())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    *type_index.entry(name.clone()).or_insert_with(|| {
-                        types.push(name);
-                        (types.len() - 1) as u32
-                    })
+                    let name = match edge.data.text(type_field)? {
+                        Lookup::Found(s) => s,
+                        Lookup::Missing | Lookup::Invalid => "unknown".to_string(),
+                    };
+                    match type_index.get(&name) {
+                        Some(&t) => t,
+                        None => {
+                            let t = types.len() as u32;
+                            type_index.insert(name.clone(), t);
+                            types.push(name);
+                            t
+                        }
+                    }
                 } else {
                     0
                 };
@@ -76,10 +113,9 @@ impl WalkIndex {
             }
             adj.push(out);
         }
-        // Targets outside the vertex have no outgoing edges.
-        adj.resize_with(ids.len(), Vec::new);
 
-        WalkIndex { ids, n_real, adj, types }
+        let n_real = ids.len();
+        Ok(WalkIndex { ids, n_real, adj, types })
     }
 }
 
@@ -208,6 +244,7 @@ fn weighted_pick_index<R: Rng>(weights: &[f64], rng: &mut R) -> usize {
 }
 
 // Simple random walk that embraces randomness without backtracking.
+#[allow(clippy::too_many_arguments)]
 fn perform_walk<R: Rng>(
     index: &WalkIndex,
     start: u32,
@@ -277,47 +314,29 @@ fn perform_walk<R: Rng>(
     Walk { nodes: walk_nodes, edges: walk_edges }
 }
 
-fn validate_params(
-    vertex: &Vertex,
-    start_node_id: &Option<String>,
-    max_length: usize,
-    min_len: usize,
-    stratified: bool,
-) -> PyResult<()> {
+fn validate_params<N, E>(g: &Graph<N, E>, start_node_id: Option<&str>, opts: &WalkOptions) -> Result<(), GraphError> {
+    let invalid = |msg: &str| Err(GraphError::InvalidArgument(msg.to_string()));
     match start_node_id {
         Some(id) => {
-            if !vertex.nodes.contains_key(id) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    format!("Start node with id '{}' not found", id),
-                ));
+            if !g.contains_node(id) {
+                return Err(GraphError::InvalidArgument(format!("Start node with id '{}' not found", id)));
             }
         }
         None => {
-            if !stratified {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "start_node_id may only be None when stratified=True",
-                ));
+            if !opts.stratified {
+                return invalid("start_node_id may only be None when stratified=True");
             }
-            if vertex.nodes.is_empty() {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Cannot perform stratified walks on an empty graph",
-                ));
+            if g.is_empty() {
+                return invalid("Cannot perform stratified walks on an empty graph");
             }
         }
     }
-
-    if max_length == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "max_length must be greater than 0",
-        ));
+    if opts.max_length == 0 {
+        return invalid("max_length must be greater than 0");
     }
-
-    if min_len > max_length {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "min_length cannot be greater than max_length",
-        ));
+    if opts.min_length > opts.max_length {
+        return invalid("min_length cannot be greater than max_length");
     }
-
     Ok(())
 }
 
@@ -346,57 +365,59 @@ fn chunk_seed(base: u64, chunk: usize) -> u64 {
     z ^ (z >> 31)
 }
 
-pub fn random_walks(
-    vertex: &Vertex,
-    py: Python<'_>,
-    start_node_id: Option<String>,
-    max_length: usize,
-    min_length: Option<usize>,
-    num_attempts: usize,
-    allow_revisit: Option<bool>,
-    include_edge_types: Option<bool>,
-    edge_type_field: Option<String>,
-    stratified: Option<bool>,
-    seed: Option<u64>,
-) -> PyResult<Py<PyList>> {
-    let min_len = min_length.unwrap_or(1);
-    let allow_revisit_nodes = allow_revisit.unwrap_or(false);
-    let include_edges = include_edge_types.unwrap_or(false);
-    let type_field = edge_type_field.unwrap_or_else(|| "type".to_string());
-    let stratified_mode = stratified.unwrap_or(false);
+/// A validated batch of walks, detached from the graph: `run` does the
+/// walking and `items` turns a walk into ids.
+pub struct WalkPlan {
+    index: WalkIndex,
+    start: Option<u32>,
+    opts: WalkOptions,
+}
 
-    validate_params(vertex, &start_node_id, max_length, min_len, stratified_mode)?;
+/// Validate the options and index the graph for walking from `start_node_id`
+/// (`None` only with `stratified`).
+pub fn plan<N, E, X>(g: &Graph<N, E>, start_node_id: Option<&str>, opts: WalkOptions) -> Result<WalkPlan, X>
+where
+    E: Attributes,
+    X: From<GraphError> + From<E::Error>,
+{
+    validate_params(g, start_node_id, &opts)?;
+    let index = WalkIndex::build(g, opts.include_edge_types, &opts.edge_type_field)?;
+    let start = start_node_id.map(|id| index.ids.iter().position(|x| x == id).expect("validated") as u32);
+    Ok(WalkPlan { index, start, opts })
+}
 
-    let index = WalkIndex::build(py, vertex, include_edges, &type_field);
-    let fixed_start: Option<u32> = start_node_id
-        .as_ref()
-        .map(|id| index.ids.iter().position(|x| x == id).unwrap() as u32);
-    let base_seed: u64 = seed.unwrap_or_else(rand::random);
+impl WalkPlan {
+    /// Perform the walks; duplicates are removed (first occurrence kept).
+    pub fn run(&self) -> Vec<Walk> {
+        let index = &self.index;
+        let opts = &self.opts;
+        let fixed_start = self.start;
+        let base_seed: u64 = opts.seed.unwrap_or_else(rand::random);
+        let (max_length, allow_revisit, include_edges) = (opts.max_length, opts.allow_revisit, opts.include_edge_types);
 
-    // Walks run on the pure-Rust index, so the GIL is released meanwhile.
-    let walks: Vec<Walk> = py.allow_threads(|| {
-        if stratified_mode {
-            // Visit counts persist across all attempts of this call so that
-            // later walks are steered towards nodes that earlier walks
-            // neglected; this is inherently sequential.
+        let walks: Vec<Walk> = if opts.stratified {
+            // Visit counts persist across all attempts so that later walks are
+            // steered towards nodes that earlier walks neglected; this is
+            // inherently sequential.
             let mut rng = StdRng::seed_from_u64(base_seed);
-            let mut strat = Stratification::new(&index);
+            let mut strat = Stratification::new(index);
             let mut scratch = Scratch::new(index.ids.len());
-            let mut walks = Vec::with_capacity(num_attempts);
-            for _ in 0..num_attempts {
+            let mut walks = Vec::with_capacity(opts.num_attempts);
+            for _ in 0..opts.num_attempts {
                 let start = fixed_start.unwrap_or_else(|| strat.sample_start(&mut rng));
                 let walk = perform_walk(
-                    &index, start, max_length, allow_revisit_nodes, include_edges,
+                    index, start, max_length, allow_revisit, include_edges,
                     Some(&mut strat), &mut scratch, &mut rng,
                 );
-                if walk.nodes.len() >= min_len {
+                if walk.nodes.len() >= opts.min_length {
                     walks.push(walk);
                 }
             }
             walks
         } else {
             let start = fixed_start.expect("validated: start node is required");
-            let n_chunks = (num_attempts + CHUNK - 1) / CHUNK;
+            let num_attempts = opts.num_attempts;
+            let n_chunks = num_attempts.div_ceil(CHUNK);
             let per_chunk: Vec<Vec<Walk>> = (0..n_chunks)
                 .into_par_iter()
                 .map(|chunk| {
@@ -406,10 +427,10 @@ pub fn random_walks(
                     let mut walks = Vec::with_capacity(attempts);
                     for _ in 0..attempts {
                         let walk = perform_walk(
-                            &index, start, max_length, allow_revisit_nodes, include_edges,
+                            index, start, max_length, allow_revisit, include_edges,
                             None, &mut scratch, &mut rng,
                         );
-                        if walk.nodes.len() >= min_len {
+                        if walk.nodes.len() >= opts.min_length {
                             walks.push(walk);
                         }
                     }
@@ -417,30 +438,28 @@ pub fn random_walks(
                 })
                 .collect();
             per_chunk.into_iter().flatten().collect()
-        }
-    });
-
-    let unique_walks = deduplicate_walks(walks, include_edges);
-
-    // Convert to Python list
-    let _gc = GcPause::new(py);
-    let result = PyList::empty(py);
-    for walk in unique_walks {
-        let py_walk = if include_edges {
-            // Return list of [node, edge_type, node, edge_type, ...] format
-            let mut items: Vec<&str> = Vec::with_capacity(walk.nodes.len() * 2);
-            for (i, n) in walk.nodes.iter().enumerate() {
-                items.push(&index.ids[*n as usize]);
-                if let Some(t) = walk.edges.get(i) {
-                    items.push(&index.types[*t as usize]);
-                }
-            }
-            PyList::new(py, items)?
-        } else {
-            PyList::new(py, walk.nodes.iter().map(|n| index.ids[*n as usize].as_str()))?
         };
-        result.append(py_walk)?;
+
+        deduplicate_walks(walks, include_edges)
     }
 
-    Ok(result.into())
+    /// The walk as node ids, or, with `include_edge_types`, alternating node
+    /// ids and edge types (`[node, type, node, type, ..., node]`).
+    pub fn items<'a>(&'a self, walk: &'a Walk) -> impl Iterator<Item = &'a str> + 'a {
+        let index = &self.index;
+        walk.nodes.iter().enumerate().flat_map(move |(i, n)| {
+            let edge = walk.edges.get(i).map(|t| index.types[*t as usize].as_str());
+            std::iter::once(index.ids[*n as usize].as_str()).chain(edge)
+        })
+    }
+}
+
+/// Random walks from `start_node_id` (see [`WalkOptions`]), as lists of ids.
+pub fn random_walks<N, E, X>(g: &Graph<N, E>, start_node_id: Option<&str>, opts: WalkOptions) -> Result<Vec<Vec<String>>, X>
+where
+    E: Attributes,
+    X: From<GraphError> + From<E::Error>,
+{
+    let plan = plan::<N, E, X>(g, start_node_id, opts)?;
+    Ok(plan.run().iter().map(|w| plan.items(w).map(str::to_owned).collect()).collect())
 }

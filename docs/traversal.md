@@ -4,7 +4,7 @@ Ironweaver provides several traversal methods on both `Node` and `Vertex`.
 
 ## Node-level traversal
 
-All node-level methods start from a single node and follow outgoing edges. They return a `Vertex` with the discovered nodes and a `meta["nodelist"]` recording visit order. The result holds the *original* node objects (not copies).
+All node-level methods start from a single node and follow outgoing edges. They return a new `Vertex` with copies of the discovered nodes (and the edges between them) and a `meta["nodelist"]` recording visit order. A callable `filter` may read the graph but must not change it (adding or removing nodes or edges, setting attributes): that can raise `RuntimeError`.
 
 The examples below use this graph:
 
@@ -158,7 +158,7 @@ Nodes without coordinates or without a table entry get estimate 0 (always safe, 
 
 #### Adding a path algorithm
 
-Algorithms live in `src/vertex/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated query (source and target nodes, direction, edge costs, `max_cost`, options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`), best-first search (`best_first.rs`) and result building — are reusable. See the comment at the top of `mod.rs`.
+Algorithms live in the pure-Rust core crate, `crates/ironweaver-core/src/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated `PathQuery` (direction, edge costs, `max_cost`, method options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`) and best-first search (`best_first.rs`) — are reusable. The Python keyword options are parsed into the query in `src/vertex/pathfinding.rs`. See the comment at the top of the core `mod.rs`.
 
 ### Random walks — `vertex.random_walks(...)`
 

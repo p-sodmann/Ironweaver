@@ -1,0 +1,38 @@
+// error.rs
+
+use std::fmt;
+
+/// Errors raised by the graph and its algorithms.
+///
+/// The `Display` text is the user-facing message (the Python bindings pass
+/// it on unchanged).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GraphError {
+    /// A node with this id already exists.
+    DuplicateNode(String),
+    /// No node has this id.
+    NodeNotFound(String),
+    /// A `NodeIx` / `EdgeIx` whose node or edge has been removed.
+    Stale,
+    /// An argument or option has an invalid value.
+    InvalidArgument(String),
+    /// A value (edge weight, coordinate, option, ...) has the wrong type.
+    InvalidType(String),
+    /// Encoding or decoding a graph document failed.
+    Format(String),
+}
+
+impl fmt::Display for GraphError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GraphError::DuplicateNode(id) => write!(f, "Node with id '{}' already exists", id),
+            GraphError::NodeNotFound(id) => write!(f, "Node with id '{}' not found", id),
+            GraphError::Stale => f.write_str("node or edge was removed from its graph"),
+            GraphError::InvalidArgument(msg)
+            | GraphError::InvalidType(msg)
+            | GraphError::Format(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for GraphError {}

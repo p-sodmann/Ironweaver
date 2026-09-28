@@ -93,19 +93,19 @@ def test_prune_no_dangling_edges_returns_zero():
     assert count == 0
 
 
-def test_prune_removes_edges_to_absent_nodes():
-    """from_nodes copies node objects (with their edges intact), so b->c is dangling
-    when only {a, b} are in the new Vertex."""
+def test_from_nodes_copies_nodes_and_internal_edges():
+    """from_nodes copies the nodes and only the edges between them (b->c is
+    dropped because c is absent), so there is never anything to prune."""
     large = linear_graph()
     a = large.get_node("a")
     b = large.get_node("b")
     sub = Vertex.from_nodes({"a": a, "b": b})
-    # a->b is internal; b->c is dangling (c absent from sub)
-    count = sub.prune()
-    assert count > 0
-    for node in sub:
-        for edge in node.edges:
-            assert sub.has_node(edge.to_node.id), f"dangling edge to {edge.to_node.id}"
+    assert sorted(sub.keys()) == ["a", "b"]
+    assert [e.to_node.id for e in sub["a"].edges] == ["b"]
+    assert sub["b"].edges == []
+    assert sub.prune() == 0
+    sub["a"].attr_set("x", 1)
+    assert a.attr_get("x") is None
 
 
 # ---- shortest_path_bfs ----

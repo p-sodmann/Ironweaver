@@ -41,7 +41,7 @@ assert edge.attr_get("weight") == 1.5
 
 ## Traverse from a node
 
-Results are new `Vertex` objects holding the original nodes; the visit order is in `meta["nodelist"]`.
+Results are new `Vertex` objects holding copies of the reached nodes (and the edges between them); the visit order is in `meta["nodelist"]`.
 
 ```python
 r = alice.bfs()                                    # breadth-first, all reachable
@@ -50,7 +50,7 @@ r = alice.bfs(depth=1)                             # at most one hop
 r = alice.traverse(depth=2)                        # depth-first (pre-order)
 r = alice.bfs(filter={"type": "knows"})            # follow edges whose attr matches
 r = alice.bfs(filter=lambda e: e.attr("weight", 0) < 3)   # callable gets an EdgeView
-assert alice.bfs_search("acme", depth=2) is g["acme"]     # Node or None
+assert alice.bfs_search("acme", depth=2) == g["acme"]     # Node or None
 ```
 
 ## Filter and expand (results contain copies of nodes and edges)
@@ -162,8 +162,10 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 
 - `node.attr`, `node.meta`, `node.edges`, `node.inverse_edges`, `edge.attr`, `edge.meta` and `vertex.nodes` return copies. `node.attr["k"] = v` and `vertex.nodes[id] = node` are silently lost. Use `attr_set`, assign a whole dict, or the add/remove methods.
 - `vertex.meta` and the `on_*_callbacks` lists are live objects.
-- `bfs` / `traverse` results share the original nodes; `filter`, `expand` and `shortest_path*` return copies (a `filter` result shares the source's `meta` and callback lists).
-- Ordered output is in `result.meta["nodelist"]`; `keys()` is unordered.
+- `bfs`, `traverse`, `filter`, `expand` and `shortest_path*` return new graphs with copies of the nodes and edges (a `filter` result shares the source's `meta` and callback lists).
+- `Node` / `Edge` objects are handles into their `vertex`: compare them with `==`, not `is` (`g["a"] == g["a"]`, but not necessarily `g["a"] is g["a"]`). Edges only come from `add_edge`; `Edge(...)` raises `TypeError`. `remove_node` returns a detached copy; old handles to it raise `RuntimeError`.
+- Don't change the graph (add/remove nodes or edges, set attributes) from inside a traversal `filter` callable: the graph is in use and the change can raise `RuntimeError`.
+- Ordered output is in `result.meta["nodelist"]`; `keys()` is graph order (insertion order until nodes are removed), not visit order.
 - With several equally short paths, `shortest_path` returns one of them (unspecified which).
 - `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
 

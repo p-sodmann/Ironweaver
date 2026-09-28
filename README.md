@@ -374,14 +374,24 @@ These behaviours surprise people (and LLMs) most often:
   `remove_edge`.
 - **`vertex.meta` and the `on_*_callbacks` lists are live** Python objects:
   `vertex.meta["k"] = v` and `vertex.on_node_add_callbacks.append(cb)` work.
-- **Result graphs.** `node.bfs()` and `node.traverse()` return a `Vertex`
-  holding the *original* node objects. `filter`, `expand`,
-  `shortest_path` (and its `shortest_path_bfs` / `shortest_path_dijkstra`
-  shorthands) return *copies* of the
-  nodes and edges, so changing them does not touch the source graph (a
-  `filter` result does share the source's `meta` dict and callback lists).
+- **Result graphs.** `node.bfs()`, `node.traverse()`, `filter`, `expand`
+  and `shortest_path` (and its `shortest_path_bfs` / `shortest_path_dijkstra`
+  shorthands) return new graphs with *copies* of the nodes and edges, so
+  changing them does not touch the source graph (a `filter` result does
+  share the source's `meta` dict and callback lists).
+- **Nodes and edges are handles.** The graph data lives in Rust; a `Node` or
+  `Edge` object refers to one node or edge of its `vertex`. Compare them with
+  `==` (`graph["a"] == graph["a"]`), not `is`. Edges are only created with
+  `add_edge` (`Edge(...)` raises `TypeError`); `Node(id, attr)` makes a node
+  in its own one-node `Vertex`. `remove_node` returns a detached copy, and
+  using an old handle to a removed node or edge raises `RuntimeError`.
+- **Don't change the graph from a traversal filter.** While `bfs` /
+  `traverse` / `bfs_search` run, a callable `filter` may read the graph, but
+  changing it (adding or removing nodes and edges, assigning attributes) can
+  raise `RuntimeError`.
 - **Ordered results live in `meta`.** Traversal order and paths are in
-  `result.meta["nodelist"]`; `result.keys()` has no meaningful order.
+  `result.meta["nodelist"]`; `result.keys()` is graph order (insertion order
+  until nodes are removed), not visit order.
 - **Shortest-path ties.** When several shortest paths exist,
   `shortest_path` returns one of them; which one is not specified.
 - **`Vertex.load_from_json(text)`** treats a string starting with `{` as JSON
@@ -409,7 +419,7 @@ count = graph.node_count() -> int
 edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 
 # Removal (neighbours' edge lists are kept consistent)
-node = graph.remove_node(id: str) -> Node                           # also drops its edges
+node = graph.remove_node(id: str) -> Node                           # also drops its edges; returns a detached copy
 count = graph.remove_edge(from_id: str, to_id: str, attr: dict = None) -> int
 
 # Algorithms
@@ -432,7 +442,7 @@ result = graph.shortest_path_dijkstra(start: str, end: str, weight: str = "weigh
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
-pruned_count = graph.prune() -> int            # remove dangling edges after filter/subset
+pruned_count = graph.prune() -> int            # always 0: edges never dangle (kept for compatibility)
 walks = graph.random_walks(start_node_id, max_length, num_attempts,
                             min_length=None, allow_revisit=False,
                             include_edge_types=False,
@@ -495,13 +505,42 @@ attrs = edge.attr           # Edge attributes dict (a copy; use edge.attr_set)
 
 > **Note:** No current public API method returns a `Path` object directly. `shortest_path_bfs` and the traversal methods return a `Vertex` subgraph — use `result.meta["nodelist"]` for the ordered list of node IDs. `Path` is reserved for future use.
 
+## Using the Rust core directly
+
+The graph and all algorithms live in a pure-Rust crate,
+[`crates/ironweaver-core`](crates/ironweaver-core), which has no Python
+dependency; the Python module is a thin PyO3 layer on top of it. Rust code can
+use the core on its own:
+
+```toml
+[dependencies]
+ironweaver-core = { path = "crates/ironweaver-core" }
+```
+
+```rust
+use ironweaver_core::pathfinding::{find_path, PathQuery};
+use ironweaver_core::{Graph, GraphError, Record, Value};
+
+let mut g: Graph<Record, Record> = Graph::new();
+let a = g.add_node("a", Record::default())?;
+let b = g.add_node("b", Record::default())?;
+g.add_edge(a, b, Record::with_attr([("weight", Value::from(2.0))]))?;
+let path = find_path::<_, _, GraphError>(&g, a, b, &mut PathQuery::dijkstra())?.unwrap();
+assert_eq!(path.cost, 2.0);
+```
+
+`Graph<N, E>` is generic over the node and edge payloads; algorithms read
+them through the `Attributes` trait (implemented by `Record`, a map of
+`Value`s). `ironweaver_core::format` reads and writes the same JSON / binary
+files as the Python `save_to_*` / `load_from_*` methods.
+
 ## Performance
 
 `IronWeaver` is built with performance in mind:
 
 - **Rust Backend**: Core algorithms implemented in Rust for maximum speed
 - **Memory Efficient**: Optimized data structures for large graphs
-- **Minimal Overhead**: PyO3 bindings provide near-native performance
+- **Minimal Overhead**: nodes and edges are stored in Rust (no Python object per node or edge); PyO3 bindings provide near-native performance
 - **Scalable**: Tested with graphs containing thousands of nodes and edges
 
 ### Benchmarks
@@ -548,7 +587,8 @@ cd ironweaver
 maturin develop
 
 # Run tests
-pytest
+pytest                        # Python API (needs the built extension)
+cargo test -p ironweaver-core # pure-Rust core
 ```
 
 ## License

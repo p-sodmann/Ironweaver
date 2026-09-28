@@ -231,11 +231,11 @@ class EdgeView:
 
     def __eq__(self, other):
         if isinstance(other, EdgeView):
-            return self._edge is other._edge
+            return self._edge == other._edge
         return NotImplemented
 
     def __hash__(self):
-        return id(self._edge)
+        return hash(self._edge)
 
 
 class FilterResult:

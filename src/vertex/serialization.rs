@@ -1,15 +1,24 @@
 // vertex/serialization.rs
 
+use ironweaver_core::format::{GraphWriter, LoadGraph};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyString};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufWriter;
-use crate::serialization::{dict_to_json, GraphView, LoadGraph};
-use crate::gc_pause::GcPause;
+
 use super::Vertex;
+use crate::convert::{dict_to_json, to_attrs, PyCodec, Strings};
+use crate::data::{EdgeData, NodeData};
+use crate::errors::Error;
+use crate::gc_pause::GcPause;
 
 fn runtime_error(context: &str, e: impl std::fmt::Display) -> PyErr {
     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}: {}", context, e))
+}
+
+fn codec<'py>(vertex: &Vertex, py: Python<'py>, half: bool) -> PyCodec<'py> {
+    PyCodec { py, meta: vertex.meta.bind(py).clone(), half }
 }
 
 /// Save graph to JSON file (when file_path is provided) or return JSON string (when file_path is None).
@@ -20,17 +29,18 @@ pub fn save_to_json(
     file_path: Option<String>,
     pretty: bool,
 ) -> PyResult<Py<PyAny>> {
-    let view = GraphView::new(py, vertex, false);
+    let codec = codec(vertex, py, false);
+    let writer = GraphWriter::new(&vertex.graph, &codec);
 
     match file_path {
         Some(path) => {
-            let json = view.to_json(pretty).map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
+            let json = writer.to_json(pretty).map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
             py.allow_threads(|| std::fs::write(&path, json))
                 .map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
             Ok(py.None())
         }
         None => {
-            let json = view.to_json(pretty).map_err(|e| runtime_error("Failed to serialize graph to JSON", e))?;
+            let json = writer.to_json(pretty).map_err(|e| runtime_error("Failed to serialize graph to JSON", e))?;
             // The serializer only ever writes valid UTF-8
             let text = std::str::from_utf8(&json).map_err(|e| runtime_error("Failed to serialize graph to JSON", e))?;
             Ok(PyString::new(py, text).into_any().unbind())
@@ -39,12 +49,14 @@ pub fn save_to_json(
 }
 
 fn save_binary(vertex: &Vertex, py: Python<'_>, file_path: &str, half: bool) -> PyResult<()> {
-    let view = GraphView::new(py, vertex, half);
+    let codec = codec(vertex, py, half);
+    let writer = GraphWriter::new(&vertex.graph, &codec);
     let file = File::create(file_path).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
-    let mut writer = BufWriter::new(file);
-    view.write_binary(&mut writer)
-        .and_then(|_| Ok(std::io::Write::flush(&mut writer)?))
-        .map_err(|e| runtime_error("Failed to save graph to binary", e))
+    let mut out = BufWriter::new(file);
+    writer
+        .write_binary(&mut out)
+        .map_err(|e| runtime_error("Failed to save graph to binary", e))?;
+    std::io::Write::flush(&mut out).map_err(|e| runtime_error("Failed to save graph to binary", e))
 }
 
 pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
@@ -53,6 +65,34 @@ pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyR
 
 pub fn save_to_binary_f16(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
     save_binary(vertex, py, &file_path, true)
+}
+
+/// Build a Vertex from a parsed document.
+fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
+    let _gc = GcPause::new(py);
+    let strings: RefCell<Strings<'_>> = RefCell::new(Strings::new());
+    let graph = doc.build(
+        |n| -> Result<NodeData, Error> {
+            let mut s = strings.borrow_mut();
+            Ok(NodeData::new(to_attrs(py, n.attr(), &mut s)?, to_attrs(py, n.meta(), &mut s)?))
+        },
+        |e| -> Result<EdgeData, Error> {
+            let mut s = strings.borrow_mut();
+            Ok(EdgeData::new(
+                Some(e.id().into()),
+                to_attrs(py, e.attr(), &mut s)?,
+                to_attrs(py, e.meta(), &mut s)?,
+            ))
+        },
+    );
+    let graph = graph?;
+    let mut vertex = Vertex::with_graph(py, graph);
+    let meta = PyDict::new(py);
+    for (key, value) in doc.meta().iter() {
+        meta.set_item(key, crate::convert::to_python(py, value, &mut strings.borrow_mut())?)?;
+    }
+    vertex.meta = meta.unbind();
+    Py::new(py, vertex)
 }
 
 /// Load graph from JSON file (when source is a string path) or from JSON string/dict (when source is a dict or JSON string)
@@ -83,20 +123,18 @@ pub fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<
         ));
     };
 
-    let graph = py
+    let doc = py
         .allow_threads(|| LoadGraph::from_json_slice(bytes))
         .map_err(|e| runtime_error("Failed to parse graph JSON", e))?;
-    let _gc = GcPause::new(py);
-    graph.into_vertex(py)
+    into_vertex(py, &doc)
 }
 
 pub fn load_from_binary(py: Python<'_>, file_path: String) -> PyResult<Py<Vertex>> {
     let bytes = py
         .allow_threads(|| std::fs::read(&file_path))
         .map_err(|e| runtime_error("Failed to load graph from binary", e))?;
-    let graph = py
+    let doc = py
         .allow_threads(|| LoadGraph::from_binary_slice(&bytes))
         .map_err(|e| runtime_error("Failed to load graph from binary", e))?;
-    let _gc = GcPause::new(py);
-    graph.into_vertex(py)
+    into_vertex(py, &doc)
 }

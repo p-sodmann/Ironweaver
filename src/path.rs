@@ -44,6 +44,7 @@ impl Path {
     }
 
     /// Return the node ids in order.
+    #[allow(non_snake_case)]
     fn toJSON(&self, py: Python<'_>) -> Vec<String> {
         self.nodes
             .iter()

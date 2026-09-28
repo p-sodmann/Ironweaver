@@ -38,6 +38,6 @@ n.attr_set("color", "blue")# prints: a.color: red -> blue
 
 ## How It Works
 
-- When `add_node` / `add_edge` creates a new node or edge, the vertex's update-callback list is **shared by reference** with the node/edge. Callbacks appended to `vertex.on_node_update_callbacks` later will automatically apply to all previously created nodes.
+- `node.on_update_callbacks` / `edge.on_update_callbacks` *are* the vertex's `on_node_update_callbacks` / `on_edge_update_callbacks` lists. Callbacks appended to `vertex.on_node_update_callbacks` later automatically apply to all existing nodes.
 - `attr_set` compares the new value against the existing one using Python equality (`==`). Callbacks only fire when the value actually changes.
 - `old_value` is `None` when the key did not previously exist.

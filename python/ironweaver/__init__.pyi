@@ -156,6 +156,12 @@ class ObservedDictionary:
 class Edge:
     """A directed, attributed edge between two nodes.
 
+    An ``Edge`` is a handle to an edge stored in its ``vertex`` (the graph
+    data lives in Rust): two handles to the same edge compare equal (``==``)
+    but need not be the same object. Edges are created with
+    ``Vertex.add_edge``; ``Edge(...)`` raises TypeError. Using a handle to a
+    removed edge raises RuntimeError.
+
     Attributes are stored in ``attr``. Use ``attr_set`` / ``attr_get`` instead
     of direct dict access when you need update callbacks to fire.
 
@@ -165,29 +171,37 @@ class Edge:
     """
 
     id: str | None
-    """Optional edge identifier."""
-    from_node: Node
-    """Source node."""
-    to_node: Node
-    """Target node."""
+    """Id the edge was saved under (None for edges made with add_edge)."""
     attr: dict[str, Any]
-    """Edge attributes, e.g. {"type": "knows", "since": 2020}."""
+    """Edge attributes (a copy), e.g. {"type": "knows", "since": 2020}."""
     watched_by: list[Any]
     meta: dict[str, Any]
     on_meta_change_callbacks: list[Callable[..., Any]]
-    on_update_callbacks: list[Callable[[Vertex | None, Edge, str, Any, Any | None], bool]]
-    """Fires when attr_set changes a value. Shared with Vertex.on_edge_update_callbacks."""
-    vertex: Vertex | None
-    """Back-reference to the owning Vertex (set automatically by add_edge)."""
+    @property
+    def from_node(self) -> Node:
+        """Source node."""
+        ...
+    @property
+    def to_node(self) -> Node:
+        """Target node."""
+        ...
+    @property
+    def on_update_callbacks(self) -> list[Callable[[Vertex, Edge, str, Any, Any | None], bool]]:
+        """The owning Vertex's on_edge_update_callbacks (fired by attr_set)."""
+        ...
+    @property
+    def vertex(self) -> Vertex:
+        """The Vertex this edge belongs to."""
+        ...
 
-    def __new__(
-        cls,
-        from_node: Node,
-        to_node: Node,
-        attr: dict[str, Any] | None,
-        id: str | None,
-    ) -> Edge: ...
+    def __new__(cls, *args: Any, **kwargs: Any) -> Edge:
+        """Always raises TypeError: create edges with Vertex.add_edge."""
+        ...
     def __repr__(self) -> str: ...
+    def __eq__(self, other: object) -> bool:
+        """True if both handles refer to the same edge of the same Vertex."""
+        ...
+    def __hash__(self) -> int: ...
     def toJSON(self) -> dict[str, Any]:
         """Return the attr dict as a plain Python dict."""
         ...
@@ -206,6 +220,11 @@ class Edge:
 class Node:
     """A graph node with a string ID, an attribute dict, and directed edge lists.
 
+    A ``Node`` is a handle to a node stored in its ``vertex`` (the graph data
+    lives in Rust): ``g["a"] == g["a"]``, but the two need not be the same
+    object, so compare with ``==``. Using a handle to a removed node raises
+    RuntimeError.
+
     Callback signature for on_update_callbacks::
 
         def cb(vertex, node, key, new_value, old_value) -> bool: ...
@@ -215,27 +234,44 @@ class Node:
     """
 
     id: str
-    """Unique node identifier."""
+    """Unique node identifier (assigning renames the node; ValueError if taken)."""
     attr: dict[str, Any]
-    """Node attributes, e.g. {"type": "Person", "age": 30}."""
-    edges: list[Edge]
-    """Outgoing edges."""
-    inverse_edges: list[Edge]
-    """Incoming edges."""
+    """Node attributes (a copy), e.g. {"type": "Person", "age": 30}."""
     meta: dict[str, Any]
     on_edge_add_callbacks: list[Callable[..., Any]]
-    on_update_callbacks: list[Callable[[Vertex | None, Node, str, Any, Any | None], bool]]
-    """Fires when attr_set changes a value. Shared with Vertex.on_node_update_callbacks."""
-    vertex: Vertex | None
-    """Back-reference to the owning Vertex (set automatically by add_node)."""
+    @property
+    def edges(self) -> list[Edge]:
+        """Outgoing edges (a new list)."""
+        ...
+    @property
+    def inverse_edges(self) -> list[Edge]:
+        """Incoming edges (a new list)."""
+        ...
+    @property
+    def on_update_callbacks(self) -> list[Callable[[Vertex, Node, str, Any, Any | None], bool]]:
+        """The owning Vertex's on_node_update_callbacks (fired by attr_set)."""
+        ...
+    @property
+    def vertex(self) -> Vertex:
+        """The Vertex this node belongs to."""
+        ...
 
     def __new__(
         cls,
         id: str,
-        attr: dict[str, Any] | None,
-        edges: list[Edge] | None,
-    ) -> Node: ...
+        attr: dict[str, Any] | None = ...,
+        edges: list[Edge] | None = ...,
+    ) -> Node:
+        """A standalone node in its own new one-node Vertex (``node.vertex``).
+
+        *edges* must be empty: edges are created with ``Vertex.add_edge``.
+        """
+        ...
     def __repr__(self) -> str: ...
+    def __eq__(self, other: object) -> bool:
+        """True if both handles refer to the same node of the same Vertex."""
+        ...
+    def __hash__(self) -> int: ...
     def traverse(
         self,
         depth: int | None = ...,
@@ -256,8 +292,10 @@ class Node:
         edge_filter:
             Explicit callable edge filter (same semantics as a callable *filter*).
 
-        Returns a :class:`Vertex` whose ``meta["nodelist"]`` contains node IDs
-        in DFS visit order.
+        Returns a new :class:`Vertex` with copies of the reached nodes (and
+        the edges between them) whose ``meta["nodelist"]`` contains node IDs
+        in DFS visit order. A callable filter must not change the graph
+        (that can raise RuntimeError).
         """
         ...
     def bfs(
@@ -268,8 +306,9 @@ class Node:
     ) -> Vertex:
         """BFS traversal from this node.
 
-        Same parameters as :meth:`traverse`. Returns a :class:`Vertex` whose
-        ``meta["nodelist"]`` contains node IDs in BFS discovery order.
+        Same parameters as :meth:`traverse`. Returns a new :class:`Vertex`
+        with copies of the reached nodes whose ``meta["nodelist"]`` contains
+        node IDs in BFS discovery order.
         """
         ...
     def bfs_search(
@@ -281,8 +320,8 @@ class Node:
     ) -> Node | None:
         """Search for *target_id* using BFS. Returns the Node if found, None otherwise.
 
-        For nodes that belong to a Vertex the search runs from both ends at
-        once (bidirectional BFS), which is much faster on large graphs.
+        The search runs from both ends at once (bidirectional BFS), which is
+        much faster on large graphs.
         *filter* / *edge_filter* are applied to every edge either side
         follows; *depth* bounds the path length.
         """
@@ -357,14 +396,16 @@ class Vertex:
     returning ``False`` only prevents subsequent callbacks from running.
     """
 
-    nodes: dict[str, Node]
-    """Maps node ID → Node for all nodes in the graph."""
+    @property
+    def nodes(self) -> dict[str, Node]:
+        """A new dict mapping node ID → Node for all nodes in the graph."""
+        ...
     meta: dict[str, Any]
     """Arbitrary graph-level metadata. Traversal methods may populate meta["nodelist"]."""
     on_node_add_callbacks: list[Callable[[Vertex, Node], bool]]
     on_edge_add_callbacks: list[Callable[[Vertex, Edge], bool]]
-    on_node_update_callbacks: list[Callable[[Vertex | None, Node, str, Any, Any | None], bool]]
-    on_edge_update_callbacks: list[Callable[[Vertex | None, Edge, str, Any, Any | None], bool]]
+    on_node_update_callbacks: list[Callable[[Vertex, Node, str, Any, Any | None], bool]]
+    on_edge_update_callbacks: list[Callable[[Vertex, Edge, str, Any, Any | None], bool]]
 
     def __new__(cls) -> Vertex: ...
     def __getitem__(self, key: str, /) -> Node:
@@ -386,7 +427,7 @@ class Vertex:
         ...
     def __repr__(self) -> str: ...
     def keys(self) -> list[str]:
-        """Return all node IDs."""
+        """Return all node IDs (graph order: insertion order until nodes are removed)."""
         ...
     def toJSON(self) -> dict[str, Any]: ...
 
@@ -421,10 +462,11 @@ class Vertex:
         """Add a directed edge and return it. Raises ValueError if either node is missing."""
         ...
     def remove_node(self, id: str) -> Node:
-        """Remove a node and every edge attached to it; return the removed node.
+        """Remove a node and every edge attached to it.
 
-        Neighbours' ``edges`` / ``inverse_edges`` are updated, so no dangling
-        edges remain. Raises KeyError if the node does not exist.
+        Returns a detached copy of the node (same id, attr and meta, no edges)
+        in a new one-node Vertex; existing handles to the removed node raise
+        RuntimeError when used. Raises KeyError if the node does not exist.
         """
         ...
     def remove_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> int:
@@ -439,9 +481,11 @@ class Vertex:
         """Return the node. Raises KeyError if not found."""
         ...
     def prune(self) -> int:
-        """Remove dangling edges (edges pointing to nodes not in this vertex).
+        """Kept for compatibility; always returns 0.
 
-        Returns the number of edges removed. Useful after filtering or subsetting.
+        Edges always connect two nodes of their own graph (results of
+        filter/traversals/from_nodes only copy the edges between their nodes),
+        so there are never dangling edges to remove.
         """
         ...
 
@@ -480,7 +524,8 @@ class Vertex:
     def load_from_binary(file_path: str) -> Vertex: ...
     @staticmethod
     def from_nodes(nodes: dict[str, Node]) -> Vertex:
-        """Construct a Vertex directly from an existing node mapping."""
+        """A new Vertex with copies of the given nodes (keyed by the dict keys)
+        and of the edges between them."""
         ...
     @staticmethod
     def from_nodes_with_path(nodes: dict[str, Node], nodelist: list[str]) -> Vertex:

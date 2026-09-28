@@ -68,6 +68,10 @@ A node has an `id`, a dict of `attr`, outgoing `edges`, and `inverse_edges`.
 > `node.attr_set("k", v)` or assign a whole dict (`node.attr = {...}`).
 > `vertex.meta` and the `on_*_callbacks` lists, in contrast, are live.
 
+> **Handles:** the graph data lives in Rust and a `Node` (or `Edge`) is a
+> handle to one node of its `vertex`. `v["x"] == v["x"]`, but the two may be
+> different objects, so compare with `==` rather than `is`.
+
 ```python
 node = v.add_node("x", attr={"label": "hello"})
 
@@ -80,7 +84,8 @@ node.attr_list_append("tags", "new")
 
 node.edges                   # outgoing edges
 node.inverse_edges           # incoming edges
-node.vertex                  # back-reference to the owning Vertex
+node.vertex                  # the owning Vertex
+assert v["x"] == node       # handles compare by node
 ```
 
 ---

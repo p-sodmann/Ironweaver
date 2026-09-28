@@ -88,14 +88,17 @@ def test_bfs_search_agrees_with_forward_traversal(seed):
                 assert found.id == dst
 
 
-def test_bfs_search_on_hand_built_nodes_uses_forward_search():
-    # Nodes built directly (no Vertex) have no inverse_edges; the forward
-    # fallback must still find the target.
-    a, b, c = Node("a", None, None), Node("b", None, None), Node("c", None, None)
-    a.edges = [Edge(a, b, None, None)]
-    b.edges = [Edge(b, c, None, None)]
-    assert a.bfs_search("c").id == "c"
-    assert a.bfs_search("c", depth=1) is None
+def test_standalone_nodes_and_edges():
+    # A Node built directly lives in its own one-node Vertex; edges can only
+    # be made through a Vertex, so edges/inverse_edges always stay in sync.
+    a = Node("a", {"k": 1})
+    assert a.vertex.keys() == ["a"] and a.attr == {"k": 1}
+    assert a.bfs_search("a") == a
+    assert a.bfs_search("b") is None
+    with pytest.raises(TypeError):
+        Edge(a, a, None, None)
+    with pytest.raises(TypeError):
+        Node("b", None, [object()])
 
 
 def test_shortest_path_on_long_chain():

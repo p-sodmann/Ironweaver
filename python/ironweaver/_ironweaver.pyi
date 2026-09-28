@@ -27,26 +27,28 @@ class ObservedDictionary:
 
 @final
 class Edge:
-    """A directed, attributed edge between two nodes."""
+    """A directed, attributed edge between two nodes (a handle into its vertex)."""
 
     id: str | None
-    from_node: Node
-    to_node: Node
     attr: dict[str, Any]
     watched_by: list[Any]
     meta: dict[str, Any]
     on_meta_change_callbacks: list[Callable[..., Any]]
-    on_update_callbacks: list[Callable[[Vertex | None, Edge, str, Any, Any | None], bool]]
-    vertex: Vertex | None
+    @property
+    def from_node(self) -> Node: ...
+    @property
+    def to_node(self) -> Node: ...
+    @property
+    def on_update_callbacks(self) -> list[Callable[[Vertex, Edge, str, Any, Any | None], bool]]: ...
+    @property
+    def vertex(self) -> Vertex: ...
 
-    def __new__(
-        cls,
-        from_node: Node,
-        to_node: Node,
-        attr: dict[str, Any] | None,
-        id: str | None,
-    ) -> Edge: ...
+    def __new__(cls, *args: Any, **kwargs: Any) -> Edge:
+        """Always raises TypeError: create edges with Vertex.add_edge."""
+        ...
     def __repr__(self) -> str: ...
+    def __eq__(self, other: object) -> bool: ...
+    def __hash__(self) -> int: ...
     def toJSON(self) -> dict[str, Any]: ...
     def attr_set(self, key: str, value: Any) -> None:
         """Set attr[key] = value and fire on_update_callbacks if the value changed."""
@@ -61,20 +63,28 @@ class Node:
 
     id: str
     attr: dict[str, Any]
-    edges: list[Edge]
-    inverse_edges: list[Edge]
     meta: dict[str, Any]
     on_edge_add_callbacks: list[Callable[..., Any]]
-    on_update_callbacks: list[Callable[[Vertex | None, Node, str, Any, Any | None], bool]]
-    vertex: Vertex | None
+    @property
+    def edges(self) -> list[Edge]: ...
+    @property
+    def inverse_edges(self) -> list[Edge]: ...
+    @property
+    def on_update_callbacks(self) -> list[Callable[[Vertex, Node, str, Any, Any | None], bool]]: ...
+    @property
+    def vertex(self) -> Vertex: ...
 
     def __new__(
         cls,
         id: str,
-        attr: dict[str, Any] | None,
-        edges: list[Edge] | None,
-    ) -> Node: ...
+        attr: dict[str, Any] | None = ...,
+        edges: list[Edge] | None = ...,
+    ) -> Node:
+        """A node in its own new one-node Vertex; *edges* must be empty."""
+        ...
     def __repr__(self) -> str: ...
+    def __eq__(self, other: object) -> bool: ...
+    def __hash__(self) -> int: ...
     def traverse(
         self,
         depth: int | None = ...,
@@ -116,15 +126,16 @@ class Path:
 
 @final
 class Vertex:
-    """A directed property graph backed by a Rust HashMap."""
+    """A directed property graph backed by ironweaver_core::Graph (pure Rust)."""
 
-    nodes: dict[str, Node]
     meta: dict[str, Any]
     on_node_add_callbacks: list[Callable[[Vertex, Node], bool]]
     on_edge_add_callbacks: list[Callable[[Vertex, Edge], bool]]
-    on_node_update_callbacks: list[Callable[[Vertex | None, Node, str, Any, Any | None], bool]]
-    on_edge_update_callbacks: list[Callable[[Vertex | None, Edge, str, Any, Any | None], bool]]
+    on_node_update_callbacks: list[Callable[[Vertex, Node, str, Any, Any | None], bool]]
+    on_edge_update_callbacks: list[Callable[[Vertex, Edge, str, Any, Any | None], bool]]
 
+    @property
+    def nodes(self) -> dict[str, Node]: ...
     def __new__(cls) -> Vertex: ...
     def __getitem__(self, key: str, /) -> Node: ...
     def __iter__(self) -> Iterator[Node]: ...
