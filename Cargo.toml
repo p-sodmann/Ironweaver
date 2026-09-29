@@ -7,6 +7,7 @@ name = "ironweaver"
 version = "0.2.0"
 edition = "2021"
 publish = false  # released on PyPI as a Python package, not on crates.io
+rust-version = "1.85"
 description = "Python bindings (PyO3) for ironweaver-core"
 license = "MIT"
 repository = "https://github.com/p-sodmann/Ironweaver"

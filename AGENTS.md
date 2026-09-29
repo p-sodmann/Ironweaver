@@ -57,8 +57,14 @@ API, update `llms.txt`, the `.pyi` stubs and the docs together.
 CI (`.github/workflows/ci.yml`) also runs `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo audit`
 (ignored advisories, with reasons, are in `.cargo/audit.toml`), a check that
-the core does not depend on pyo3, and pytest on Python 3.9-3.13 (Linux) plus
-macOS and Windows. Run fmt and clippy before pushing.
+the core does not depend on pyo3, a build with the minimum supported Rust
+version (1.85, `rust-version` in both Cargo.toml files), rustdoc with
+`-D warnings` plus `cargo package` for the core (its README is the crate
+docs, so its example runs as a doctest), and pytest on Python 3.9-3.14
+(Linux) plus macOS and Windows. Run fmt and clippy before pushing.
+
+Releases: see RELEASING.md (version in Cargo.toml, CHANGELOG.md, a `v*` tag
+builds and publishes wheels and the core crate).
 
 ## Function Reference
 Below is a quick guide to notable functions and where to find them.

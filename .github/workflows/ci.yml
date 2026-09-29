@@ -39,6 +39,32 @@ jobs:
             exit 1
           fi
 
+  msrv:
+    name: Rust 1.85 (minimum supported version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      # Keep in step with rust-version in both Cargo.toml files
+      - run: cargo check --workspace --all-targets
+
+  docs-rs:
+    name: Core API docs (rustdoc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc -p ironweaver-core --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: The crate packages for crates.io
+        run: cargo package -p ironweaver-core
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
@@ -57,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           - os: macos-latest
             python: "3.13"

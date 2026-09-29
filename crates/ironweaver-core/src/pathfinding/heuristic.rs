@@ -36,7 +36,7 @@ impl Metric {
 }
 
 /// Where a node's coordinates live. A path is an attribute name followed by
-/// nested keys (`"pos.lat"` -> attr["pos"]["lat"]).
+/// nested keys (`"pos.lat"` -> `attr["pos"]["lat"]`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Coords {
     /// One path to a sequence of numbers (`coords="pos"`).

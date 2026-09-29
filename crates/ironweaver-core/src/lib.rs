@@ -1,37 +1,17 @@
-//! The graph engine behind ironweaver, in pure Rust.
+#![doc = include_str!("../README.md")]
 //!
-//! A [`Graph<N, E>`](Graph) is a directed multigraph whose nodes have unique
-//! string ids and carry a payload `N`; edges carry a payload `E`. Nodes and
-//! edges are addressed by [`NodeIx`] / [`EdgeIx`] handles, which stay valid
-//! until that node or edge is removed (a removed handle never aliases a later
-//! node or edge).
+//! ## Modules
 //!
-//! The algorithms never look inside the payloads except through the
-//! [`Attributes`] trait (edge weights, node coordinates, edge types), and
-//! take user callbacks as closures returning `Result<_, X>`, so a caller can
-//! thread its own error type through them. [`Record`] (an `attr` and a `meta`
-//! map of [`Value`]s) is the ready-made payload for Rust users; the Python
-//! bindings use their own.
-//!
-//! ```
-//! use ironweaver_core::{Direction, Graph, GraphError, Record, Value};
-//! use ironweaver_core::pathfinding::{find_path, PathQuery};
-//!
-//! let mut g: Graph<Record, Record> = Graph::new();
-//! let a = g.add_node("a", Record::default())?;
-//! let b = g.add_node("b", Record::default())?;
-//! let c = g.add_node("c", Record::default())?;
-//! g.add_edge(a, b, Record::with_attr([("weight", Value::from(5.0))]))?;
-//! g.add_edge(a, c, Record::with_attr([("weight", Value::from(1.0))]))?;
-//! g.add_edge(c, b, Record::with_attr([("weight", Value::from(1.0))]))?;
-//!
-//! let path = find_path::<_, _, GraphError>(&g, a, b, &mut PathQuery::dijkstra())?.unwrap();
-//! let ids: Vec<&str> = path.nodes.iter().map(|&n| g.node(n).unwrap().id()).collect();
-//! assert_eq!(ids, ["a", "c", "b"]);
-//! assert_eq!(path.cost, 2.0);
-//! # let _ = Direction::Out;
-//! # Ok::<(), GraphError>(())
-//! ```
+//! - [`graph`]: [`Graph`], handles, [`EdgeId`], labels and types ([`Symbols`]).
+//! - [`ops`]: [`Op`], `Graph::apply` / `Graph::apply_all` (changes as data, with undo).
+//! - [`expr`]: [`Expr`] filter expressions.
+//! - [`projection`]: [`Projection`], the read-only snapshot the analytics run on.
+//! - [`algo`]: analytics on a projection; [`batch`]: many shortest paths at once.
+//! - [`query`]: pattern matching and variable-length paths.
+//! - [`pathfinding`]: single shortest paths (BFS, Dijkstra, A*).
+//! - [`traversal`], [`random_walks`]: walks over the graph.
+//! - [`format`](mod@format): saving and loading ([`Record`] graphs), format version 2.
+//! - [`value`], [`record`]: [`Value`], [`Record`] and the [`Attributes`] trait.
 
 pub mod algo;
 pub mod batch;
