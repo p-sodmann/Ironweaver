@@ -214,10 +214,8 @@ pub fn shortest_paths(
     max_cost: Option<f64>,
 ) -> Result<Vec<Option<PathResult>>, GraphError> {
     crate::pathfinding::check_max_cost(max_cost)?;
-    let dense: Vec<(u32, u32)> = pairs
-        .iter()
-        .map(|&(a, b)| Ok((s.index_of(a)?, s.index_of(b)?)))
-        .collect::<Result<_, GraphError>>()?;
+    let dense: Vec<(u32, u32)> =
+        pairs.iter().map(|&(a, b)| Ok((s.index_of(a)?, s.index_of(b)?))).collect::<Result<_, GraphError>>()?;
     Ok(dense
         .par_iter()
         .map_init(
@@ -273,10 +271,8 @@ mod tests {
     // a -> b (1) -> d (5), a -> c (2) -> d (1), d -> e (default 1), f isolated
     fn diamond() -> (Graph<Record, Record>, Vec<NodeIx>) {
         let mut g = Graph::new();
-        let ix: Vec<NodeIx> = ["a", "b", "c", "d", "e", "f"]
-            .iter()
-            .map(|id| g.add_node(*id, Record::default()).unwrap())
-            .collect();
+        let ix: Vec<NodeIx> =
+            ["a", "b", "c", "d", "e", "f"].iter().map(|id| g.add_node(*id, Record::default()).unwrap()).collect();
         for (f, t, w) in [(0, 1, Some(1.0)), (1, 3, Some(5.0)), (0, 2, Some(2.0)), (2, 3, Some(1.0)), (3, 4, None)] {
             g.add_edge(ix[f], ix[t], w.map_or_else(Record::default, weighted)).unwrap();
         }

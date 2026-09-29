@@ -253,9 +253,7 @@ impl<'a> LoadGraph<'a> {
 
     /// Parse a bincode document.
     pub fn from_binary_slice(bytes: &'a [u8]) -> Result<Self, GraphError> {
-        let options = bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .allow_trailing_bytes();
+        let options = bincode::DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes();
         options.deserialize(bytes).map_err(|e| GraphError::Format(e.to_string()))
     }
 

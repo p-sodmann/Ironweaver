@@ -6,8 +6,8 @@
 // `ironweaver_core::pathfinding` (see the recipe at the top of its mod.rs).
 
 use ironweaver_core::pathfinding::{
-    check_max_cost, check_options, edge_cost, find_path, not_reachable, resolve, Coords, Heuristic,
-    MethodKind, Metric, PathQuery, METHODS,
+    check_max_cost, check_options, edge_cost, find_path, not_reachable, resolve, Coords, Heuristic, MethodKind, Metric,
+    PathQuery, METHODS,
 };
 use ironweaver_core::{Direction, NodeIx};
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -32,9 +32,10 @@ impl<'py> Options<'py> {
 
     fn get<T: for<'a> FromPyObject<'a>>(&self, name: &str) -> PyResult<Option<T>> {
         match self.raw(name)? {
-            Some(v) => v.extract::<T>().map(Some).map_err(|e| {
-                PyTypeError::new_err(format!("invalid value for option '{}': {}", name, e))
-            }),
+            Some(v) => v
+                .extract::<T>()
+                .map(Some)
+                .map_err(|e| PyTypeError::new_err(format!("invalid value for option '{}': {}", name, e))),
             None => Ok(None),
         }
     }
@@ -76,13 +77,13 @@ fn heuristic<'py>(
 
     if let Some(name) = options.get::<String>("distances")? {
         if metric.is_some() || coords.is_some() {
-            return Err(PyValueError::new_err(
-                "use either distances=... or heuristic/coords=..., not both",
-            ));
+            return Err(PyValueError::new_err("use either distances=... or heuristic/coords=..., not both"));
         }
-        let table = vertex.meta.bind(py).get_item(&name)?.ok_or_else(|| {
-            PyValueError::new_err(format!("distances: vertex.meta has no key '{}'", name))
-        })?;
+        let table = vertex
+            .meta
+            .bind(py)
+            .get_item(&name)?
+            .ok_or_else(|| PyValueError::new_err(format!("distances: vertex.meta has no key '{}'", name)))?;
         let table = table.downcast_into::<PyDict>().map_err(|_| {
             PyTypeError::new_err(format!(
                 "distances: vertex.meta['{}'] must be a dict {{node_id: estimate}} \
@@ -159,12 +160,12 @@ pub fn shortest_path<'py>(
     let direction = Direction::parse(direction).map_err(graph_error)?;
 
     let graph = &vertex.graph;
-    let source = graph.node_ix(&source_id).ok_or_else(|| {
-        PyValueError::new_err(format!("Root node with id '{}' not found", source_id))
-    })?;
-    let target = graph.node_ix(&target_id).ok_or_else(|| {
-        PyValueError::new_err(format!("Target node with id '{}' not found", target_id))
-    })?;
+    let source = graph
+        .node_ix(&source_id)
+        .ok_or_else(|| PyValueError::new_err(format!("Root node with id '{}' not found", source_id)))?;
+    let target = graph
+        .node_ix(&target_id)
+        .ok_or_else(|| PyValueError::new_err(format!("Target node with id '{}' not found", target_id)))?;
 
     let max_depth = options.get::<usize>("max_depth")?;
     let heuristic = match method.kind {
@@ -194,4 +195,3 @@ pub fn shortest_path<'py>(
     }
     build_subgraph(py, vertex, result.nodes, meta.unbind(), false)
 }
-

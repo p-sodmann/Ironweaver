@@ -15,10 +15,7 @@ impl EdgeCost {
     /// Weighted by attribute `key` (default `"weight"`), `default` (default
     /// 1.0) for edges without it.
     pub fn weighted(key: Option<String>, default: Option<f64>) -> Self {
-        EdgeCost::Weighted {
-            key: key.unwrap_or_else(|| "weight".to_string()),
-            default: default.unwrap_or(1.0),
-        }
+        EdgeCost::Weighted { key: key.unwrap_or_else(|| "weight".to_string()), default: default.unwrap_or(1.0) }
     }
 
     /// Cost of an edge with payload `edge`; weights must be non-negative

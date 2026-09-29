@@ -13,9 +13,7 @@ pub fn remove_node(slf: &Bound<'_, Vertex>, id: &str) -> PyResult<Py<Node>> {
     let py = slf.py();
     let (id, data) = {
         let mut v = slf.try_borrow_mut()?;
-        let ix = v.graph.node_ix(id).ok_or_else(|| {
-            PyKeyError::new_err(format!("Node with id '{}' not found", id))
-        })?;
+        let ix = v.graph.node_ix(id).ok_or_else(|| PyKeyError::new_err(format!("Node with id '{}' not found", id)))?;
         v.graph.remove_node(ix).expect("looked up above")
     };
     let mut graph = PyGraph::new();
@@ -27,19 +25,12 @@ pub fn remove_node(slf: &Bound<'_, Vertex>, id: &str) -> PyResult<Py<Node>> {
 /// Remove edges from `from_id` to `to_id`. If `attr` is given, only edges
 /// whose attributes equal every given key/value pair are removed.
 /// Returns the number of edges removed.
-pub fn remove_edge(
-    slf: &Bound<'_, Vertex>,
-    from_id: &str,
-    to_id: &str,
-    attr: Option<AttrMap>,
-) -> PyResult<usize> {
+pub fn remove_edge(slf: &Bound<'_, Vertex>, from_id: &str, to_id: &str, attr: Option<AttrMap>) -> PyResult<usize> {
     let py = slf.py();
     let doomed = {
         let v = slf.try_borrow()?;
         let lookup = |id: &str| {
-            v.graph.node_ix(id).ok_or_else(|| {
-                PyValueError::new_err(format!("Node with id '{}' not found", id))
-            })
+            v.graph.node_ix(id).ok_or_else(|| PyValueError::new_err(format!("Node with id '{}' not found", id)))
         };
         let (from, to) = (lookup(from_id)?, lookup(to_id)?);
         let mut doomed = Vec::new();

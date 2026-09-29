@@ -193,10 +193,11 @@ fn random_walks_are_seeded() {
 fn format_round_trips() {
     let (mut g, ix) = diamond();
     g.node_mut(ix["a"]).unwrap().data.meta.insert("note".into(), Value::from("m"));
-    g.node_mut(ix["b"]).unwrap().data.attr.insert(
-        "tags".into(),
-        Value::List(vec![Value::from("x"), Value::Int(2), Value::None]),
-    );
+    g.node_mut(ix["b"])
+        .unwrap()
+        .data
+        .attr
+        .insert("tags".into(), Value::List(vec![Value::from("x"), Value::Int(2), Value::None]));
     let meta = HashMap::from([("title".to_string(), Value::from("t"))]);
 
     let json = format::to_json(&g, &meta, false).unwrap();
@@ -234,7 +235,9 @@ fn legacy_files_load() {
     let json = std::fs::read(format!("{data}legacy_graph.json")).unwrap();
     let bin = std::fs::read(format!("{data}legacy_graph.bin")).unwrap();
     let half = std::fs::read(format!("{data}legacy_graph_f16.bin")).unwrap();
-    for (g, meta) in [format::from_json(&json).unwrap(), format::from_binary(&bin).unwrap(), format::from_binary(&half).unwrap()] {
+    for (g, meta) in
+        [format::from_json(&json).unwrap(), format::from_binary(&bin).unwrap(), format::from_binary(&half).unwrap()]
+    {
         assert_eq!(meta["title"], Value::from("legacy"));
         let mut ids: Vec<&str> = g.nodes().map(|(_, n)| n.id()).collect();
         ids.sort();
@@ -252,8 +255,5 @@ fn missing_endpoint_is_an_error() {
     let doc = br#"{"nodes":{"a":{"id":"a","attr":{},"meta":{},"edge_ids":[],"inverse_edge_ids":[]}},
                   "edges":{"e":{"id":"e","from_id":"a","to_id":"zz","attr":{},"meta":{}}},
                   "meta":{},"metadata":{}}"#;
-    assert_eq!(
-        format::from_json(doc).unwrap_err(),
-        GraphError::InvalidArgument("To node zz not found".into())
-    );
+    assert_eq!(format::from_json(doc).unwrap_err(), GraphError::InvalidArgument("To node zz not found".into()));
 }

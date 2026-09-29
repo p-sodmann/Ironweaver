@@ -63,9 +63,10 @@ fn by_ids(vertex: &Vertex, ids: Vec<String>) -> PyResult<Vec<ironweaver_core::No
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
-        let ix = vertex.graph.node_ix(&id).ok_or_else(|| {
-            PyValueError::new_err(format!("Node with id '{}' not found in vertex", id))
-        })?;
+        let ix = vertex
+            .graph
+            .node_ix(&id)
+            .ok_or_else(|| PyValueError::new_err(format!("Node with id '{}' not found in vertex", id)))?;
         if seen.insert(ix) {
             out.push(ix);
         }

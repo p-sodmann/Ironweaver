@@ -76,11 +76,7 @@ pub fn resolve(
         None => "bfs",
     };
     METHODS.iter().find(|m| m.name == name).ok_or_else(|| {
-        GraphError::InvalidArgument(format!(
-            "unknown path method '{}'; available: {}",
-            name,
-            method_names()
-        ))
+        GraphError::InvalidArgument(format!("unknown path method '{}'; available: {}", name, method_names()))
     })
 }
 
@@ -88,11 +84,7 @@ pub fn resolve(
 pub fn check_options(method: &PathMethod, option_names: &[&str]) -> Result<(), GraphError> {
     for name in option_names {
         if !method.options.contains(name) {
-            let accepted = if method.options.is_empty() {
-                "none".to_string()
-            } else {
-                method.options.join(", ")
-            };
+            let accepted = if method.options.is_empty() { "none".to_string() } else { method.options.join(", ") };
             return Err(GraphError::InvalidType(format!(
                 "method '{}' does not accept option '{}' (accepted options: {})",
                 method.name, name, accepted

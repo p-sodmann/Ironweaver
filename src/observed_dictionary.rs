@@ -1,7 +1,7 @@
 // observed_dictionary.rs
 
-use pyo3::prelude::*;
 use pyo3::class::basic::CompareOp;
+use pyo3::prelude::*;
 use std::collections::HashMap;
 
 #[pyclass]
@@ -15,15 +15,8 @@ pub struct ObservedDictionary {
 #[pymethods]
 impl ObservedDictionary {
     #[new]
-    fn new(
-        node: Option<Py<PyAny>>,
-        callbacks: Option<HashMap<String, Vec<Py<PyAny>>>>,
-    ) -> Self {
-        ObservedDictionary {
-            dict: HashMap::new(),
-            node,
-            callbacks: callbacks.unwrap_or_default(),
-        }
+    fn new(node: Option<Py<PyAny>>, callbacks: Option<HashMap<String, Vec<Py<PyAny>>>>) -> Self {
+        ObservedDictionary { dict: HashMap::new(), node, callbacks: callbacks.unwrap_or_default() }
     }
 
     fn __setitem__(&mut self, py: Python<'_>, key: String, value: Py<PyAny>) -> PyResult<()> {
@@ -32,9 +25,7 @@ impl ObservedDictionary {
         // Determine whether the value actually changed using Python's equality
         let mut changed = true;
         if let Some(ref old) = old_value {
-            let eq_obj = old
-                .bind(py)
-                .rich_compare(value.bind(py), CompareOp::Eq)?;
+            let eq_obj = old.bind(py).rich_compare(value.bind(py), CompareOp::Eq)?;
             if eq_obj.is_truthy()? {
                 changed = false;
             }
@@ -68,5 +59,3 @@ impl ObservedDictionary {
             .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!("Key '{}' not found", key)))
     }
 }
-
-

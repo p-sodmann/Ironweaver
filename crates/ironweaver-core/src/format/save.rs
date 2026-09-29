@@ -195,8 +195,7 @@ impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
     /// Write the graph with bincode (fixed-width integer encoding).
     pub fn write_binary<W: Write>(&self, writer: W) -> Result<(), GraphError> {
         let options = bincode::DefaultOptions::new().with_fixint_encoding();
-        self.serialize(&mut bincode::Serializer::new(writer, options))
-            .map_err(|e| GraphError::Format(e.to_string()))
+        self.serialize(&mut bincode::Serializer::new(writer, options)).map_err(|e| GraphError::Format(e.to_string()))
     }
 }
 
@@ -365,4 +364,3 @@ impl<N, E, C: Codec<N, E>> Serialize for GraphWriter<'_, N, E, C> {
         st.end()
     }
 }
-

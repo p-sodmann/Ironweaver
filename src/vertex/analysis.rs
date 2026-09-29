@@ -11,11 +11,7 @@ pub fn get_metadata(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
     let graph = &vertex.graph;
     dict.set_item("node_count", graph.node_count())?;
     dict.set_item("edge_count", graph.edge_count())?;
-    let average_degree = if graph.is_empty() {
-        0.0
-    } else {
-        graph.edge_count() as f64 / graph.node_count() as f64
-    };
+    let average_degree = if graph.is_empty() { 0.0 } else { graph.edge_count() as f64 / graph.node_count() as f64 };
     dict.set_item("average_degree", average_degree)?;
     let node_ids: Vec<&str> = graph.nodes().map(|(_, n)| n.id()).collect();
     dict.set_item("node_ids", node_ids)?;

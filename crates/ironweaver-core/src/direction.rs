@@ -40,10 +40,9 @@ impl FromStr for Direction {
             "out" => Ok(Direction::Out),
             "in" => Ok(Direction::In),
             "both" => Ok(Direction::Both),
-            other => Err(GraphError::InvalidArgument(format!(
-                "direction must be 'out', 'in' or 'both', got '{}'",
-                other
-            ))),
+            other => {
+                Err(GraphError::InvalidArgument(format!("direction must be 'out', 'in' or 'both', got '{}'", other)))
+            }
         }
     }
 }

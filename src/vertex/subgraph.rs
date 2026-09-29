@@ -34,4 +34,3 @@ pub fn build_subgraph(
     }
     Py::new(py, vertex)
 }
-

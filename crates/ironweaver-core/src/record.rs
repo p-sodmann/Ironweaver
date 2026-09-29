@@ -82,11 +82,9 @@ impl Attributes for Record {
     fn numbers(&self, path: &[String]) -> Result<Lookup<Vec<f64>>, GraphError> {
         Ok(match self.at(path) {
             None => Lookup::Missing,
-            Some(Value::List(items)) => items
-                .iter()
-                .map(Value::as_f64)
-                .collect::<Option<Vec<f64>>>()
-                .map_or(Lookup::Invalid, Lookup::Found),
+            Some(Value::List(items)) => {
+                items.iter().map(Value::as_f64).collect::<Option<Vec<f64>>>().map_or(Lookup::Invalid, Lookup::Found)
+            }
             Some(_) => Lookup::Invalid,
         })
     }

@@ -103,11 +103,8 @@ pub(crate) fn edge_predicate<'a>(
     edge_filter: &'a Option<Py<PyAny>>,
 ) -> impl FnMut(ironweaver_core::EdgeIx, &ironweaver_core::Edge<EdgeData>) -> Result<bool, Error> + 'a {
     // Interned keys: every lookup then hits the dict's pointer fast path.
-    let wanted: Vec<(Bound<'a, PyString>, Bound<'a, PyAny>)> = filter
-        .iter()
-        .flatten()
-        .map(|(k, v)| (PyString::intern(py, k), v.bind(py).clone()))
-        .collect();
+    let wanted: Vec<(Bound<'a, PyString>, Bound<'a, PyAny>)> =
+        filter.iter().flatten().map(|(k, v)| (PyString::intern(py, k), v.bind(py).clone())).collect();
     move |e, edge| {
         if !wanted.is_empty() {
             let attr = match edge.data.attr.dict(py) {
@@ -137,12 +134,15 @@ impl Node {
     /// are made with `Vertex.add_edge`.
     #[new]
     #[pyo3(signature = (id, attr=None, edges=None))]
-    fn new(py: Python<'_>, id: String, attr: Option<Bound<'_, PyDict>>, edges: Option<Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn new(
+        py: Python<'_>,
+        id: String,
+        attr: Option<Bound<'_, PyDict>>,
+        edges: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         if let Some(edges) = edges {
             if !edges.is_none() && edges.len()? > 0 {
-                return Err(PyTypeError::new_err(
-                    "Node edges are created with Vertex.add_edge(from_id, to_id, attr)",
-                ));
+                return Err(PyTypeError::new_err("Node edges are created with Vertex.add_edge(from_id, to_id, attr)"));
             }
         }
         let mut graph = PyGraph::new();

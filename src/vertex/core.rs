@@ -239,15 +239,20 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If either node doesn't exist
     #[pyo3(signature = (from_id, to_id, attr=None))]
-    fn add_edge(slf: &Bound<'_, Self>, from_id: &str, to_id: &str, attr: Option<Bound<'_, PyDict>>) -> PyResult<Py<Edge>> {
+    fn add_edge(
+        slf: &Bound<'_, Self>,
+        from_id: &str,
+        to_id: &str,
+        attr: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<Edge>> {
         let py = slf.py();
         let data = EdgeData::new(None, PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());
         let (ix, callbacks) = {
             let mut v = slf.try_borrow_mut()?;
             let lookup = |id: &str| {
-                v.graph.node_ix(id).ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!("Node with id '{}' not found", id))
-                })
+                v.graph
+                    .node_ix(id)
+                    .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Node with id '{}' not found", id)))
             };
             let (from, to) = (lookup(from_id)?, lookup(to_id)?);
             let ix = v.graph.add_edge(from, to, data).map_err(graph_error)?;
@@ -271,9 +276,11 @@ impl Vertex {
     /// Raises:
     ///     KeyError: If no node with the given ID exists
     fn get_node(slf: &Bound<'_, Self>, id: &str) -> PyResult<Py<Node>> {
-        let ix = slf.try_borrow()?.graph.node_ix(id).ok_or_else(|| {
-            pyo3::exceptions::PyKeyError::new_err(format!("Node with id '{}' not found", id))
-        })?;
+        let ix = slf
+            .try_borrow()?
+            .graph
+            .node_ix(id)
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!("Node with id '{}' not found", id)))?;
         Node::handle(slf.py(), &slf.clone().unbind(), ix)
     }
 
@@ -386,7 +393,16 @@ impl Vertex {
         let options = PyDict::new(py);
         options.set_item("max_depth", max_depth)?;
         pathfinding::shortest_path(
-            self, py, root_node_id, target_node_id, Some("bfs"), None, None, None, direction, Some(options),
+            self,
+            py,
+            root_node_id,
+            target_node_id,
+            Some("bfs"),
+            None,
+            None,
+            None,
+            direction,
+            Some(options),
         )
     }
 
@@ -420,8 +436,16 @@ impl Vertex {
         direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
         pathfinding::shortest_path(
-            self, py, root_node_id, target_node_id, Some("dijkstra"), weight, default_weight, max_cost,
-            direction, None,
+            self,
+            py,
+            root_node_id,
+            target_node_id,
+            Some("dijkstra"),
+            weight,
+            default_weight,
+            max_cost,
+            direction,
+            None,
         )
     }
 
@@ -475,7 +499,16 @@ impl Vertex {
         options: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Py<Vertex>> {
         pathfinding::shortest_path(
-            self, py, source, target, method, weight, default_weight, max_cost, direction, options,
+            self,
+            py,
+            source,
+            target,
+            method,
+            weight,
+            default_weight,
+            max_cost,
+            direction,
+            options,
         )
     }
 
@@ -625,12 +658,7 @@ impl Vertex {
     /// Raises:
     ///     ValueError: If either node doesn't exist
     #[pyo3(signature = (from_id, to_id, attr=None))]
-    fn remove_edge(
-        slf: &Bound<'_, Self>,
-        from_id: &str,
-        to_id: &str,
-        attr: Option<AttrMap>,
-    ) -> PyResult<usize> {
+    fn remove_edge(slf: &Bound<'_, Self>, from_id: &str, to_id: &str, attr: Option<AttrMap>) -> PyResult<usize> {
         manipulation::remove_edge(slf, from_id, to_id, attr)
     }
 

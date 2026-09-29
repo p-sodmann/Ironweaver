@@ -1,6 +1,6 @@
+use crate::Node;
 use pyo3::prelude::*;
 use pyo3::{PyTraverseError, PyVisit};
-use crate::Node;
 
 /// An ordered list of nodes. Reserved for future use: path algorithms return
 /// a `Vertex` with the ordered ids in `meta["nodelist"]` instead.
@@ -14,9 +14,7 @@ pub struct Path {
 impl Path {
     #[new]
     fn new(nodes: Option<Vec<Py<Node>>>) -> Self {
-        Path {
-            nodes: nodes.unwrap_or_default(),
-        }
+        Path { nodes: nodes.unwrap_or_default() }
     }
 
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
@@ -31,14 +29,10 @@ impl Path {
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
-        let node_ids: Vec<String> = self.nodes
+        let node_ids: Vec<String> = self
+            .nodes
             .iter()
-            .filter_map(|n| {
-                n.bind(py)
-                    .getattr("id")
-                    .ok()
-                    .and_then(|id| id.extract::<String>().ok())
-            })
+            .filter_map(|n| n.bind(py).getattr("id").ok().and_then(|id| id.extract::<String>().ok()))
             .collect();
         format!("Path({:?})", node_ids)
     }
@@ -48,12 +42,7 @@ impl Path {
     fn toJSON(&self, py: Python<'_>) -> Vec<String> {
         self.nodes
             .iter()
-            .filter_map(|n| {
-                n.bind(py)
-                    .getattr("id")
-                    .ok()
-                    .and_then(|id| id.extract::<String>().ok())
-            })
+            .filter_map(|n| n.bind(py).getattr("id").ok().and_then(|id| id.extract::<String>().ok()))
             .collect()
     }
 }

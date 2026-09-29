@@ -23,12 +23,7 @@ fn codec<'py>(vertex: &Vertex, py: Python<'py>, half: bool) -> PyCodec<'py> {
 
 /// Save graph to JSON file (when file_path is provided) or return JSON string (when file_path is None).
 /// Output is compact unless `pretty` is true.
-pub fn save_to_json(
-    vertex: &Vertex,
-    py: Python<'_>,
-    file_path: Option<String>,
-    pretty: bool,
-) -> PyResult<Py<PyAny>> {
+pub fn save_to_json(vertex: &Vertex, py: Python<'_>, file_path: Option<String>, pretty: bool) -> PyResult<Py<PyAny>> {
     let codec = codec(vertex, py, false);
     let writer = GraphWriter::new(&vertex.graph, &codec);
 
@@ -53,9 +48,7 @@ fn save_binary(vertex: &Vertex, py: Python<'_>, file_path: &str, half: bool) -> 
     let writer = GraphWriter::new(&vertex.graph, &codec);
     let file = File::create(file_path).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
     let mut out = BufWriter::new(file);
-    writer
-        .write_binary(&mut out)
-        .map_err(|e| runtime_error("Failed to save graph to binary", e))?;
+    writer.write_binary(&mut out).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
     std::io::Write::flush(&mut out).map_err(|e| runtime_error("Failed to save graph to binary", e))
 }
 
@@ -78,11 +71,7 @@ fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
         },
         |e| -> Result<EdgeData, Error> {
             let mut s = strings.borrow_mut();
-            Ok(EdgeData::new(
-                Some(e.id().into()),
-                to_attrs(py, e.attr(), &mut s)?,
-                to_attrs(py, e.meta(), &mut s)?,
-            ))
+            Ok(EdgeData::new(Some(e.id().into()), to_attrs(py, e.attr(), &mut s)?, to_attrs(py, e.meta(), &mut s)?))
         },
     );
     let graph = graph?;
@@ -119,7 +108,7 @@ pub fn load_from_json(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Py<
         &owned
     } else {
         return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "source must be a file path (str), JSON string (str), or dict"
+            "source must be a file path (str), JSON string (str), or dict",
         ));
     };
 

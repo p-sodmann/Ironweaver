@@ -38,9 +38,7 @@ fn setup(
 }
 
 fn lookup(vertex: &Vertex, id: &str, role: &str) -> PyResult<NodeIx> {
-    vertex.graph.node_ix(id).ok_or_else(|| {
-        PyValueError::new_err(format!("{} node with id '{}' not found", role, id))
-    })
+    vertex.graph.node_ix(id).ok_or_else(|| PyValueError::new_err(format!("{} node with id '{}' not found", role, id)))
 }
 
 fn id(vertex: &Vertex, ix: NodeIx) -> &str {
@@ -73,9 +71,7 @@ pub fn shortest_paths(
         .map(|(s, t)| Ok((lookup(vertex, s, "Root")?, lookup(vertex, t, "Target")?)))
         .collect::<PyResult<_>>()?;
     let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py
-        .allow_threads(|| batch::shortest_paths(&snapshot, &pairs, max_cost))
-        .map_err(graph_error)?;
+    let results = py.allow_threads(|| batch::shortest_paths(&snapshot, &pairs, max_cost)).map_err(graph_error)?;
 
     let _gc = GcPause::new(py);
     let out = PyList::empty(py);
@@ -108,13 +104,10 @@ pub fn distances(
 ) -> PyResult<Py<PyDict>> {
     let (method, cost, direction) = setup(method, weight, default_weight, max_cost, direction)?;
     let sources: Vec<NodeIx> = sources.iter().map(|s| lookup(vertex, s, "Root")).collect::<PyResult<_>>()?;
-    let targets: Option<HashSet<NodeIx>> = targets
-        .map(|ts| ts.iter().map(|t| lookup(vertex, t, "Target")).collect::<PyResult<_>>())
-        .transpose()?;
+    let targets: Option<HashSet<NodeIx>> =
+        targets.map(|ts| ts.iter().map(|t| lookup(vertex, t, "Target")).collect::<PyResult<_>>()).transpose()?;
     let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py
-        .allow_threads(|| batch::distances(&snapshot, &sources, max_cost))
-        .map_err(graph_error)?;
+    let results = py.allow_threads(|| batch::distances(&snapshot, &sources, max_cost)).map_err(graph_error)?;
 
     let _gc = GcPause::new(py);
     let out = PyDict::new(py);

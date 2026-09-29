@@ -10,9 +10,7 @@
 
 use ironweaver_core::format::{tagged, Codec, LoadAttrs, LoadKind, LoadValue};
 use pyo3::prelude::*;
-use pyo3::types::{
-    PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString, PyTuple,
-};
+use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString, PyTuple};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -272,8 +270,5 @@ fn shared_string<'s>(py: Python<'_>, s: &'s str, strings: &mut Strings<'s>) -> P
     if s.len() > SHARED_STRING_MAX {
         return PyString::new(py, s).into_any().unbind();
     }
-    strings
-        .entry(s)
-        .or_insert_with(|| PyString::new(py, s).into_any().unbind())
-        .clone_ref(py)
+    strings.entry(s).or_insert_with(|| PyString::new(py, s).into_any().unbind()).clone_ref(py)
 }

@@ -176,20 +176,14 @@ impl<T> Arena<T> {
     }
 
     fn iter(&self) -> impl Iterator<Item = (u32, u32, &T)> + '_ {
-        self.slots
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.value.as_ref().map(|v| (i as u32, s.generation, v)))
+        self.slots.iter().enumerate().filter_map(|(i, s)| s.value.as_ref().map(|v| (i as u32, s.generation, v)))
     }
 
     fn iter_mut(&mut self) -> impl Iterator<Item = (u32, u32, &mut T)> + '_ {
-        self.slots
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(i, s)| {
-                let generation = s.generation;
-                s.value.as_mut().map(|v| (i as u32, generation, v))
-            })
+        self.slots.iter_mut().enumerate().filter_map(|(i, s)| {
+            let generation = s.generation;
+            s.value.as_mut().map(|v| (i as u32, generation, v))
+        })
     }
 }
 
@@ -255,12 +249,7 @@ impl<N, E> Graph<N, E> {
     }
 
     fn insert_node(&mut self, id: String, data: N) -> NodeIx {
-        let (slot, generation) = self.nodes.insert(Node {
-            id: id.clone(),
-            out: Vec::new(),
-            inc: Vec::new(),
-            data,
-        });
+        let (slot, generation) = self.nodes.insert(Node { id: id.clone(), out: Vec::new(), inc: Vec::new(), data });
         let ix = NodeIx { slot, generation };
         self.index.insert(id, ix);
         ix
@@ -413,9 +402,7 @@ impl<N, E> Graph<N, E> {
             Some(n) if direction != Direction::Out => &n.inc,
             _ => &[],
         };
-        out.iter()
-            .map(move |&e| (e, self.edge_ref(e).to))
-            .chain(inc.iter().map(move |&e| (e, self.edge_ref(e).from)))
+        out.iter().map(move |&e| (e, self.edge_ref(e).to)).chain(inc.iter().map(move |&e| (e, self.edge_ref(e).from)))
     }
 
     /// A new graph with the nodes in `keep` (in that order, duplicates and
@@ -537,9 +524,7 @@ mod tests {
     #[test]
     fn induced_subgraph_keeps_order_and_internal_edges() {
         let (g, [a, b, c]) = triangle();
-        let sub = g
-            .induced_subgraph([c, a, c], |_| Ok::<_, ()>(()), |e| Ok(e.data * 10))
-            .unwrap();
+        let sub = g.induced_subgraph([c, a, c], |_| Ok::<_, ()>(()), |e| Ok(e.data * 10)).unwrap();
         let ids: Vec<_> = sub.nodes().map(|(_, n)| n.id()).collect();
         assert_eq!(ids, ["c", "a"]);
         assert_eq!(sub.edge_count(), 1);

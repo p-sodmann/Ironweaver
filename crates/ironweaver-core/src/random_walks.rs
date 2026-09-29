@@ -285,10 +285,7 @@ fn perform_walk<R: Rng>(
             _ => {
                 scratch.options.clear();
                 scratch.options.extend(
-                    edges
-                        .iter()
-                        .copied()
-                        .filter(|(t, _)| allow_revisit || scratch.stamp[*t as usize] != generation),
+                    edges.iter().copied().filter(|(t, _)| allow_revisit || scratch.stamp[*t as usize] != generation),
                 );
                 if scratch.options.is_empty() {
                     break;
@@ -406,8 +403,14 @@ impl WalkPlan {
             for _ in 0..opts.num_attempts {
                 let start = fixed_start.unwrap_or_else(|| strat.sample_start(&mut rng));
                 let walk = perform_walk(
-                    index, start, max_length, allow_revisit, include_edges,
-                    Some(&mut strat), &mut scratch, &mut rng,
+                    index,
+                    start,
+                    max_length,
+                    allow_revisit,
+                    include_edges,
+                    Some(&mut strat),
+                    &mut scratch,
+                    &mut rng,
                 );
                 if walk.nodes.len() >= opts.min_length {
                     walks.push(walk);
@@ -427,8 +430,14 @@ impl WalkPlan {
                     let mut walks = Vec::with_capacity(attempts);
                     for _ in 0..attempts {
                         let walk = perform_walk(
-                            index, start, max_length, allow_revisit, include_edges,
-                            None, &mut scratch, &mut rng,
+                            index,
+                            start,
+                            max_length,
+                            allow_revisit,
+                            include_edges,
+                            None,
+                            &mut scratch,
+                            &mut rng,
                         );
                         if walk.nodes.len() >= opts.min_length {
                             walks.push(walk);
@@ -455,7 +464,11 @@ impl WalkPlan {
 }
 
 /// Random walks from `start_node_id` (see [`WalkOptions`]), as lists of ids.
-pub fn random_walks<N, E, X>(g: &Graph<N, E>, start_node_id: Option<&str>, opts: WalkOptions) -> Result<Vec<Vec<String>>, X>
+pub fn random_walks<N, E, X>(
+    g: &Graph<N, E>,
+    start_node_id: Option<&str>,
+    opts: WalkOptions,
+) -> Result<Vec<Vec<String>>, X>
 where
     E: Attributes,
     X: From<GraphError> + From<E::Error>,

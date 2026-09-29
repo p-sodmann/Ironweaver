@@ -28,9 +28,9 @@ impl fmt::Display for GraphError {
             GraphError::DuplicateNode(id) => write!(f, "Node with id '{}' already exists", id),
             GraphError::NodeNotFound(id) => write!(f, "Node with id '{}' not found", id),
             GraphError::Stale => f.write_str("node or edge was removed from its graph"),
-            GraphError::InvalidArgument(msg)
-            | GraphError::InvalidType(msg)
-            | GraphError::Format(msg) => f.write_str(msg),
+            GraphError::InvalidArgument(msg) | GraphError::InvalidType(msg) | GraphError::Format(msg) => {
+                f.write_str(msg)
+            }
         }
     }
 }
