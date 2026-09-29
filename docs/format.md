@@ -36,7 +36,12 @@ Both encodings hold the same document:
 ```
 
 - Edge ids are the persistent integer ids, written in decimal. `next_edge_id` keeps the ids of removed edges from being handed out again after loading.
-- Attribute values are tagged with their type (`{"Float": 1.5}`, `{"String": "x"}`, ...), so ints, floats, strings, bools, None, lists and dicts all round-trip exactly.
+- Attribute values are tagged with their type (`{"Float": 1.5}`, `{"String": "x"}`, ...), so ints, floats, strings, bools, None, lists and dicts all round-trip exactly, and so do:
+  - bytes (`bytes` / `bytearray`; loaded as `bytes`): base64 in JSON, `{"Bytes": "aGk="}`;
+  - dates (`datetime.date`): `{"Date": "2024-05-01"}`;
+  - date-times (`datetime.datetime`): `{"DateTime": "2024-05-01T12:30:00.250000+02:00"}`, microsecond precision. An aware datetime keeps its UTC offset but not its zone name (it loads with a fixed-offset `timezone`); a naive one loads naive.
+
+  In binary files dates are day counts, date-times microseconds plus offset, bytes raw. Files saved before 0.2 stored datetimes as strings (and bytes as lists of ints); they load as they were saved.
 - Values may nest at most 100 levels deep; deeper files are rejected when loading, so a crafted file can't exhaust the stack.
 
 **JSON** is the document above, compact by default (`save_to_json(path, pretty=True)` indents it).

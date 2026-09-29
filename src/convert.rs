@@ -9,8 +9,14 @@
 // through the JSON loader.
 
 use ironweaver_core::format::{tagged, Codec, LoadAttrs, LoadKind, LoadValue};
+use ironweaver_core::temporal::Parts;
+use ironweaver_core::{Date, DateTime, Value};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyMapping, PySequence, PyString, PyTuple};
+use pyo3::types::{
+    PyAny, PyBool, PyByteArray, PyBytes, PyDate, PyDateAccess, PyDateTime, PyDelta, PyDeltaAccess, PyDict, PyFloat,
+    PyInt, PyList, PyMapping, PySequence, PyString, PyTimeAccess, PyTuple, PyTzInfo,
+};
 use serde::ser::{Error as _, SerializeMap, SerializeSeq, Serializer};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -122,6 +128,13 @@ impl Serialize for PyValue<'_, '_> {
             tagged::float(s, f.value(), half)
         } else if let Ok(st) = v.cast::<PyString>() {
             tagged::string(s, st.to_str().map_err(py_err)?)
+        } else if let Some(special) = special_value(v).map_err(py_err)? {
+            match special {
+                Value::Bytes(b) => tagged::bytes(s, &b),
+                Value::Date(d) => tagged::date(s, d),
+                Value::DateTime(t) => tagged::datetime(s, t),
+                _ => unreachable!("special_value returns bytes, dates and date-times"),
+            }
         } else if let Ok(list) = v.cast::<PyList>() {
             let items: Vec<Bound<'_, PyAny>> = list.iter().collect();
             tagged::list(s, &PyItems { items: &items, half, depth })
@@ -231,12 +244,70 @@ impl Codec<NodeData, EdgeData> for PyCodec<'_> {
     }
 }
 
+/// A Python `bytes` / `bytearray`, `datetime.datetime` or `datetime.date`
+/// as a core value; `None` for anything else. An aware datetime keeps its
+/// UTC offset (a fixed offset: zone names are not kept); offsets with
+/// microseconds are refused.
+pub fn special_value(v: &Bound<'_, PyAny>) -> PyResult<Option<Value>> {
+    Ok(Some(if let Ok(b) = v.cast::<PyBytes>() {
+        Value::Bytes(b.as_bytes().to_vec())
+    } else if let Ok(b) = v.cast::<PyByteArray>() {
+        Value::Bytes(b.to_vec())
+    } else if let Ok(t) = v.cast::<PyDateTime>() {
+        let offset = match v.call_method0("utcoffset")? {
+            o if o.is_none() => None,
+            o => {
+                let d = o.cast_into::<PyDelta>()?;
+                if d.get_microseconds() != 0 {
+                    return Err(PyValueError::new_err("UTC offsets with microseconds are not supported"));
+                }
+                Some(d.get_days() * 86_400 + d.get_seconds())
+            }
+        };
+        let parts = Parts {
+            year: t.get_year(),
+            month: t.get_month().into(),
+            day: t.get_day().into(),
+            hour: t.get_hour().into(),
+            minute: t.get_minute().into(),
+            second: t.get_second().into(),
+            microsecond: t.get_microsecond(),
+        };
+        Value::DateTime(DateTime::from_parts(parts, offset).map_err(crate::errors::graph_error)?)
+    } else if let Ok(d) = v.cast::<PyDate>() {
+        Value::Date(
+            Date::from_ymd(d.get_year(), d.get_month().into(), d.get_day().into())
+                .map_err(crate::errors::graph_error)?,
+        )
+    } else {
+        return Ok(None);
+    }))
+}
+
+/// A core bytes / date / date-time value as a Python object.
+fn special_to_python(py: Python<'_>, v: &LoadKind<'_, '_>) -> PyResult<Py<PyAny>> {
+    Ok(match v {
+        LoadKind::Bytes(b) => PyBytes::new(py, b).into_any().unbind(),
+        LoadKind::Date(d) => {
+            let (y, m, day) = d.ymd();
+            PyDate::new(py, y, m as u8, day as u8)?.into_any().unbind()
+        }
+        LoadKind::DateTime(t) => {
+            let p = t.parts();
+            let tz = t.offset.map(|o| PyTzInfo::fixed_offset(py, PyDelta::new(py, 0, o, 0, true)?)).transpose()?;
+            let (mo, d, h, mi, s) = (p.month as u8, p.day as u8, p.hour as u8, p.minute as u8, p.second as u8);
+            PyDateTime::new(py, p.year, mo, d, h, mi, s, p.microsecond, tz.as_ref())?.into_any().unbind()
+        }
+        _ => unreachable!("only called for bytes, dates and date-times"),
+    })
+}
+
 /// A Python value as a core `Value` (for filter expressions): None, bool,
-/// int (float if out of i64 range), float, str, list / tuple, dict (keys as
-/// strings); anything else as `str(value)`. Fails beyond `MAX_DEPTH` levels.
+/// int (float if out of i64 range), float, str, bytes, date, datetime,
+/// list / tuple, dict (keys as strings); anything else as `str(value)`.
+/// Fails beyond `MAX_DEPTH` levels.
 pub fn to_value(v: &Bound<'_, PyAny>) -> PyResult<ironweaver_core::Value> {
     fn go(v: &Bound<'_, PyAny>, depth: usize) -> PyResult<ironweaver_core::Value> {
-        use ironweaver_core::Value;
         if depth > ironweaver_core::format::MAX_DEPTH {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "values nested more than {} levels deep",
@@ -256,6 +327,8 @@ pub fn to_value(v: &Bound<'_, PyAny>) -> PyResult<ironweaver_core::Value> {
             Value::Float(f.value())
         } else if let Ok(s) = v.cast::<PyString>() {
             Value::String(s.to_str()?.to_owned())
+        } else if let Some(special) = special_value(v)? {
+            special
         } else if let Ok(d) = v.cast::<PyDict>() {
             let mut out = HashMap::with_capacity(d.len());
             for (k, x) in d.iter() {
@@ -306,6 +379,7 @@ pub fn to_python<'s>(py: Python<'_>, value: &'s LoadValue<'_>, strings: &mut Str
             }
             Ok(dict.into_any().unbind())
         }
+        kind @ (LoadKind::Bytes(_) | LoadKind::Date(_) | LoadKind::DateTime(_)) => special_to_python(py, &kind),
     }
 }
 

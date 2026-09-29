@@ -27,6 +27,10 @@ a query layer and database foundations.
 - `Projection.label_propagation` on a directed projection follows the LDBC
   Graphalytics CDLP rule: in- and out-neighbours count separately.
 - Python 3.8 is no longer supported (3.9 – 3.14 are).
+- `datetime.date` / `datetime.datetime` attribute values are saved as dates
+  and date-times (they used to be saved as their `str()` and load as
+  strings), and `bytes` / `bytearray` as bytes (they used to become lists of
+  ints). Files saved by 0.1 load as before.
 
 ### Deprecated
 
@@ -67,6 +71,11 @@ a query layer and database foundations.
 - **Rust core (`ironweaver-core`):** `Graph<N, E>`, an op log (`Op`,
   `Graph::apply` returning the undo ops, atomic `apply_all`), `Expr`,
   `Projection` and the algorithms above, file formats, query primitives.
+- **Dates, date-times and bytes** as attribute values: they keep their
+  types through JSON and binary saves (aware date-times keep their UTC
+  offset) and compare in filter expressions. In the core: `Value::Bytes`,
+  `Value::Date`, `Value::DateTime` and `Key` (a totally ordered, hashable
+  form of scalar values, for indexes).
 - **Ctrl+C stops long computations:** projection algorithms, batch
   shortest paths / distances, random walks, `Vertex.match`, `Node.paths`,
   `shortest_path` and traversals raise `KeyboardInterrupt` shortly after

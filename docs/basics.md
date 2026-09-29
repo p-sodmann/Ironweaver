@@ -91,6 +91,24 @@ v.save_to_binary_f16("graph_f16.bin")
 
 Files are written in format version 2: node labels, edge types and edge ids are saved; binary files carry a header and a checksum (truncated or corrupted files are rejected). Files from older versions still load. There, edges get new ids, the old string id is kept in `edge.meta["legacy_id"]`, and `attr["labels"]` / `attr["type"]` become labels and types.
 
+Attribute values can be None, bools, ints, floats, strings, bytes, `datetime.date` / `datetime.datetime` (aware ones keep their UTC offset), and lists / dicts of those; they load back with the same types. numpy arrays and scalars are saved as lists / numbers, anything else as its `str()`.
+
+```python
+import datetime as dt
+import os
+import tempfile
+from ironweaver import Vertex
+
+g = Vertex()
+g.add_node("launch", {"day": dt.date(1969, 7, 16), "raw": b"\x00\x01",
+                      "at": dt.datetime(1969, 7, 16, 13, 32, tzinfo=dt.timezone.utc)})
+path = os.path.join(tempfile.mkdtemp(), "g.bin")
+g.save_to_binary(path)
+attr = Vertex.load_from_binary(path)["launch"].attr
+assert attr["day"] == dt.date(1969, 7, 16) and attr["raw"] == b"\x00\x01"
+assert attr["at"].tzinfo is not None
+```
+
 Saving to a file is atomic: the graph is written to a temporary file next to the target and renamed over it, so a failed or interrupted save never leaves a half-written file (the previous file stays as it was). Attribute values may nest lists and dicts at most 100 levels deep; saving deeper values (or a list that contains itself) and loading files with deeper values raise `RuntimeError`.
 
 ### Metadata & analysis

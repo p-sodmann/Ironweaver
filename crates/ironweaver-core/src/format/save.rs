@@ -22,6 +22,9 @@ pub mod tagged {
     const NONE: u32 = 5;
     const LIST: u32 = 6;
     const DICT: u32 = 7;
+    const BYTES: u32 = 8;
+    const DATE: u32 = 9;
+    const DATETIME: u32 = 10;
 
     pub fn string<S: Serializer>(s: S, v: &str) -> Result<S::Ok, S::Error> {
         s.serialize_newtype_variant(ENUM, STRING, "String", v)
@@ -60,6 +63,25 @@ pub mod tagged {
     /// A dict; `entries` must serialize as a map of string keys to tagged values.
     pub fn dict<S: Serializer, T: Serialize + ?Sized>(s: S, entries: &T) -> Result<S::Ok, S::Error> {
         s.serialize_newtype_variant(ENUM, DICT, "Dict", entries)
+    }
+
+    /// A byte string (base64 in text formats).
+    pub fn bytes<S: Serializer>(s: S, v: &[u8]) -> Result<S::Ok, S::Error> {
+        struct Bytes<'a>(&'a [u8]);
+        impl Serialize for Bytes<'_> {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                crate::temporal::bytes::serialize(self.0, s)
+            }
+        }
+        s.serialize_newtype_variant(ENUM, BYTES, "Bytes", &Bytes(v))
+    }
+
+    pub fn date<S: Serializer>(s: S, v: crate::Date) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, DATE, "Date", &v)
+    }
+
+    pub fn datetime<S: Serializer>(s: S, v: crate::DateTime) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(ENUM, DATETIME, "DateTime", &v)
     }
 
     /// Fails when `depth` (1 for an attribute's own value) exceeds
@@ -107,6 +129,9 @@ impl Serialize for Tagged<'_> {
             Value::None => tagged::none(s),
             Value::List(items) => tagged::list(s, &TaggedList { items, half, depth }),
             Value::Dict(map) => tagged::dict(s, &TaggedMap { map, half, depth }),
+            Value::Bytes(v) => tagged::bytes(s, v),
+            Value::Date(v) => tagged::date(s, *v),
+            Value::DateTime(v) => tagged::datetime(s, *v),
         }
     }
 }

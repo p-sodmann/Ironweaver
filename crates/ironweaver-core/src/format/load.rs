@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 
-use crate::{Attrs, EdgeId, EdgeIx, Graph, GraphError, Value};
+use crate::{Attrs, Date, DateTime, EdgeId, EdgeIx, Graph, GraphError, Value};
 
 /// A string from the input document: borrowed from the input buffer when it
 /// contains no escape sequences, owned otherwise.
@@ -85,6 +85,9 @@ enum RawValue<'a> {
     None,
     List(#[serde(borrow)] Vec<LoadValue<'a>>),
     Dict(#[serde(borrow)] LoadAttrs<'a>),
+    Bytes(#[serde(with = "crate::temporal::bytes")] Vec<u8>),
+    Date(Date),
+    DateTime(DateTime),
 }
 
 /// A value from the input document; strings borrow from the input buffer.
@@ -130,6 +133,9 @@ pub enum LoadKind<'v, 'a> {
     None,
     List(&'v [LoadValue<'a>]),
     Dict(&'v LoadAttrs<'a>),
+    Bytes(&'v [u8]),
+    Date(Date),
+    DateTime(DateTime),
 }
 
 impl<'a> LoadValue<'a> {
@@ -144,6 +150,9 @@ impl<'a> LoadValue<'a> {
             RawValue::None => LoadKind::None,
             RawValue::List(items) => LoadKind::List(items),
             RawValue::Dict(d) => LoadKind::Dict(d),
+            RawValue::Bytes(b) => LoadKind::Bytes(b),
+            RawValue::Date(d) => LoadKind::Date(*d),
+            RawValue::DateTime(t) => LoadKind::DateTime(*t),
         }
     }
 
@@ -160,6 +169,9 @@ impl<'a> LoadValue<'a> {
             LoadKind::None => Value::None,
             LoadKind::List(items) => Value::List(items.iter().map(LoadValue::to_value).collect()),
             LoadKind::Dict(d) => Value::Dict(d.to_attrs()),
+            LoadKind::Bytes(b) => Value::Bytes(b.to_vec()),
+            LoadKind::Date(d) => Value::Date(d),
+            LoadKind::DateTime(t) => Value::DateTime(t),
         }
     }
 }

@@ -27,6 +27,7 @@ pub mod projection;
 pub mod query;
 pub mod random_walks;
 pub mod record;
+pub mod temporal;
 pub mod traversal;
 pub mod value;
 
@@ -37,4 +38,5 @@ pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
 pub use ops::{AttrPatch, Op};
 pub use projection::Projection;
 pub use record::{Attributes, Attrs, Lookup, Record};
-pub use value::Value;
+pub use temporal::{Date, DateTime};
+pub use value::{Key, Value};

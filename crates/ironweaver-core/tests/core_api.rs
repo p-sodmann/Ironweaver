@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use ironweaver_core::format;
 use ironweaver_core::pathfinding::{self, find_path, Coords, Heuristic, Metric, PathQuery};
 use ironweaver_core::random_walks::{random_walks, WalkOptions};
-use ironweaver_core::{Direction, Graph, GraphError, NodeIx, Record, Value};
+use ironweaver_core::{Date, DateTime, Direction, Graph, GraphError, NodeIx, Record, Value};
 
 type G = Graph<Record, Record>;
 
@@ -210,6 +210,12 @@ fn format_round_trips() {
         .data
         .attr
         .insert("tags".into(), Value::List(vec![Value::from("x"), Value::Int(2), Value::None]));
+    let when: DateTime = "2024-05-01T12:30:00.000001-03:30".parse().unwrap();
+    let c = &mut g.node_mut(ix["c"]).unwrap().data.attr;
+    c.insert("when".into(), Value::DateTime(when));
+    c.insert("local".into(), Value::DateTime("1969-07-20T20:17:40".parse().unwrap()));
+    c.insert("day".into(), Value::Date(Date::from_ymd(1900, 3, 1).unwrap()));
+    c.insert("raw".into(), Value::Bytes((0..=255).collect()));
     let meta = HashMap::from([("title".to_string(), Value::from("t"))]);
 
     let json = format::to_json(&g, &meta, false).unwrap();
@@ -233,6 +239,12 @@ fn assert_same(a: &G, b: &G) {
     for (_, n) in a.nodes() {
         let m = b.node_by_id(n.id()).unwrap();
         assert_eq!(n.data, m.data);
+        for (k, v) in &n.data.attr {
+            if let Value::DateTime(t) = v {
+                // Same instant and the same offset
+                assert!(matches!(m.data.attr[k], Value::DateTime(u) if u.offset == t.offset), "{k}");
+            }
+        }
         let targets = |g: &G, edges: &[ironweaver_core::EdgeIx]| -> Vec<String> {
             edges.iter().map(|&e| g.node(g.edge(e).unwrap().target()).unwrap().id().to_string()).collect()
         };

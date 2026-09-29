@@ -52,6 +52,9 @@ fn describe(v: &Value) -> String {
         Value::None => "None".into(),
         Value::List(items) => format!("[{}]", items.iter().map(describe).collect::<Vec<_>>().join(", ")),
         Value::Dict(_) => "{...}".into(),
+        Value::Bytes(b) => format!("<{} bytes>", b.len()),
+        Value::Date(d) => format!("date({d})"),
+        Value::DateTime(t) => format!("datetime({t})"),
     }
 }
 
