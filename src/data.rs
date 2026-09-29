@@ -295,6 +295,12 @@ fn with_value<R>(attr: &PyAttrs, path: &[String], f: impl FnOnce(Option<&ironwea
     })
 }
 
+/// The index key of the value at `path` in `attr` (see
+/// `ironweaver_core::Key`); may run Python code (`str()` of odd values).
+pub fn index_key(attr: &PyAttrs, path: &[String]) -> PyResult<Option<ironweaver_core::Key>> {
+    with_value(attr, path, |v| v.and_then(ironweaver_core::Key::of))
+}
+
 impl Attributes for NodeData {
     type Error = PyErr;
 

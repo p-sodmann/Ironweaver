@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
+use crate::index::Indexes;
 use crate::{Direction, GraphError};
 
 /// Hasher for `NodeIx` / `EdgeIx` keys: a multiply-rotate mix of the two
@@ -338,6 +339,8 @@ pub struct Graph<N, E> {
     symbols: Symbols,
     /// Nodes carrying each label.
     labeled: HashMap<Symbol, IxSet<NodeIx>>,
+    /// Property indexes (see `index.rs`).
+    pub(crate) indexes: Indexes,
 }
 
 impl<N, E> Default for Graph<N, E> {
@@ -360,6 +363,7 @@ impl<N, E> Graph<N, E> {
             next_edge_id: 0,
             symbols: Symbols::default(),
             labeled: HashMap::new(),
+            indexes: Indexes::default(),
         }
     }
 
@@ -399,6 +403,7 @@ impl<N, E> Graph<N, E> {
             self.nodes.insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data });
         let ix = NodeIx { slot, generation };
         self.index.insert(id, ix);
+        self.indexes.touch(ix);
         ix
     }
 
@@ -583,8 +588,12 @@ impl<N, E> Graph<N, E> {
         self.nodes.get(ix.slot, ix.generation)
     }
 
+    /// The node, mutably. Its payload may change, so property indexes
+    /// re-check it until they are flushed (see [`Graph::flush_indexes`]).
     pub fn node_mut(&mut self, ix: NodeIx) -> Option<&mut Node<N>> {
-        self.nodes.get_mut(ix.slot, ix.generation)
+        let node = self.nodes.get_mut(ix.slot, ix.generation)?;
+        self.indexes.touch(ix);
+        Some(node)
     }
 
     pub fn node_by_id(&self, id: &str) -> Option<&Node<N>> {
@@ -601,7 +610,7 @@ impl<N, E> Graph<N, E> {
 
     /// A node known to be live (listed in an edge or adjacency list).
     fn node_ref_mut(&mut self, ix: NodeIx) -> &mut Node<N> {
-        self.node_mut(ix).expect("adjacency lists reference live nodes")
+        self.nodes.get_mut(ix.slot, ix.generation).expect("adjacency lists reference live nodes")
     }
 
     /// An edge known to be live (listed in an adjacency list).
@@ -629,6 +638,7 @@ impl<N, E> Graph<N, E> {
     pub fn remove_node(&mut self, ix: NodeIx) -> Option<(String, N)> {
         let node = self.nodes.remove(ix.slot, ix.generation)?;
         self.index.remove(&node.id);
+        self.indexes.remove(ix);
         for &label in &node.labels {
             self.unindex_label(label, ix);
         }
@@ -684,7 +694,10 @@ impl<N, E> Graph<N, E> {
         self.nodes.iter().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
     }
 
+    /// Every node, mutably (property indexes re-check them all until
+    /// flushed).
     pub fn nodes_mut(&mut self) -> impl Iterator<Item = (NodeIx, &mut Node<N>)> + '_ {
+        self.indexes.touch_all();
         self.nodes.iter_mut().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
     }
 

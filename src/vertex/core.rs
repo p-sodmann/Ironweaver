@@ -235,6 +235,7 @@ impl Vertex {
             (ix, v.on_node_add_callbacks.clone_ref(py))
         };
         let vertex = slf.clone().unbind();
+        super::index::reindex(py, &vertex, &[ix])?;
         let node = Node::handle(py, &vertex, ix)?;
         if !callbacks.bind(py).is_empty() {
             let args = PyTuple::new(py, [vertex.into_any(), node.clone_ref(py).into_any()])?;
@@ -391,6 +392,50 @@ impl Vertex {
         limit: Option<usize>,
     ) -> PyResult<Py<PyList>> {
         super::query::match_pattern(slf, pattern, r#where.as_ref(), ids.as_ref(), limit)
+    }
+
+    /// Index node attribute ``name`` for fast ``find`` / ``find_range``
+    /// lookups; ``filter(where=...)`` and ``match`` use it too. Kept up to
+    /// date as attributes change; not saved with the graph.
+    ///
+    /// Returns:
+    ///     bool: False if the index already existed
+    fn create_index(slf: &Bound<'_, Self>, name: String) -> PyResult<bool> {
+        super::index::create_index(slf.py(), &slf.clone().unbind(), name)
+    }
+
+    /// Drop the index on ``name``; returns whether there was one.
+    fn drop_index(&mut self, name: String) -> bool {
+        self.graph.drop_index(&[name])
+    }
+
+    /// Names of the indexed node attributes, in creation order.
+    #[getter]
+    fn indexes(&self) -> Vec<String> {
+        self.graph.index_paths().into_iter().map(|p| p.join(".")).collect()
+    }
+
+    /// Nodes whose attribute ``name`` equals ``value`` (numbers compare
+    /// across int and float), in graph order. Uses the index on ``name`` if
+    /// there is one, else scans every node.
+    fn find(slf: &Bound<'_, Self>, name: String, value: &Bound<'_, PyAny>) -> PyResult<Vec<Py<Node>>> {
+        super::index::find(slf.py(), &slf.clone().unbind(), name, value)
+    }
+
+    /// Nodes whose attribute ``name`` lies between ``low`` and ``high``
+    /// (either may be None for no bound), in graph order. ``inclusive`` is
+    /// "both" (default), "left", "right" or "neither". Bounds are numbers,
+    /// strings, bools, bytes, dates or datetimes, of one kind; values of
+    /// other kinds are never in range. Uses the index on ``name`` if any.
+    #[pyo3(signature = (name, low=None, high=None, *, inclusive="both"))]
+    fn find_range(
+        slf: &Bound<'_, Self>,
+        name: String,
+        low: Option<Bound<'_, PyAny>>,
+        high: Option<Bound<'_, PyAny>>,
+        inclusive: &str,
+    ) -> PyResult<Vec<Py<Node>>> {
+        super::index::find_range(slf.py(), &slf.clone().unbind(), name, low.as_ref(), high.as_ref(), inclusive)
     }
 
     /// Nodes carrying ``label``, in graph order (uses the label index)

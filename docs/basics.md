@@ -74,6 +74,34 @@ node = v.get_node("a")
 node = v["a"]         # same thing
 ```
 
+### Indexes
+
+`find(name, value)` and `find_range(name, low, high)` look nodes up by an attribute. They scan every node unless the attribute is indexed:
+
+```python
+from ironweaver import Vertex, attr
+
+g = Vertex()
+g.add_nodes([("ann", {"age": 31, "city": "Oslo"}), ("bob", {"age": 25, "city": "Rome"}),
+             ("cat", {"age": 40, "city": "Oslo"})])
+g.create_index("city")                                  # returns False if it exists
+g.create_index("age")
+assert g.indexes == ["city", "age"]
+assert [n.id for n in g.find("city", "Oslo")] == ["ann", "cat"]
+assert [n.id for n in g.find_range("age", 30, 40, inclusive="left")] == ["ann"]
+g["bob"].attr_set("city", "Oslo")                       # indexes follow every change
+assert [n.id for n in g.find("city", "Oslo")] == ["ann", "bob", "cat"]
+assert sorted(g.filter(where=attr("age") > 30).nodes) == ["ann", "cat"]   # uses the index
+g.drop_index("city")
+```
+
+- Results are in graph order. Numbers compare across int and float (`find("age", 31.0)` finds 31).
+- `find_range` takes `low` and/or `high` (None: open) of one kind (numbers, strings, bools, bytes, dates or datetimes); values of other kinds are never in range. `inclusive` is `"both"` (default), `"left"`, `"right"` or `"neither"`.
+- Only scalar values are indexed; lists, dicts, None and NaN never match, as in filter expressions.
+- `filter(where=...)` and `match` use indexes on the attributes they compare (equality, ranges, `is_in`), and `match` starts from the pattern node with the fewest candidates.
+- Indexes follow changes made through the graph (`add_node(s)`, `attr_set`, assigning `attr`, `remove_node`). Changing a list or dict *inside* an attribute value in place doesn't count, but such values aren't indexed anyway.
+- Indexes are not saved with the graph: create them again after loading.
+
 ### Serialization
 
 ```python

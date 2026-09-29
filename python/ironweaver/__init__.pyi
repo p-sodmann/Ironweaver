@@ -753,6 +753,44 @@ class Vertex:
     def nodes_with_label(self, label: str) -> list[Node]:
         """Nodes carrying *label*, in graph order (label index)."""
         ...
+    def create_index(self, name: str) -> bool:
+        """Index node attribute *name* for fast :meth:`find` / :meth:`find_range`.
+
+        ``filter(where=...)`` and :meth:`match` use indexes automatically.
+        The index follows every change made through the graph's methods; it
+        is not saved with the graph. Only scalar values are indexed (numbers,
+        strings, bools, bytes, dates, datetimes). Returns False if the index
+        already existed.
+        """
+        ...
+    def drop_index(self, name: str) -> bool:
+        """Drop the index on *name*; returns whether there was one."""
+        ...
+    @property
+    def indexes(self) -> list[str]:
+        """Names of the indexed node attributes, in creation order."""
+        ...
+    def find(self, name: str, value: Any) -> list[Node]:
+        """Nodes whose attribute *name* equals *value* (1 == 1.0), in graph order.
+
+        Uses the index on *name* if there is one, else scans every node.
+        """
+        ...
+    def find_range(
+        self,
+        name: str,
+        low: Any = ...,
+        high: Any = ...,
+        *,
+        inclusive: Literal["both", "left", "right", "neither"] = ...,
+    ) -> list[Node]:
+        """Nodes whose attribute *name* lies between *low* and *high*, in graph order.
+
+        Either bound may be None (open). Bounds are numbers, strings, bools,
+        bytes, dates or datetimes, of one kind; values of another kind are
+        never in range. Uses the index on *name* if there is one.
+        """
+        ...
     def match(
         self,
         pattern: str,

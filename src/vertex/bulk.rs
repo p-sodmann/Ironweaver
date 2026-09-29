@@ -168,6 +168,7 @@ pub fn add_nodes(
         }
         (added, v.on_node_add_callbacks.clone_ref(py))
     };
+    super::index::reindex(py, &slf.clone().unbind(), &added)?;
     let callbacks = callbacks.bind(py);
     if !callbacks.is_empty() {
         let vertex = slf.clone().unbind();

@@ -90,6 +90,15 @@ Below is a quick guide to notable functions and where to find them.
   `nodes_with_label`, `set_edge_type` / `edge_type_name`, `edges_between`,
   `nodes`, `edges`, `neighbors`, `induced_subgraph` (shared by
   filter/expand/shortest paths/traversals; keeps ids, labels, types).
+- **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
+  Posting>` + each node's key): `create_index` / `create_index_with_keys`,
+  `find_nodes`, `find_nodes_in_range`, `index_candidates(Expr)` (used by
+  the matcher and `filter`), `set_index_keys` / `reindex_node` /
+  `flush_indexes`. `add_node`, `node_mut`, `nodes_mut` mark nodes dirty;
+  lookups re-read dirty nodes, so they are exact before a flush.
+- **temporal.rs** – `Date`, `DateTime` (offset or wall-clock), `Parts`, and
+  the `bytes` serde helper (base64 in JSON); `value.rs` has `Key` (hashable,
+  totally ordered scalar keys agreeing with `loose_eq` / `loose_cmp`).
 - **ops.rs** – `Op<N, E>` (changes as data, nodes by id, edges by
   `EdgeId`; serde), `Graph::apply` (checks first, returns the undo ops),
   `apply_all` (atomic), `AttrPatch` (per-attribute ops; `Record` has it).
@@ -248,6 +257,10 @@ Below is a quick guide to notable functions and where to find them.
   `PathQuery`, `distances=` table heuristic), `path_methods`.
 - **vertex/batch.rs** – `project`, and `shortest_paths` / `distances` (a
   one-off projection of the whole graph, queries with the GIL released).
+- **vertex/index.rs** – `create_index`, `find`, `find_range`, and
+  `reindex(py, vertex, nodes)`: after changing node attributes, call it
+  (keys are computed with no mutable borrow held, since reading a value can
+  run Python code).
 - **vertex/subgraph.rs** – `build_subgraph` (new Vertex from part of another).
 - **vertex/serialization.rs** – `save_to_json`, `save_to_binary`,
   `save_to_binary_f16`, `load_from_json`, `load_from_binary`.

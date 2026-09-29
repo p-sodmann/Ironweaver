@@ -76,6 +76,14 @@ a query layer and database foundations.
   offset) and compare in filter expressions. In the core: `Value::Bytes`,
   `Value::Date`, `Value::DateTime` and `Key` (a totally ordered, hashable
   form of scalar values, for indexes).
+- **Property indexes:** `Vertex.create_index(name)` / `drop_index` /
+  `indexes`, and `find(name, value)` / `find_range(name, low, high)`
+  (which scan when there is no index). `filter(where=...)` and `match` use
+  indexes for equality, range and `is_in` conditions. Indexes follow every
+  change made through the graph; they are not saved. In the core:
+  `Graph::create_index`, `find_nodes`, `find_nodes_in_range`,
+  `index_candidates`, with exact results while payload changes are pending
+  (`flush_indexes`).
 - **Ctrl+C stops long computations:** projection algorithms, batch
   shortest paths / distances, random walks, `Vertex.match`, `Node.paths`,
   `shortest_path` and traversals raise `KeyboardInterrupt` shortly after

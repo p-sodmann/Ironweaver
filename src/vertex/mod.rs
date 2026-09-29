@@ -6,6 +6,7 @@ mod batch;
 mod bulk;
 pub(crate) mod callbacks;
 mod core;
+pub(crate) mod index;
 mod manipulation;
 mod pathfinding;
 pub(crate) mod query;

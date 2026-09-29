@@ -468,6 +468,8 @@ graph.add_nodes(ids_or_id_attr_pairs, *, labels=None, attrs=None) -> int     # b
 graph.add_edges(pairs_or_triples, *, type=None, attrs={"weight": [...]}) -> int   # bulk; all-or-nothing
 edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.id (persistent int)
 graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]
+graph.create_index(name) -> bool; graph.drop_index(name); graph.indexes -> list[str]
+graph.find(name, value) -> list[Node]; graph.find_range(name, low=None, high=None, *, inclusive="both")
 # expressions evaluated in Rust: from ironweaver import attr, label, edge_type
 graph.filter((attr("age") > 30) & label("Person")); graph.project(edge_filter=edge_type("knows"))
 rows = graph.match("(a:Person)-[k:knows*1..2]->(b)", where=None, ids=None, limit=None)

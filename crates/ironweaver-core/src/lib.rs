@@ -21,6 +21,7 @@ pub mod error;
 pub mod expr;
 pub mod format;
 pub mod graph;
+pub mod index;
 pub mod ops;
 pub mod pathfinding;
 pub mod projection;

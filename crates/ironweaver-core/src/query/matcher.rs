@@ -51,6 +51,8 @@ struct Compiled {
     ids: Vec<Option<IxSet<NodeIx>>>,
     /// `None`: any type.
     types: Vec<Option<Vec<Symbol>>>,
+    /// Candidates for a node's filter from property indexes (slot order).
+    indexed: Vec<Option<Vec<NodeIx>>>,
 }
 
 /// Resolve labels, types and ids; `None` if the pattern can't match (an
@@ -83,14 +85,18 @@ fn compile<N, E>(g: &Graph<N, E>, pattern: &Pattern) -> Option<Compiled> {
             Some(known)
         });
     }
-    Some(Compiled { labels, ids, types })
+    Some(Compiled { labels, ids, types, indexed: vec![None; pattern.nodes.len()] })
 }
 
-fn plan<N, E>(g: &Graph<N, E>, pattern: &Pattern) -> Vec<Step> {
+fn plan<N, E>(g: &Graph<N, E>, pattern: &Pattern, compiled: &Compiled) -> Vec<Step> {
     let cost = |i: usize| {
         let n = &pattern.nodes[i];
         let by_label = n.labels.iter().map(|l| g.label_count(l)).min().unwrap_or(usize::MAX);
         let by_id = n.ids.as_ref().map_or(usize::MAX, Vec::len);
+        if let Some(c) = &compiled.indexed[i] {
+            // Index candidates are (nearly) the exact answer
+            return c.len().min(by_label).min(by_id);
+        }
         let c = by_label.min(by_id).min(g.node_count());
         // A filter usually rules out most candidates
         if n.filter.is_some() {
@@ -212,7 +218,15 @@ where
         };
         match step {
             Step::Scan(v) => {
+                let by_index = self.compiled.indexed[v].as_ref();
+                let by_label = || self.pattern.nodes[v].labels.iter().map(|l| self.g.label_count(l)).min();
                 let candidates: Vec<NodeIx> = match (&self.compiled.ids[v], self.pattern.nodes[v].labels.first()) {
+                    (None, _) if by_index.is_some_and(|c| by_label().is_none_or(|l| c.len() <= l)) => {
+                        by_index.expect("checked").clone()
+                    }
+                    (Some(ids), _) if by_index.is_some_and(|c| c.len() < ids.len()) => {
+                        by_index.expect("checked").clone()
+                    }
                     (Some(ids), _) => {
                         let mut c: Vec<NodeIx> = ids.iter().copied().collect();
                         c.sort_unstable_by_key(|ix| ix.slot());
@@ -314,12 +328,24 @@ where
             super::paths::check_hops(h, Uniqueness::Trail)?;
         }
     }
-    let Some(compiled) = compile(g, pattern) else { return Ok(()) };
+    let Some(mut compiled) = compile(g, pattern) else { return Ok(()) };
+    if !g.index_paths().is_empty() {
+        for (i, n) in pattern.nodes.iter().enumerate() {
+            if let Some(f) = &n.filter {
+                let found = g.index_candidates(f)?;
+                if found.as_ref().is_some_and(Vec::is_empty) {
+                    return Ok(());
+                }
+                compiled.indexed[i] = found;
+            }
+        }
+    }
+    let steps = plan(g, pattern, &compiled);
     let mut m = Matcher {
         g,
         pattern,
         compiled,
-        steps: plan(g, pattern),
+        steps,
         nodes: vec![None; pattern.nodes.len()],
         edges: vec![None; pattern.edges.len()],
         used: Vec::new(),
@@ -579,6 +605,8 @@ mod tests {
             "(a:A)-->(a)",
             "(a)-->(b), (c:B)",
             "(a {w: 1})-[:x]-(b)-->(b)",
+            "(a {w: 0})-->(b {w: 1})",
+            "(a:A {w: 1})-->(b {w: 2})",
         ];
         let mut total = 0;
         for seed in 0..8 {
@@ -602,17 +630,23 @@ mod tests {
                 let ty = ["x", "y", "z"][rng.below(3) as usize];
                 g.insert_edge(a, b, None, Some(ty), Record::default()).unwrap();
             }
-            for text in patterns {
-                let p = Pattern::parse(text).unwrap();
-                let mut got = find_matches::<_, _, GraphError>(&g, &p, None).unwrap();
-                let mut want = brute(&g, &p);
-                let key = |m: &Match| format!("{:?}", m);
-                got.sort_by_key(key);
-                want.sort_by_key(key);
-                assert_eq!(got, want, "seed {seed}: {text}");
-                total += got.len();
+            // Without and with a property index (which changes the plan)
+            for indexed in [false, true] {
+                if indexed {
+                    g.create_index::<GraphError>(&["w".to_string()]).unwrap();
+                }
+                for text in patterns {
+                    let p = Pattern::parse(text).unwrap();
+                    let mut got = find_matches::<_, _, GraphError>(&g, &p, None).unwrap();
+                    let mut want = brute(&g, &p);
+                    let key = |m: &Match| format!("{:?}", m);
+                    got.sort_by_key(key);
+                    want.sort_by_key(key);
+                    assert_eq!(got, want, "seed {seed} indexed {indexed}: {text}");
+                    total += got.len();
+                }
             }
         }
-        assert!(total > 500, "{total}");
+        assert!(total > 1000, "{total}");
     }
 }

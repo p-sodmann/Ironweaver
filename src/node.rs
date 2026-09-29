@@ -261,6 +261,7 @@ impl Node {
         let labels: Vec<String> = labels.map(|l| l.extract()).transpose()?.unwrap_or_default();
         let old = self.write(py, |n| std::mem::replace(&mut n.data.attr, attr))?;
         drop(old); // after the borrow ends, in case a value's __del__ touches the graph
+        crate::vertex::index::reindex(py, &self.vertex, &[self.ix])?;
         self.set_labels(py, labels)
     }
 
@@ -432,6 +433,7 @@ impl Node {
             // Fetch the (unshared) dict only now: the comparison above may
             // have run Python code that derived a graph sharing it.
             this.attr_dict(py)?.bind(py).set_item(&key, &value)?;
+            crate::vertex::index::reindex(py, &this.vertex, &[this.ix])?;
         }
         let old = old.map(Bound::unbind);
 
@@ -462,6 +464,8 @@ impl Node {
             existing.cast::<PyList>()?.append(value)?;
             return Ok(());
         }
-        dict.set_item(key, PyList::new(py, [value])?)
+        dict.set_item(key, PyList::new(py, [value])?)?;
+        // Creating the dict may have marked the node dirty for the indexes
+        crate::vertex::index::reindex(py, &self.vertex, &[self.ix])
     }
 }
