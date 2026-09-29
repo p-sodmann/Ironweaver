@@ -156,9 +156,9 @@ impl Node {
         self.read(py, |n| n.id().to_string()).unwrap_or_else(|_| "<removed node>".to_string())
     }
 
-    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> PyObject {
+    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> Py<PyAny> {
         let py = other.py();
-        let same = match other.downcast::<Node>() {
+        let same = match other.cast::<Node>() {
             Ok(o) => {
                 let o = o.get();
                 o.vertex.is(&self.vertex) && o.ix == self.ix
@@ -354,7 +354,7 @@ impl Node {
         let dict = self.attr_dict(py)?;
         let dict = dict.bind(py);
         if let Some(existing) = dict.get_item(key)? {
-            existing.downcast::<PyList>()?.append(value)?;
+            existing.cast::<PyList>()?.append(value)?;
             return Ok(());
         }
         dict.set_item(key, PyList::new(py, [value])?)

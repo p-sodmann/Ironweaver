@@ -8,6 +8,7 @@
 // Python's cyclic GC.
 
 use ironweaver_core::{Attributes, Graph, Lookup};
+use pyo3::conversion::FromPyObjectOwned;
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString};
@@ -26,6 +27,12 @@ pub type PyGraph = Graph<NodeData, EdgeData>;
 /// it only through `unique` / `unique_now`.
 #[derive(Default)]
 pub struct PyAttrs(Option<Py<PyDict>>);
+
+/// Reference count of `d`; 1 means only this `PyAttrs` holds it.
+fn refcnt(_py: Python<'_>, d: &Py<PyDict>) -> isize {
+    // SAFETY: `d` is a live object and the GIL is held (`_py`)
+    unsafe { pyo3::ffi::Py_REFCNT(d.as_ptr()) }
+}
 
 impl PyAttrs {
     /// A copy of a user-supplied dict; keys must be strings.
@@ -69,14 +76,14 @@ impl PyAttrs {
     /// The dict, if it exists and no other graph shares it (safe to change
     /// in place right now).
     pub fn unique_now(&self, py: Python<'_>) -> Option<&Py<PyDict>> {
-        self.0.as_ref().filter(|d| d.get_refcnt(py) == 1)
+        self.0.as_ref().filter(|d| refcnt(py, d) == 1)
     }
 
     /// The dict, ready to be changed in place: created if missing, copied
     /// first if another graph shares it.
     pub fn unique(&mut self, py: Python<'_>) -> PyResult<&Py<PyDict>> {
         let shared = match &self.0 {
-            Some(d) => d.get_refcnt(py) > 1,
+            Some(d) => refcnt(py, d) > 1,
             None => true,
         };
         if shared {
@@ -244,7 +251,7 @@ fn lookup<'py>(py: Python<'py>, attr: &PyAttrs, path: &[String]) -> PyResult<Opt
         if value.is_none() {
             return Ok(None);
         }
-        value = if let Ok(d) = value.downcast::<PyDict>() {
+        value = if let Ok(d) = value.cast::<PyDict>() {
             match d.get_item(cached_key(py, key))? {
                 Some(v) => v,
                 None => return Ok(None),
@@ -260,7 +267,7 @@ fn lookup<'py>(py: Python<'py>, attr: &PyAttrs, path: &[String]) -> PyResult<Opt
     Ok(if value.is_none() { None } else { Some(value) })
 }
 
-fn extracted<'py, T: FromPyObject<'py>>(value: Option<Bound<'py, PyAny>>) -> Lookup<T> {
+fn extracted<'py, T: FromPyObjectOwned<'py>>(value: Option<Bound<'py, PyAny>>) -> Lookup<T> {
     match value {
         None => Lookup::Missing,
         Some(v) => v.extract::<T>().map_or(Lookup::Invalid, Lookup::Found),
@@ -268,18 +275,18 @@ fn extracted<'py, T: FromPyObject<'py>>(value: Option<Bound<'py, PyAny>>) -> Loo
 }
 
 // Attribute reads for the core algorithms. They run while the caller holds
-// the GIL, so `with_gil` only fetches the token.
+// the GIL, so `attach` only fetches the token.
 
 fn number(attr: &PyAttrs, path: &[String]) -> PyResult<Lookup<f64>> {
-    Python::with_gil(|py| Ok(extracted(lookup(py, attr, path)?)))
+    Python::attach(|py| Ok(extracted(lookup(py, attr, path)?)))
 }
 
 fn numbers(attr: &PyAttrs, path: &[String]) -> PyResult<Lookup<Vec<f64>>> {
-    Python::with_gil(|py| Ok(extracted(lookup(py, attr, path)?)))
+    Python::attach(|py| Ok(extracted(lookup(py, attr, path)?)))
 }
 
 fn text(attr: &PyAttrs, key: &str) -> PyResult<Lookup<String>> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         Ok(match attr.get(py, key)? {
             None => Lookup::Missing,
             Some(v) if v.is_none() => Lookup::Missing,

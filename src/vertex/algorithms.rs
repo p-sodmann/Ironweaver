@@ -100,7 +100,7 @@ pub fn random_walks(
 
     let plan = plan::<_, _, Error>(&vertex.graph, start_node_id.as_deref(), opts)?;
     // The walks run on a detached index, so the GIL is released meanwhile.
-    let walks = py.allow_threads(|| plan.run());
+    let walks = py.detach(|| plan.run());
 
     let _gc = GcPause::new(py);
     let result = PyList::empty(py);

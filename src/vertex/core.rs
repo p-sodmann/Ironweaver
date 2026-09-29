@@ -65,7 +65,7 @@ impl Vertex {
         let mut map = HashMap::with_capacity(nodes.len());
         for (key, node) in nodes.iter() {
             let id: String = key.extract()?;
-            let node = node.downcast::<Node>()?.get();
+            let node = node.cast::<Node>()?.get();
             let source = node.vertex.try_borrow(py)?;
             let data = source
                 .graph

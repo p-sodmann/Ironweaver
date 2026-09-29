@@ -10,6 +10,7 @@ use ironweaver_core::pathfinding::{
     PathQuery, METHODS,
 };
 use ironweaver_core::{Direction, NodeIx};
+use pyo3::conversion::FromPyObjectOwned;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString};
@@ -30,12 +31,12 @@ impl<'py> Options<'py> {
         }
     }
 
-    fn get<T: for<'a> FromPyObject<'a>>(&self, name: &str) -> PyResult<Option<T>> {
+    fn get<T: FromPyObjectOwned<'py>>(&self, name: &str) -> PyResult<Option<T>> {
         match self.raw(name)? {
-            Some(v) => v
-                .extract::<T>()
-                .map(Some)
-                .map_err(|e| PyTypeError::new_err(format!("invalid value for option '{}': {}", name, e))),
+            Some(v) => v.extract::<T>().map(Some).map_err(|e| {
+                let e: PyErr = e.into();
+                PyTypeError::new_err(format!("invalid value for option '{}': {}", name, e))
+            }),
             None => Ok(None),
         }
     }
@@ -84,7 +85,7 @@ fn heuristic<'py>(
             .bind(py)
             .get_item(&name)?
             .ok_or_else(|| PyValueError::new_err(format!("distances: vertex.meta has no key '{}'", name)))?;
-        let table = table.downcast_into::<PyDict>().map_err(|_| {
+        let table = table.cast_into::<PyDict>().map_err(|_| {
             PyTypeError::new_err(format!(
                 "distances: vertex.meta['{}'] must be a dict {{node_id: estimate}} \
                  or {{node_id: {{target_id: estimate}}}}",
@@ -98,7 +99,7 @@ fn heuristic<'py>(
                 Some(v) if !v.is_none() => v,
                 _ => return Ok(0.0),
             };
-            let value = match entry.downcast::<PyDict>() {
+            let value = match entry.cast::<PyDict>() {
                 Ok(per_target) => match per_target.get_item(&target_id)? {
                     Some(v) if !v.is_none() => v,
                     _ => return Ok(0.0),
@@ -119,7 +120,7 @@ fn heuristic<'py>(
     let metric = Metric::parse(metric.as_deref()).map_err(graph_error)?;
     let coords = match coords {
         None => Coords::default(),
-        Some(v) => match v.downcast::<PyString>() {
+        Some(v) => match v.cast::<PyString>() {
             Ok(s) => Coords::sequence(&s.to_cow()?),
             Err(_) => {
                 let paths: Vec<String> = v.extract().map_err(|_| {

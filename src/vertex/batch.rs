@@ -46,7 +46,7 @@ fn id(vertex: &Vertex, ix: NodeIx) -> &str {
 }
 
 /// A cost as Python sees it: an int for BFS (edge count), a float otherwise.
-fn cost_object(py: Python<'_>, method: &PathMethod, cost: f64) -> PyResult<PyObject> {
+fn cost_object(py: Python<'_>, method: &PathMethod, cost: f64) -> PyResult<Py<PyAny>> {
     Ok(if method.weighted {
         cost.into_pyobject(py)?.into_any().unbind()
     } else {
@@ -71,7 +71,7 @@ pub fn shortest_paths(
         .map(|(s, t)| Ok((lookup(vertex, s, "Root")?, lookup(vertex, t, "Target")?)))
         .collect::<PyResult<_>>()?;
     let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py.allow_threads(|| batch::shortest_paths(&snapshot, &pairs, max_cost)).map_err(graph_error)?;
+    let results = py.detach(|| batch::shortest_paths(&snapshot, &pairs, max_cost)).map_err(graph_error)?;
 
     let _gc = GcPause::new(py);
     let out = PyList::empty(py);
@@ -107,7 +107,7 @@ pub fn distances(
     let targets: Option<HashSet<NodeIx>> =
         targets.map(|ts| ts.iter().map(|t| lookup(vertex, t, "Target")).collect::<PyResult<_>>()).transpose()?;
     let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py.allow_threads(|| batch::distances(&snapshot, &sources, max_cost)).map_err(graph_error)?;
+    let results = py.detach(|| batch::distances(&snapshot, &sources, max_cost)).map_err(graph_error)?;
 
     let _gc = GcPause::new(py);
     let out = PyDict::new(py);

@@ -83,9 +83,9 @@ impl Edge {
         format!("{}: {} --> {}", typ, id(edge.source()), id(edge.target()))
     }
 
-    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> PyObject {
+    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> Py<PyAny> {
         let py = other.py();
-        let same = match other.downcast::<Edge>() {
+        let same = match other.cast::<Edge>() {
             Ok(o) => {
                 let o = o.get();
                 o.vertex.is(&self.vertex) && o.ix == self.ix

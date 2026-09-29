@@ -19,7 +19,7 @@ use crate::data::{EdgeData, NodeData, PyAttrs};
 
 /// Dictionary keys are serialized as strings; non-string keys use `str(key)`.
 fn dict_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
-    match key.downcast::<PyString>() {
+    match key.cast::<PyString>() {
         Ok(s) => Ok(s.to_str()?.to_owned()),
         Err(_) => key.str()?.extract(),
     }
@@ -47,30 +47,30 @@ impl Serialize for PlainPy<'_, '_> {
         }
         if v.is_none() {
             s.serialize_unit()
-        } else if let Ok(b) = v.downcast::<PyBool>() {
+        } else if let Ok(b) = v.cast::<PyBool>() {
             s.serialize_bool(b.is_true())
-        } else if let Ok(i) = v.downcast::<PyInt>() {
+        } else if let Ok(i) = v.cast::<PyInt>() {
             match i.extract::<i64>() {
                 Ok(n) => s.serialize_i64(n),
                 Err(_) => s.serialize_f64(i.extract::<f64>().map_err(py_err)?),
             }
-        } else if let Ok(f) = v.downcast::<PyFloat>() {
+        } else if let Ok(f) = v.cast::<PyFloat>() {
             s.serialize_f64(f.value())
-        } else if let Ok(st) = v.downcast::<PyString>() {
+        } else if let Ok(st) = v.cast::<PyString>() {
             s.serialize_str(st.to_str().map_err(py_err)?)
-        } else if let Ok(dict) = v.downcast::<PyDict>() {
+        } else if let Ok(dict) = v.cast::<PyDict>() {
             let mut map = s.serialize_map(Some(dict.len()))?;
             for (k, val) in dict.iter() {
                 map.serialize_entry(&dict_key(&k).map_err(py_err)?, &PlainPy(&val, depth + 1))?;
             }
             map.end()
-        } else if let Ok(list) = v.downcast::<PyList>() {
+        } else if let Ok(list) = v.cast::<PyList>() {
             let mut seq = s.serialize_seq(Some(list.len()))?;
             for item in list.iter() {
                 seq.serialize_element(&PlainPy(&item, depth + 1))?;
             }
             seq.end()
-        } else if let Ok(tuple) = v.downcast::<PyTuple>() {
+        } else if let Ok(tuple) = v.cast::<PyTuple>() {
             let mut seq = s.serialize_seq(Some(tuple.len()))?;
             for item in tuple.iter() {
                 seq.serialize_element(&PlainPy(&item, depth + 1))?;
@@ -110,38 +110,38 @@ impl Serialize for PyValue<'_, '_> {
 
         if v.is_none() {
             tagged::none(s)
-        } else if let Ok(b) = v.downcast::<PyBool>() {
+        } else if let Ok(b) = v.cast::<PyBool>() {
             tagged::bool(s, b.is_true())
-        } else if let Ok(i) = v.downcast::<PyInt>() {
+        } else if let Ok(i) = v.cast::<PyInt>() {
             match i.extract::<i64>() {
                 Ok(n) => tagged::int(s, n),
                 // Out of i64 range: keep the magnitude as a float
                 Err(_) => tagged::float(s, i.extract::<f64>().map_err(py_err)?, half),
             }
-        } else if let Ok(f) = v.downcast::<PyFloat>() {
+        } else if let Ok(f) = v.cast::<PyFloat>() {
             tagged::float(s, f.value(), half)
-        } else if let Ok(st) = v.downcast::<PyString>() {
+        } else if let Ok(st) = v.cast::<PyString>() {
             tagged::string(s, st.to_str().map_err(py_err)?)
-        } else if let Ok(list) = v.downcast::<PyList>() {
+        } else if let Ok(list) = v.cast::<PyList>() {
             let items: Vec<Bound<'_, PyAny>> = list.iter().collect();
             tagged::list(s, &PyItems { items: &items, half, depth })
-        } else if let Ok(tuple) = v.downcast::<PyTuple>() {
+        } else if let Ok(tuple) = v.cast::<PyTuple>() {
             let items: Vec<Bound<'_, PyAny>> = tuple.iter().collect();
             tagged::list(s, &PyItems { items: &items, half, depth })
-        } else if let Ok(dict) = v.downcast::<PyDict>() {
+        } else if let Ok(dict) = v.cast::<PyDict>() {
             let entries: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)> = dict.iter().collect();
             tagged::dict(s, &PyEntries { entries: &entries, half, depth })
         } else if v.hasattr("tolist").map_err(py_err)? {
             // numpy arrays and numpy scalars (e.g. embeddings)
             let native = v.call_method0("tolist").map_err(py_err)?;
             PyValue { value: &native, half, depth }.serialize(s)
-        } else if let Ok(mapping) = v.downcast::<PyMapping>() {
+        } else if let Ok(mapping) = v.cast::<PyMapping>() {
             let mut entries = Vec::new();
             for item in mapping.items().map_err(py_err)?.iter() {
                 entries.push(item.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>().map_err(py_err)?);
             }
             tagged::dict(s, &PyEntries { entries: &entries, half, depth })
-        } else if let Ok(seq) = v.downcast::<PySequence>() {
+        } else if let Ok(seq) = v.cast::<PySequence>() {
             let mut items = Vec::new();
             for item in seq.try_iter().map_err(py_err)? {
                 items.push(item.map_err(py_err)?);
@@ -184,7 +184,7 @@ impl Serialize for PyEntries<'_, '_> {
         let mut map = s.serialize_map(Some(self.entries.len()))?;
         for (k, v) in self.entries {
             let value = PyValue { value: v, half: self.half, depth: self.depth + 1 };
-            match k.downcast::<PyString>() {
+            match k.cast::<PyString>() {
                 Ok(key) => map.serialize_entry(key.to_str().map_err(py_err)?, &value)?,
                 Err(_) => map.serialize_entry(&dict_key(k).map_err(py_err)?, &value)?,
             }
