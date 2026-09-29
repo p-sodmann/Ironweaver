@@ -8,3 +8,5 @@
 *.lock
 *.pyc
 *.in
+/benchmarks/data
+

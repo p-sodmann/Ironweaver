@@ -179,9 +179,10 @@ assert pa.k_shortest_paths("p", "s", 2)[0] == {"nodelist": ["p", "q", "r", "s"],
 - `weakly_connected_components()` / `strongly_connected_components()`: lists of ids, largest first.
 - `topological_sort()`: raises ValueError on a cycle. `find_cycle()`: a list of ids or None.
 - `degree_centrality("out"|"in")`.
-- `pagerank(alpha=0.85, *, personalization={id: w}, max_iter=100, tol=1e-6)`: uses the projection's weights.
+- `pagerank(alpha=0.85, *, personalization={id: w}, max_iter=100, tol=1e-6)`: uses the projection's weights. `tol=0` runs exactly `max_iter` iterations.
 - `triangles()`, `clustering()`, `core_number()`: these treat edges as undirected and ignore self-loops and parallel edges.
-- `label_propagation(max_iter=20)`: synchronous CDLP, deterministic.
+  - `clustering(directed=True)` uses the LDBC Graphalytics directed definition.
+- `label_propagation(max_iter=20)`: LDBC CDLP, deterministic; on directed projections in- and out-neighbours count separately.
 - `bfs_levels(sources, max_depth=None)`: parallel, direction-optimizing.
 - `betweenness_centrality(k=None, *, normalized=True, endpoints=False, weighted=None, seed=None)`: `k` samples sources (use it on large graphs).
 - `closeness_centrality(*, wf_improved=True, weighted=None)`, `harmonic_centrality(*, weighted=None)`: from distances *to* each node.

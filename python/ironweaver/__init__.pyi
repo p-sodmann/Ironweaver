@@ -489,20 +489,23 @@ class Projection:
         """``{id: rank}``, like ``networkx.pagerank``; uses the projection's weights.
 
         *personalization* biases the random jumps (personalized PageRank).
-        Raises ValueError for invalid options or if it does not converge.
+        Raises ValueError for invalid options or if it does not converge;
+        ``tol=0`` runs exactly *max_iter* iterations instead.
         """
         ...
     def triangles(self) -> dict[str, int]:
         """``{id: triangles through the node}`` (edges as undirected)."""
         ...
-    def clustering(self) -> dict[str, float]:
-        """``{id: local clustering coefficient}`` (edges as undirected)."""
+    def clustering(self, *, directed: bool = ...) -> dict[str, float]:
+        """``{id: local clustering coefficient}``: edges as undirected (like
+        networkx), or with ``directed=True`` the LDBC Graphalytics definition."""
         ...
     def core_number(self) -> dict[str, int]:
         """``{id: k-core number}`` (edges as undirected)."""
         ...
     def label_propagation(self, max_iter: int = ...) -> list[list[str]]:
-        """Communities by synchronous label propagation (deterministic), largest first."""
+        """Communities by synchronous label propagation (the LDBC CDLP rule;
+        deterministic), largest first."""
         ...
     def bfs_levels(self, sources: list[str], max_depth: int | None = ...) -> dict[str, int]:
         """``{id: hops from the nearest source}`` for every node reached."""

@@ -2,32 +2,50 @@
 
 use rayon::prelude::*;
 
-use super::{groups, Undirected};
-use crate::Projection;
+use super::groups;
+use crate::{Direction, Projection};
 
-/// Communities by synchronous label propagation (the LDBC Graphalytics
-/// "CDLP" rule, edges taken as undirected): every node starts with its own
-/// label; in each round every node takes the label most common among its
-/// neighbours (ties: the smallest label), all at once. Stops when no label
+/// Push the labels of the distinct nodes in a sorted list, except `skip`.
+fn push_distinct(seen: &mut Vec<u32>, list: &[u32], skip: u32, labels: &[u32]) {
+    let mut last = None;
+    for &w in list {
+        if w != skip && last != Some(w) {
+            seen.push(labels[w as usize]);
+        }
+        last = Some(w);
+    }
+}
+
+/// Communities by synchronous label propagation, the LDBC Graphalytics
+/// "CDLP" rule: every node starts with its own label; in each round every
+/// node takes the label most common among its neighbours (ties: the
+/// smallest label, i.e. the earliest node in projection order), all at
+/// once. On a directed projection a node's neighbours are its distinct in-
+/// and out-neighbours counted separately, so a neighbour joined both ways
+/// counts twice; on an undirected (`Both`) projection each neighbour counts
+/// once. Parallel edges and self-loops don't count. Stops when no label
 /// changes, or after `max_iter` rounds (synchronous updates can oscillate).
 /// Deterministic. Returns the communities (largest first) and the number of
 /// rounds run.
 pub fn label_propagation(p: &Projection, max_iter: usize) -> (Vec<Vec<u32>>, usize) {
-    let u = Undirected::of(p);
-    let mut labels: Vec<u32> = (0..u.len() as u32).collect();
+    let n = p.node_count();
+    let directed = p.direction() != Direction::Both;
+    let mut labels: Vec<u32> = (0..n as u32).collect();
     let mut rounds = 0;
     while rounds < max_iter {
         rounds += 1;
-        let next: Vec<u32> = (0..u.len() as u32)
+        let next: Vec<u32> = (0..n as u32)
             .into_par_iter()
             .with_min_len(256)
             .map_init(Vec::new, |seen: &mut Vec<u32>, v| {
-                let neighbors = u.neighbors(v);
-                if neighbors.is_empty() {
+                seen.clear();
+                push_distinct(seen, p.out_neighbors(v), v, &labels);
+                if directed {
+                    push_distinct(seen, p.in_neighbors(v), v, &labels);
+                }
+                if seen.is_empty() {
                     return labels[v as usize];
                 }
-                seen.clear();
-                seen.extend(neighbors.iter().map(|&w| labels[w as usize]));
                 seen.sort_unstable();
                 // Most frequent label; ties go to the smallest (first run)
                 let (mut best, mut best_count) = (seen[0], 0);
@@ -91,5 +109,53 @@ mod tests {
                 assert!(c.iter().all(|&v| component[v as usize] == component[c[0] as usize]));
             }
         }
+    }
+
+    /// The CDLP rule written out plainly.
+    fn reference(p: &Projection, rounds: usize) -> Vec<Vec<u32>> {
+        let n = p.node_count() as u32;
+        let distinct = |list: &[u32], v: u32| -> Vec<u32> {
+            let mut l: Vec<u32> = list.iter().copied().filter(|&w| w != v).collect();
+            l.dedup();
+            l
+        };
+        let mut labels: Vec<u32> = (0..n).collect();
+        for _ in 0..rounds {
+            let next: Vec<u32> = (0..n)
+                .map(|v| {
+                    let mut nb = distinct(p.out_neighbors(v), v);
+                    if p.direction() != Direction::Both {
+                        nb.extend(distinct(p.in_neighbors(v), v));
+                    }
+                    let mut counts = std::collections::BTreeMap::new();
+                    for w in nb {
+                        *counts.entry(labels[w as usize]).or_insert(0) += 1;
+                    }
+                    let best = counts.values().copied().max().unwrap_or(0);
+                    counts.into_iter().find(|&(_, c)| c == best).map_or(labels[v as usize], |(l, _)| l)
+                })
+                .collect();
+            if next == labels {
+                break;
+            }
+            labels = next;
+        }
+        groups(&labels)
+    }
+
+    #[test]
+    fn matches_the_rule() {
+        for (seed, dir) in sweep() {
+            let p = random(seed, 40, 90, dir, false);
+            for rounds in [1, 2, 5, 20] {
+                assert_eq!(label_propagation(&p, rounds).0, reference(&p, rounds), "seed {seed} {dir:?} {rounds}");
+            }
+        }
+        // Directed: a neighbour joined both ways counts twice. 0 <-> 2,
+        // 1 -> 0, 3 -> 0: node 0 takes label 2 (not the smallest, 1)
+        let p = from_edges(5, &[(0, 2), (2, 0), (1, 0), (3, 0), (4, 2), (2, 4)], Direction::Out);
+        let (g, _) = label_propagation(&p, 1);
+        let with_0 = g.iter().find(|c| c.contains(&0)).unwrap();
+        assert!(!with_0.contains(&1), "{g:?}");
     }
 }

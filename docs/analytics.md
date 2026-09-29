@@ -18,7 +18,7 @@ p = g.project()
 ```
 
 Directed algorithms follow the projection's edges, so use `direction="in"` to reverse them and `direction="both"` to treat them as undirected.
-- Triangles, clustering, core numbers, label propagation and similarity always treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`).
+- Triangles, clustering, core numbers and similarity treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`). `clustering(directed=True)` and label propagation follow the LDBC Graphalytics definitions on directed projections.
 - Shortest-path based algorithms (betweenness, closeness, harmonic centrality, k shortest paths) ignore self-loops and take the lightest of parallel edges.
 - Leiden, modularity and spanning trees treat edges as undirected but keep their weights.
 
@@ -67,7 +67,7 @@ assert ppr["x"] == 0.0 and ppr["b"] > ppr["f"]
 - `pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6)` gives the same results as `networkx.pagerank`.
   - It uses the projection's weights if it has them (`g.project(weight="weight")`), and parallel edges add up.
   - Nodes without outgoing edges jump according to `personalization`, which is uniform when it isn't given.
-  - It raises `ValueError` for invalid options or if it doesn't converge within `max_iter`.
+  - It raises `ValueError` for invalid options or if it doesn't converge within `max_iter`. `tol=0` instead runs exactly `max_iter` iterations, as LDBC Graphalytics does.
 - `degree_centrality("out" | "in")` counts one per edge. On a `direction="both"` projection it matches networkx's `degree_centrality` (in + out).
 
 ### Betweenness, closeness and harmonic centrality
@@ -102,6 +102,7 @@ assert p.core_number() == {"a": 2, "b": 2, "c": 2, "d": 1, "e": 1, "f": 1, "x": 
 
 - `triangles()` gives the number of triangles through each node.
 - `clustering()` gives the local clustering coefficient: the fraction of pairs of a node's neighbours that are neighbours themselves.
+- `clustering(directed=True)` uses the LDBC Graphalytics definition for directed graphs: the number of directed edges among a node's in- and out-neighbours, divided by `k (k - 1)` for `k` neighbours. On a `direction="both"` projection it is the same as `clustering()`.
 - `core_number()` gives each node's k-core number: the largest `k` for which the node belongs to a subgraph where every node has at least `k` neighbours.
 
 ## Communities
@@ -120,9 +121,10 @@ communities = teams.project().label_propagation()  # max_iter=20
 assert sorted(map(sorted, communities)) == groups
 ```
 
-This is synchronous label propagation, the LDBC Graphalytics "CDLP" rule, with edges treated as undirected:
+This is synchronous label propagation, the LDBC Graphalytics "CDLP" rule:
 - Every node starts with its own label.
-- In each round, every node takes the label most common among its neighbours; ties go to the smallest label.
+- In each round, every node takes the label most common among its neighbours; ties go to the smallest label (the node earliest in projection order).
+- On a directed projection a node's neighbours are its in- and out-neighbours counted separately, so a node linked both ways counts twice. On a `direction="both"` projection each neighbour counts once. Parallel edges and self-loops don't count.
 - It stops when no label changes, or after `max_iter` rounds (synchronous updates can oscillate).
 - The result is deterministic.
 
@@ -215,3 +217,9 @@ assert p.bfs_levels(["a", "f"], max_depth=1) == {"a": 0, "b": 1, "f": 0, "e": 1}
 ```
 
 `bfs_levels(sources, max_depth=None)` gives the hop distance from the nearest source to every node it reaches. It is a parallel, direction-optimizing BFS: it switches to scanning the unvisited nodes when the frontier is large.
+
+## Validation and benchmarks
+
+- `tests/test_algorithms.py` compares every algorithm with networkx on random multigraphs.
+- `tests/test_graphalytics.py` runs the [LDBC Graphalytics](https://ldbcouncil.org/benchmarks/graphalytics/) validation graphs through BFS, WCC, CDLP, LCC, PageRank and SSSP, and checks the results against the benchmark's reference outputs.
+- `benchmarks/compare_libraries.py` runs the common algorithms with ironweaver, networkx, igraph, rustworkx and networkit on medium-sized graphs, checks that the results agree, and writes the timings to `performance_results/library_comparison.md`. The graphs are two SNAP social networks (GitHub developers and Facebook pages, downloaded once) and a generated Kronecker graph.

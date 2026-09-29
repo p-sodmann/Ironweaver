@@ -56,7 +56,7 @@ pub use leiden::{leiden, modularity, Leiden};
 pub use node2vec::{node2vec_walks, Node2Vec};
 pub use similarity::{most_similar, similarity, Similarity};
 pub use spanning::spanning_forest;
-pub use structure::{clustering, core_number, triangles};
+pub use structure::{clustering, clustering_directed, core_number, triangles};
 
 use rayon::prelude::*;
 

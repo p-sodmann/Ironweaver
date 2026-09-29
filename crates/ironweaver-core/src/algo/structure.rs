@@ -38,6 +38,36 @@ pub fn clustering(p: &Projection) -> Vec<f64> {
         .collect()
 }
 
+/// Local clustering coefficient of a directed graph, the LDBC Graphalytics
+/// "LCC" definition: for a node with the set N of distinct neighbours (in or
+/// out, not itself), the number of directed edges between members of N
+/// (each direction counts, parallel edges once) divided by |N| (|N| - 1).
+/// On an undirected (`Both`) projection this equals [`clustering`].
+pub fn clustering_directed(p: &Projection) -> Vec<f64> {
+    let u = Undirected::of(p);
+    // Distinct out-neighbours without self-loops
+    let out: Vec<Vec<u32>> = (0..p.node_count() as u32)
+        .into_par_iter()
+        .map(|v| {
+            let mut l: Vec<u32> = p.out_neighbors(v).iter().copied().filter(|&w| w != v).collect();
+            l.dedup();
+            l
+        })
+        .collect();
+    (0..u.len() as u32)
+        .into_par_iter()
+        .with_min_len(64)
+        .map(|v| {
+            let nb = u.neighbors(v);
+            if nb.len() < 2 {
+                return 0.0;
+            }
+            let edges: usize = nb.iter().map(|&w| intersection_size(&out[w as usize], nb)).sum();
+            edges as f64 / (nb.len() * (nb.len() - 1)) as f64
+        })
+        .collect()
+}
+
 /// Core number of each node: the largest `k` such that the node belongs to
 /// a subgraph where every node has at least `k` neighbours (edges taken as
 /// undirected; Batagelj–Zaversnik, O(E)).
@@ -160,6 +190,33 @@ mod tests {
                 }
             }
             assert_eq!(core_number(&p), want, "seed {seed} {dir:?}");
+        }
+    }
+
+    #[test]
+    fn directed_clustering_by_brute_force() {
+        for (seed, dir) in sweep() {
+            let p = random(seed, 25, 40 + 8 * seed as usize, dir, false);
+            let n = p.node_count();
+            let mut arc = vec![vec![false; n]; n];
+            for x in 0..n as u32 {
+                for &y in p.out_neighbors(x) {
+                    if x != y {
+                        arc[x as usize][y as usize] = true;
+                    }
+                }
+            }
+            let got = clustering_directed(&p);
+            for x in 0..n {
+                let nb: Vec<usize> = (0..n).filter(|&y| y != x && (arc[x][y] || arc[y][x])).collect();
+                let k = nb.len();
+                let e: usize = nb.iter().map(|&a| nb.iter().filter(|&&b| arc[a][b]).count()).sum();
+                let want = if k < 2 { 0.0 } else { e as f64 / (k * (k - 1)) as f64 };
+                assert!((got[x] - want).abs() < 1e-12, "seed {seed} {dir:?} node {x}");
+            }
+            if dir == Direction::Both {
+                assert_eq!(got, clustering(&p));
+            }
         }
     }
 

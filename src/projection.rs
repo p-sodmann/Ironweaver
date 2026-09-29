@@ -515,7 +515,8 @@ impl Projection {
 
     /// {id: PageRank}, like networkx.pagerank. Uses the projection's
     /// weights if it has them. `personalization` ({id: weight}) biases the
-    /// random jumps towards some nodes (personalized PageRank).
+    /// random jumps towards some nodes (personalized PageRank). `tol=0`
+    /// runs exactly `max_iter` iterations (as LDBC Graphalytics does).
     #[pyo3(signature = (alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6))]
     fn pagerank(
         &self,
@@ -548,10 +549,13 @@ impl Projection {
         per_node(py, p, &values)
     }
 
-    /// {id: local clustering coefficient} (edges as undirected).
-    fn clustering(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+    /// {id: local clustering coefficient}: edges as undirected (like
+    /// networkx), or with `directed=True` the LDBC Graphalytics definition
+    /// (directed edges among a node's in- and out-neighbours).
+    #[pyo3(signature = (*, directed=false))]
+    fn clustering(&self, py: Python<'_>, directed: bool) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
-        let values = py.detach(|| algo::clustering(p));
+        let values = py.detach(|| if directed { algo::clustering_directed(p) } else { algo::clustering(p) });
         per_node(py, p, &values)
     }
 
@@ -562,8 +566,8 @@ impl Projection {
         per_node(py, p, &values)
     }
 
-    /// Communities by synchronous label propagation (edges as undirected;
-    /// deterministic), as lists of ids, largest first.
+    /// Communities by synchronous label propagation (the LDBC Graphalytics
+    /// CDLP rule; deterministic), as lists of ids, largest first.
     #[pyo3(signature = (max_iter=20))]
     fn label_propagation(&self, py: Python<'_>, max_iter: usize) -> PyResult<Py<PyList>> {
         let p = &self.inner;

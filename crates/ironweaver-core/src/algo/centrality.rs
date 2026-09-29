@@ -36,7 +36,9 @@ pub struct PageRank {
     /// `None`. Normalised to sum 1.
     pub personalization: Option<Vec<f64>>,
     pub max_iter: usize,
-    /// Converged when the L1 change of the ranks is below `n * tol`.
+    /// Converged when the L1 change of the ranks is below `n * tol`. 0 runs
+    /// exactly `max_iter` iterations and returns the ranks (as LDBC
+    /// Graphalytics does).
     pub tol: f64,
 }
 
@@ -50,15 +52,16 @@ impl Default for PageRank {
 /// in-neighbours). Edges carry their projection weight (1 if unweighted);
 /// parallel edges add up. Nodes without outgoing weight ("dangling") jump
 /// by the personalization distribution. Same results as `networkx.pagerank`.
-/// Fails for invalid options or if it doesn't converge in `max_iter`.
+/// Fails for invalid options or if it doesn't converge in `max_iter` (unless
+/// `tol` is 0: then it runs exactly `max_iter` iterations).
 pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError> {
     let n = p.node_count();
     let alpha = opts.alpha;
     if !(0.0..=1.0).contains(&alpha) {
         return Err(GraphError::InvalidArgument(format!("alpha must be between 0 and 1, got {}", alpha)));
     }
-    if opts.tol.is_nan() || opts.tol <= 0.0 {
-        return Err(GraphError::InvalidArgument(format!("tol must be positive, got {}", opts.tol)));
+    if opts.tol.is_nan() || opts.tol < 0.0 {
+        return Err(GraphError::InvalidArgument(format!("tol must be positive (or 0), got {}", opts.tol)));
     }
     if n == 0 {
         return Ok(Vec::new());
@@ -113,6 +116,9 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
         if err < n as f64 * opts.tol {
             return Ok(x);
         }
+    }
+    if opts.tol == 0.0 {
+        return Ok(x);
     }
     Err(GraphError::InvalidArgument(format!("pagerank did not converge in {} iterations", opts.max_iter)))
 }
@@ -185,6 +191,11 @@ mod tests {
         assert!(pagerank(&p, &PageRank { personalization: Some(vec![0.0; 3]), ..Default::default() }).is_err());
         assert!(pagerank(&p, &PageRank { personalization: Some(vec![1.0; 2]), ..Default::default() }).is_err());
         assert!(pagerank(&p, &PageRank { max_iter: 1, ..Default::default() }).is_err());
+        assert!(pagerank(&p, &PageRank { tol: -1.0, ..Default::default() }).is_err());
+        // tol 0: exactly max_iter iterations (0: the uniform start)
+        assert_eq!(pagerank(&p, &PageRank { max_iter: 0, tol: 0.0, ..Default::default() }).unwrap(), [1.0 / 3.0; 3]);
+        let two = pagerank(&p, &PageRank { max_iter: 2, tol: 0.0, ..Default::default() }).unwrap();
+        assert!((two.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         let empty = from_edges(0, &[], Direction::Out);
         assert!(pagerank(&empty, &PageRank::default()).unwrap().is_empty());
         assert!(degree_centrality(&empty, false).is_empty());

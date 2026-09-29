@@ -141,12 +141,17 @@ def test_triangles_clustering_cores(seed, direction):
 
 
 def cdlp_reference(p, max_iter):
-    """Synchronous label propagation in pure Python (smallest label wins ties)."""
+    """Synchronous label propagation in pure Python, the LDBC CDLP rule:
+    distinct in- and out-neighbours counted separately on a directed
+    projection, distinct neighbours on an undirected one; smallest label
+    wins ties."""
     ids = p.ids()
     index = {id: i for i, id in enumerate(ids)}
-    nbrs = {id: set(p.neighbors(id)) | set(p.neighbors(id, "in")) for id in ids}
+    nbrs = {}
     for id in ids:
-        nbrs[id].discard(id)
+        out = set(p.neighbors(id)) - {id}
+        inc = set(p.neighbors(id, "in")) - {id}
+        nbrs[id] = list(out) + (list(inc) if p.direction != "both" else [])
     labels = {id: index[id] for id in ids}
     for _ in range(max_iter):
         new = {}
