@@ -327,7 +327,7 @@ impl<'a> LoadGraph<'a> {
             let to = lookup(edge.to_id(), "To")?;
             let data = make_edge(edge)?;
             by_key.insert(key.as_str(), edge_ixs.len());
-            edge_ixs.push(graph.add_edge_detached(from, to, data)?);
+            edge_ixs.push(graph.add_edge_detached(from, to, None, None, data)?);
         }
 
         let mut out_done = vec![false; edge_ixs.len()];

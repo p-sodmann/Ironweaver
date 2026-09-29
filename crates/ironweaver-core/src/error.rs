@@ -12,6 +12,10 @@ pub enum GraphError {
     DuplicateNode(String),
     /// No node has this id.
     NodeNotFound(String),
+    /// An edge with this id already exists.
+    DuplicateEdge(u64),
+    /// No edge has this id.
+    EdgeNotFound(u64),
     /// A `NodeIx` / `EdgeIx` whose node or edge has been removed.
     Stale,
     /// An argument or option has an invalid value.
@@ -27,6 +31,8 @@ impl fmt::Display for GraphError {
         match self {
             GraphError::DuplicateNode(id) => write!(f, "Node with id '{}' already exists", id),
             GraphError::NodeNotFound(id) => write!(f, "Node with id '{}' not found", id),
+            GraphError::DuplicateEdge(id) => write!(f, "Edge with id {} already exists", id),
+            GraphError::EdgeNotFound(id) => write!(f, "Edge with id {} not found", id),
             GraphError::Stale => f.write_str("node or edge was removed from its graph"),
             GraphError::InvalidArgument(msg) | GraphError::InvalidType(msg) | GraphError::Format(msg) => {
                 f.write_str(msg)

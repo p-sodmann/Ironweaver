@@ -8,7 +8,9 @@ use std::collections::HashMap;
 ///
 /// Serialized externally tagged (`{"Float": 1.5}`, `"None"`, ...). The
 /// variant order is part of the binary format (bincode writes the variant
-/// index), so never reorder the variants.
+/// index), so never reorder the variants. Serde (de)serialization fails for
+/// values nested more than [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels
+/// instead of overflowing the stack.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Value {
     String(String),
@@ -18,8 +20,53 @@ pub enum Value {
     Half(f16),
     Bool(bool),
     None,
-    List(Vec<Value>),
-    Dict(HashMap<String, Value>),
+    List(#[serde(with = "nested")] Vec<Value>),
+    Dict(#[serde(with = "nested")] HashMap<String, Value>),
+}
+
+/// Serde helpers for the contents of a list / dict value: count the nesting
+/// depth (per thread) and refuse to go deeper than `MAX_DEPTH`.
+mod nested {
+    use serde::{de, ser, Deserialize, Deserializer, Serialize, Serializer};
+    use std::cell::Cell;
+
+    use crate::format::MAX_DEPTH;
+
+    thread_local! {
+        // Containers entered on this thread
+        static DEPTH: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn enter<T, E>(err: impl FnOnce() -> E, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        struct Level;
+        impl Drop for Level {
+            fn drop(&mut self) {
+                DEPTH.with(|c| c.set(c.get() - 1));
+            }
+        }
+        let depth = DEPTH.with(|c| {
+            c.set(c.get() + 1);
+            c.get()
+        });
+        let _level = Level;
+        // A value inside `depth` containers is `depth + 1` levels deep
+        if depth >= MAX_DEPTH {
+            return Err(err());
+        }
+        f()
+    }
+
+    fn message() -> String {
+        format!("attribute values nested more than {MAX_DEPTH} levels deep")
+    }
+
+    pub fn serialize<S: Serializer, T: Serialize>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+        enter(|| <S::Error as ser::Error>::custom(message()), || v.serialize(s))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+        enter(|| <D::Error as de::Error>::custom(message()), || T::deserialize(d))
+    }
 }
 
 impl Value {

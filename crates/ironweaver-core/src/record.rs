@@ -40,7 +40,7 @@ pub type Attrs = HashMap<String, Value>;
 
 /// Node / edge payload for pure-Rust graphs: user attributes (`attr`) and
 /// free-form metadata (`meta`), mirroring the Python API.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Record {
     pub attr: Attrs,
     pub meta: Attrs,

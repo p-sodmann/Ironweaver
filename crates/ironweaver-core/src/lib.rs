@@ -39,6 +39,7 @@ pub mod direction;
 pub mod error;
 pub mod format;
 pub mod graph;
+pub mod ops;
 pub mod pathfinding;
 pub mod projection;
 pub mod random_walks;
@@ -48,7 +49,8 @@ pub mod value;
 
 pub use direction::Direction;
 pub use error::GraphError;
-pub use graph::{Edge, EdgeIx, Graph, Node, NodeIx};
+pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
+pub use ops::{AttrPatch, Op};
 pub use projection::Projection;
 pub use record::{Attributes, Attrs, Lookup, Record};
 pub use value::Value;

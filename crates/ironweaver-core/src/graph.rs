@@ -5,6 +5,11 @@
 // freed, so a handle to a removed node or edge never resolves to whatever
 // reuses its slot. Every edge is listed exactly once in its source's `out`
 // list and once in its target's `inc` list, in insertion order.
+//
+// Handles live only as long as the process. What is saved and survives:
+// node ids (strings), `EdgeId`s (a per-graph counter, never reused), node
+// labels and edge types. Labels and types are interned `Symbol`s; the graph
+// keeps an index from each label to its nodes.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
@@ -38,6 +43,11 @@ impl Hasher for IxHasher {
     }
 
     #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.add(i);
+    }
+
+    #[inline]
     fn finish(&self) -> u64 {
         self.0
     }
@@ -62,6 +72,51 @@ pub struct EdgeIx {
     generation: u32,
 }
 
+/// Persistent id of an edge: assigned from a per-graph counter when the
+/// edge is added, never reused, saved with the graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct EdgeId(pub u64);
+
+/// An interned node label or edge type; [`Graph::symbol_name`] gives the
+/// text. Only meaningful for the graph that interned it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Symbol(u32);
+
+/// Interned label / type names.
+#[derive(Clone, Debug, Default)]
+pub struct Symbols {
+    names: Vec<Box<str>>,
+    index: HashMap<Box<str>, Symbol>,
+}
+
+impl Symbols {
+    pub fn get(&self, name: &str) -> Option<Symbol> {
+        self.index.get(name).copied()
+    }
+
+    pub fn intern(&mut self, name: &str) -> Symbol {
+        if let Some(&s) = self.index.get(name) {
+            return s;
+        }
+        let s = Symbol(u32::try_from(self.names.len()).expect("too many labels and types"));
+        self.names.push(name.into());
+        self.index.insert(name.into(), s);
+        s
+    }
+
+    pub fn name(&self, s: Symbol) -> &str {
+        &self.names[s.0 as usize]
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
 impl NodeIx {
     /// Slot number, below [`Graph::node_bound`]; usable as a dense index.
     pub fn slot(self) -> usize {
@@ -76,10 +131,12 @@ impl EdgeIx {
     }
 }
 
-/// A node: its id, payload and incident edges.
+/// A node: its id, labels, payload and incident edges.
 #[derive(Clone, Debug)]
 pub struct Node<N> {
     id: String,
+    /// Sorted, distinct.
+    labels: Vec<Symbol>,
     out: Vec<EdgeIx>,
     inc: Vec<EdgeIx>,
     pub data: N,
@@ -88,6 +145,15 @@ pub struct Node<N> {
 impl<N> Node<N> {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// The node's labels, sorted by symbol.
+    pub fn labels(&self) -> &[Symbol] {
+        &self.labels
+    }
+
+    pub fn has_label(&self, label: Symbol) -> bool {
+        self.labels.binary_search(&label).is_ok()
     }
 
     /// Outgoing edges, in insertion order.
@@ -101,15 +167,26 @@ impl<N> Node<N> {
     }
 }
 
-/// A directed edge and its payload.
+/// A directed edge: its persistent id, optional type and payload.
 #[derive(Clone, Debug)]
 pub struct Edge<E> {
     from: NodeIx,
     to: NodeIx,
+    id: EdgeId,
+    ty: Option<Symbol>,
     pub data: E,
 }
 
 impl<E> Edge<E> {
+    pub fn id(&self) -> EdgeId {
+        self.id
+    }
+
+    /// The edge's type, if it has one.
+    pub fn edge_type(&self) -> Option<Symbol> {
+        self.ty
+    }
+
     pub fn source(&self) -> NodeIx {
         self.from
     }
@@ -187,7 +264,8 @@ impl<T> Arena<T> {
     }
 }
 
-/// A directed multigraph with string node ids.
+/// A directed multigraph with string node ids, node labels, edge types and
+/// persistent edge ids.
 ///
 /// Iteration order is slot order: insertion order until nodes are removed,
 /// after which new nodes reuse the freed slots.
@@ -196,6 +274,12 @@ pub struct Graph<N, E> {
     nodes: Arena<Node<N>>,
     edges: Arena<Edge<E>>,
     index: HashMap<String, NodeIx>,
+    edge_index: IxMap<EdgeId, EdgeIx>,
+    /// The id the next new edge gets.
+    next_edge_id: u64,
+    symbols: Symbols,
+    /// Nodes carrying each label.
+    labeled: HashMap<Symbol, IxSet<NodeIx>>,
 }
 
 impl<N, E> Default for Graph<N, E> {
@@ -214,6 +298,10 @@ impl<N, E> Graph<N, E> {
             nodes: Arena::with_capacity(nodes),
             edges: Arena::with_capacity(edges),
             index: HashMap::with_capacity(nodes),
+            edge_index: IxMap::with_capacity_and_hasher(edges, Default::default()),
+            next_edge_id: 0,
+            symbols: Symbols::default(),
+            labeled: HashMap::new(),
         }
     }
 
@@ -249,15 +337,29 @@ impl<N, E> Graph<N, E> {
     }
 
     fn insert_node(&mut self, id: String, data: N) -> NodeIx {
-        let (slot, generation) = self.nodes.insert(Node { id: id.clone(), out: Vec::new(), inc: Vec::new(), data });
+        let (slot, generation) =
+            self.nodes.insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data });
         let ix = NodeIx { slot, generation };
         self.index.insert(id, ix);
         ix
     }
 
-    /// Add an edge from `from` to `to` (both must be live).
+    /// Add an edge from `from` to `to` (both must be live), with a new id.
     pub fn add_edge(&mut self, from: NodeIx, to: NodeIx, data: E) -> Result<EdgeIx, GraphError> {
-        let ix = self.add_edge_detached(from, to, data)?;
+        self.insert_edge(from, to, None, None, data)
+    }
+
+    /// Add an edge with a type and/or a given id (`None`: a new one). Fails
+    /// if the id is taken; later new ids are above it.
+    pub fn insert_edge(
+        &mut self,
+        from: NodeIx,
+        to: NodeIx,
+        id: Option<EdgeId>,
+        ty: Option<&str>,
+        data: E,
+    ) -> Result<EdgeIx, GraphError> {
+        let ix = self.add_edge_detached(from, to, id, ty, data)?;
         self.attach_out(ix);
         self.attach_in(ix);
         Ok(ix)
@@ -266,12 +368,128 @@ impl<N, E> Graph<N, E> {
     /// Create an edge without listing it on its endpoints yet; the loader
     /// uses this to restore the saved per-node edge order. Callers must
     /// attach every such edge on both ends.
-    pub(crate) fn add_edge_detached(&mut self, from: NodeIx, to: NodeIx, data: E) -> Result<EdgeIx, GraphError> {
+    pub(crate) fn add_edge_detached(
+        &mut self,
+        from: NodeIx,
+        to: NodeIx,
+        id: Option<EdgeId>,
+        ty: Option<&str>,
+        data: E,
+    ) -> Result<EdgeIx, GraphError> {
         if self.node(from).is_none() || self.node(to).is_none() {
             return Err(GraphError::Stale);
         }
-        let (slot, generation) = self.edges.insert(Edge { from, to, data });
-        Ok(EdgeIx { slot, generation })
+        let id = match id {
+            Some(id) if self.edge_index.contains_key(&id) => return Err(GraphError::DuplicateEdge(id.0)),
+            Some(id) => id,
+            None => EdgeId(self.next_edge_id),
+        };
+        self.next_edge_id = self
+            .next_edge_id
+            .max(id.0.checked_add(1).ok_or(GraphError::InvalidArgument("edge id space exhausted".into()))?);
+        let ty = ty.map(|t| self.symbols.intern(t));
+        let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data });
+        let ix = EdgeIx { slot, generation };
+        self.edge_index.insert(id, ix);
+        Ok(ix)
+    }
+
+    /// The live edge with this id.
+    pub fn edge_ix(&self, id: EdgeId) -> Option<EdgeIx> {
+        self.edge_index.get(&id).copied()
+    }
+
+    /// The id the next edge added without an explicit id gets.
+    pub fn next_edge_id(&self) -> EdgeId {
+        EdgeId(self.next_edge_id)
+    }
+
+    /// Make new edge ids start at `id` or later (never lowers the counter);
+    /// for restoring a saved graph whose highest ids were removed.
+    pub fn reserve_edge_ids(&mut self, id: EdgeId) {
+        self.next_edge_id = self.next_edge_id.max(id.0);
+    }
+
+    /// Set or clear an edge's type; returns the previous type's name.
+    pub fn set_edge_type(&mut self, ix: EdgeIx, ty: Option<&str>) -> Result<Option<String>, GraphError> {
+        let sym = ty.map(|t| self.symbols.intern(t));
+        let edge = self.edges.get_mut(ix.slot, ix.generation).ok_or(GraphError::Stale)?;
+        let old = std::mem::replace(&mut edge.ty, sym);
+        Ok(old.map(|s| self.symbols.name(s).to_owned()))
+    }
+
+    /// Name of an edge's type.
+    pub fn edge_type_name(&self, ix: EdgeIx) -> Option<&str> {
+        self.edge(ix)?.ty.map(|s| self.symbols.name(s))
+    }
+
+    /// The interned labels and types.
+    pub fn symbols(&self) -> &Symbols {
+        &self.symbols
+    }
+
+    /// Text of a label or type.
+    pub fn symbol_name(&self, s: Symbol) -> &str {
+        self.symbols.name(s)
+    }
+
+    /// The symbol for a label / type name, if any node or edge ever used it.
+    pub fn symbol(&self, name: &str) -> Option<Symbol> {
+        self.symbols.get(name)
+    }
+
+    /// Add a label to a node; returns whether it was new.
+    pub fn add_label(&mut self, ix: NodeIx, label: &str) -> Result<bool, GraphError> {
+        self.node(ix).ok_or(GraphError::Stale)?;
+        let sym = self.symbols.intern(label);
+        let labels = &mut self.node_ref_mut(ix).labels;
+        match labels.binary_search(&sym) {
+            Ok(_) => Ok(false),
+            Err(at) => {
+                labels.insert(at, sym);
+                self.labeled.entry(sym).or_default().insert(ix);
+                Ok(true)
+            }
+        }
+    }
+
+    /// Remove a label from a node; returns whether it had it.
+    pub fn remove_label(&mut self, ix: NodeIx, label: &str) -> Result<bool, GraphError> {
+        self.node(ix).ok_or(GraphError::Stale)?;
+        let Some(sym) = self.symbols.get(label) else { return Ok(false) };
+        let labels = &mut self.node_ref_mut(ix).labels;
+        match labels.binary_search(&sym) {
+            Err(_) => Ok(false),
+            Ok(at) => {
+                labels.remove(at);
+                self.unindex_label(sym, ix);
+                Ok(true)
+            }
+        }
+    }
+
+    /// Names of a node's labels (sorted by when each label was first used).
+    pub fn label_names(&self, ix: NodeIx) -> Option<Vec<&str>> {
+        Some(self.node(ix)?.labels.iter().map(|&s| self.symbols.name(s)).collect())
+    }
+
+    /// Nodes carrying `label`, in slot order.
+    pub fn nodes_with_label(&self, label: &str) -> Vec<NodeIx> {
+        let mut out: Vec<NodeIx> = match self.symbols.get(label).and_then(|s| self.labeled.get(&s)) {
+            Some(set) => set.iter().copied().collect(),
+            None => Vec::new(),
+        };
+        out.sort_unstable_by_key(|ix| ix.slot);
+        out
+    }
+
+    fn unindex_label(&mut self, sym: Symbol, ix: NodeIx) {
+        if let Some(set) = self.labeled.get_mut(&sym) {
+            set.remove(&ix);
+            if set.is_empty() {
+                self.labeled.remove(&sym);
+            }
+        }
     }
 
     pub(crate) fn attach_out(&mut self, ix: EdgeIx) {
@@ -342,9 +560,13 @@ impl<N, E> Graph<N, E> {
     pub fn remove_node(&mut self, ix: NodeIx) -> Option<(String, N)> {
         let node = self.nodes.remove(ix.slot, ix.generation)?;
         self.index.remove(&node.id);
+        for &label in &node.labels {
+            self.unindex_label(label, ix);
+        }
         for &e in &node.out {
             // Self loops appear in both lists; the second visit finds nothing.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
+                self.edge_index.remove(&edge.id);
                 if edge.to != ix {
                     self.node_ref_mut(edge.to).inc.retain(|&x| x != e);
                 }
@@ -352,6 +574,7 @@ impl<N, E> Graph<N, E> {
         }
         for &e in &node.inc {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
+                self.edge_index.remove(&edge.id);
                 if edge.from != ix {
                     self.node_ref_mut(edge.from).out.retain(|&x| x != e);
                 }
@@ -363,9 +586,28 @@ impl<N, E> Graph<N, E> {
     /// Remove one edge; returns it.
     pub fn remove_edge(&mut self, ix: EdgeIx) -> Option<Edge<E>> {
         let edge = self.edges.remove(ix.slot, ix.generation)?;
+        self.edge_index.remove(&edge.id);
         self.node_ref_mut(edge.from).out.retain(|&x| x != ix);
         self.node_ref_mut(edge.to).inc.retain(|&x| x != ix);
         Some(edge)
+    }
+
+    /// Edges from `from` to `to` (optionally only of type `ty`), in `from`'s
+    /// outgoing order. Scans the shorter of the two adjacency lists.
+    pub fn edges_between(&self, from: NodeIx, to: NodeIx, ty: Option<Symbol>) -> Vec<EdgeIx> {
+        let (Some(a), Some(b)) = (self.node(from), self.node(to)) else { return Vec::new() };
+        let fits = |e: &EdgeIx| {
+            let edge = self.edge_ref(*e);
+            edge.from == from && edge.to == to && ty.is_none_or(|t| edge.ty == Some(t))
+        };
+        if a.out.len() <= b.inc.len() {
+            a.out.iter().copied().filter(fits).collect()
+        } else {
+            let mut found: Vec<EdgeIx> = b.inc.iter().copied().filter(fits).collect();
+            let order: IxMap<EdgeIx, usize> = a.out.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+            found.sort_by_key(|e| order.get(e).copied());
+            found
+        }
     }
 
     /// All nodes, in slot order.
@@ -425,6 +667,9 @@ impl<N, E> Graph<N, E> {
             }
             if let Some(n) = self.node(ix) {
                 let new = out.insert_node(n.id.clone(), node_data(n)?);
+                for &label in &n.labels {
+                    out.add_label(new, self.symbols.name(label)).expect("just added");
+                }
                 map.insert(ix, new);
                 order.push((ix, new));
             }
@@ -454,10 +699,13 @@ impl<N, E> Graph<N, E> {
                 let edge = self.edge_ref(e);
                 if let Some(&to) = map.get(&edge.to) {
                     let data = edge_data(edge)?;
-                    out.add_edge(new, to, data).expect("both endpoints were just added");
+                    let ty = edge.ty.map(|s| self.symbols.name(s));
+                    out.insert_edge(new, to, Some(edge.id), ty, data).expect("both endpoints were just added");
                 }
             }
         }
+        // Ids of edges that were not copied stay unused in the subgraph too
+        out.reserve_edge_ids(self.next_edge_id());
         Ok(out)
     }
 }
@@ -506,6 +754,71 @@ mod tests {
         assert!(g.node(b).is_none());
         assert!(g.remove_node(b).is_none());
         assert_eq!(g.add_edge(a, b, 0), Err(GraphError::Stale));
+    }
+
+    #[test]
+    fn edge_ids_are_persistent_and_never_reused() {
+        let (mut g, [a, b, c]) = triangle();
+        let ids: Vec<EdgeId> = g.edges().map(|(_, e)| e.id()).collect();
+        assert_eq!(ids, [EdgeId(0), EdgeId(1), EdgeId(2)]);
+        let e1 = g.edge_ix(EdgeId(1)).unwrap();
+        assert_eq!(g.edge(e1).unwrap().data, 2);
+        g.remove_edge(e1).unwrap();
+        assert_eq!(g.edge_ix(EdgeId(1)), None);
+        let e = g.add_edge(b, c, 5).unwrap();
+        assert_eq!(g.edge(e).unwrap().id(), EdgeId(3)); // not 1 again
+                                                        // Explicit ids: taken ones fail, later new ids go above
+        assert_eq!(g.insert_edge(a, b, Some(EdgeId(3)), None, 0), Err(GraphError::DuplicateEdge(3)));
+        let e = g.insert_edge(a, b, Some(EdgeId(10)), Some("knows"), 0).unwrap();
+        assert_eq!(g.edge_type_name(e), Some("knows"));
+        assert_eq!(g.next_edge_id(), EdgeId(11));
+        // Removing a node drops its edges' ids
+        g.remove_node(a).unwrap();
+        assert_eq!(g.edge_ix(EdgeId(10)), None);
+        assert_eq!(g.edge_ix(EdgeId(0)), None);
+        assert!(g.edge_ix(EdgeId(3)).is_some());
+    }
+
+    #[test]
+    fn labels_types_and_the_label_index() {
+        let (mut g, [a, b, c]) = triangle();
+        assert!(g.add_label(a, "Person").unwrap());
+        assert!(!g.add_label(a, "Person").unwrap());
+        g.add_label(a, "Admin").unwrap();
+        g.add_label(c, "Person").unwrap();
+        assert_eq!(g.label_names(a).unwrap(), ["Person", "Admin"]);
+        let person = g.symbol("Person").unwrap();
+        assert!(g.node(a).unwrap().has_label(person) && !g.node(b).unwrap().has_label(person));
+        assert_eq!(g.nodes_with_label("Person"), [a, c]);
+        assert!(g.remove_label(a, "Person").unwrap());
+        assert!(!g.remove_label(b, "Nope").unwrap());
+        assert_eq!(g.nodes_with_label("Person"), [c]);
+        g.remove_node(c).unwrap();
+        assert!(g.nodes_with_label("Person").is_empty());
+        assert_eq!(g.add_label(c, "X"), Err(GraphError::Stale));
+
+        let e = g.node(a).unwrap().out_edges()[0];
+        assert_eq!(g.set_edge_type(e, Some("knows")).unwrap(), None);
+        assert_eq!(g.set_edge_type(e, Some("likes")).unwrap(), Some("knows".into()));
+        let likes = g.symbol("likes").unwrap();
+        assert_eq!(g.edges_between(a, b, Some(likes)), [e]);
+        assert!(g.edges_between(a, b, g.symbol("knows")).is_empty());
+        assert_eq!(g.edges_between(a, b, None), [e]);
+        assert_eq!(g.set_edge_type(e, None).unwrap(), Some("likes".into()));
+    }
+
+    #[test]
+    fn subgraphs_keep_ids_labels_and_types() {
+        let (mut g, [a, b, c]) = triangle();
+        g.add_label(b, "B").unwrap();
+        let e = g.insert_edge(a, b, None, Some("t"), 7).unwrap();
+        let sub = g.induced_subgraph([a, b], |_| Ok::<_, ()>(()), |e| Ok(e.data)).unwrap();
+        let (six, se) = (sub.node_ix("b").unwrap(), sub.edge_ix(g.edge(e).unwrap().id()).unwrap());
+        assert_eq!(sub.label_names(six).unwrap(), ["B"]);
+        assert_eq!(sub.edge_type_name(se), Some("t"));
+        assert_eq!(sub.edge_count(), 2);
+        assert_eq!(sub.next_edge_id(), g.next_edge_id());
+        let _ = c;
     }
 
     #[test]
