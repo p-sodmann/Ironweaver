@@ -23,6 +23,21 @@ b = v.add_node("b", attr={"color": "red"}, labels=["Person"])
 e = v.add_edge("a", "b", type="knows")   # or attr={"type": "knows"}
 ```
 
+### Adding many at once
+
+```python
+bulk = Vertex()
+bulk.add_nodes(["n1", "n2", ("n3", {"age": 7})], labels=["Item"])     # ids or (id, attrs)
+bulk.add_edges([("n1", "n2"), ("n2", "n3", {"note": "x"})], type="next")  # (from, to) or (from, to, attrs)
+bulk.add_edges([("n3", "n1"), ("n1", "n3")], attrs={"weight": [0.5, 2.0], "type": ["back", None]})
+assert bulk.node_count() == 3 and bulk.project().edge_count() == 4
+```
+
+`add_nodes(nodes, *, labels=None, attrs=None)` and `add_edges(edges, *, type=None, attrs=None)` add a whole batch in one call. They're the fast way to load a large graph:
+- Every item is checked before anything is added, so an invalid item (an unknown or duplicate id, a wrong shape) leaves the graph unchanged.
+- `attrs` gives attributes as columns: `{name: [one value per item]}`. `None` leaves that attribute out for the item. A `"labels"` column (nodes) or `"type"` column (edges) sets the field. Columns avoid creating a Python dict per item, so they are the fastest way to load weights.
+- They return the number of items added. Add-callbacks fire once per item after the whole batch is in.
+
 ### Labels, edge types and edge ids
 
 Nodes carry a set of **labels** and edges a **type**. Both are graph fields:

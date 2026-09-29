@@ -22,6 +22,7 @@
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
 use std::collections::VecDeque;
 
 use super::{groups, NONE};
@@ -43,7 +44,7 @@ pub struct Leiden {
 
 impl Default for Leiden {
     fn default() -> Self {
-        Leiden { resolution: 1.0, randomness: 0.01, max_iter: 10, seed: 0 }
+        Leiden { resolution: 1.0, randomness: 0.01, max_iter: 3, seed: 0 }
     }
 }
 
@@ -68,71 +69,112 @@ impl WGraph {
         self.to[r.clone()].iter().copied().zip(self.w[r].iter().copied())
     }
 
-    /// From weighted pairs (each undirected edge once, in either order):
-    /// merges parallel edges, splits off self-loops.
-    fn from_pairs(n: usize, pairs: impl Iterator<Item = (u32, u32, f64)>, mut self_w: Vec<f64>) -> WGraph {
-        let mut both: Vec<(u32, u32, f64)> = Vec::new();
-        for (a, b, w) in pairs {
-            if a == b {
-                self_w[a as usize] += w;
-            } else {
-                both.push((a, b, w));
-                both.push((b, a, w));
-            }
+    /// From one row per node: its distinct neighbours with the summed
+    /// weights (symmetric: v in row u with weight w iff u in row v with w),
+    /// and its self-loop weight.
+    fn from_rows(rows: Vec<(Vec<(u32, f64)>, f64)>) -> WGraph {
+        let mut start = Vec::with_capacity(rows.len() + 1);
+        start.push(0);
+        for r in &rows {
+            start.push(start.last().expect("non-empty") + r.0.len());
         }
-        both.sort_unstable_by_key(|&(a, b, _)| (a, b));
-        let mut start = vec![0usize; n + 1];
-        let (mut to, mut ws) = (Vec::with_capacity(both.len()), Vec::with_capacity(both.len()));
-        let mut k: Vec<f64> = self_w.iter().map(|s| 2.0 * s).collect();
-        let mut i = 0;
-        while i < both.len() {
-            let (a, b, mut w) = both[i];
-            i += 1;
-            while i < both.len() && (both[i].0, both[i].1) == (a, b) {
-                w += both[i].2;
-                i += 1;
-            }
-            to.push(b);
-            ws.push(w);
-            k[a as usize] += w;
-            start[a as usize + 1] = to.len();
-        }
-        for u in 0..n {
-            start[u + 1] = start[u + 1].max(start[u]);
-        }
-        WGraph { start, to, w: ws, self_w, k }
+        // Parallel collects keep the order
+        let to = rows.par_iter().flat_map_iter(|r| r.0.iter().map(|x| x.0)).collect();
+        let w = rows.par_iter().flat_map_iter(|r| r.0.iter().map(|x| x.1)).collect();
+        let k = rows.par_iter().map(|(row, s)| row.iter().map(|x| x.1).sum::<f64>() + 2.0 * s).collect();
+        let self_w = rows.iter().map(|r| r.1).collect();
+        WGraph { start, to, w, self_w, k }
     }
 
+    /// The projection's edges as undirected, parallel edges summed. Rows
+    /// are merged from the sorted neighbour lists, in parallel.
     fn of(p: &Projection) -> WGraph {
-        let n = p.node_count();
         let both = p.direction() == Direction::Both;
-        let mut pairs = Vec::with_capacity(p.edge_count());
-        for u in 0..n as u32 {
-            let weights = p.out_weights(u);
-            for (i, &v) in p.out_neighbors(u).iter().enumerate() {
-                let w = weights.map_or(1.0, |w| w[i]);
-                // An undirected projection lists each edge from both ends
-                // (a self-loop twice in its node's row)
-                match (both, u.cmp(&v)) {
-                    (false, _) | (true, std::cmp::Ordering::Less) => pairs.push((u, v, w)),
-                    (true, std::cmp::Ordering::Equal) => pairs.push((u, v, w / 2.0)),
-                    (true, std::cmp::Ordering::Greater) => {}
+        let rows = (0..p.node_count() as u32)
+            .into_par_iter()
+            .with_min_len(256)
+            .map(|u| {
+                let entries = |to: &'_ [u32], w: Option<&'_ [f64]>| -> Vec<(u32, f64)> {
+                    to.iter().enumerate().map(|(i, &v)| (v, w.map_or(1.0, |w| w[i]))).collect()
+                };
+                let out = entries(p.out_neighbors(u), p.out_weights(u));
+                // A directed edge u -> v is in u's out-row and v's in-row;
+                // an undirected projection lists it from both ends already
+                let inc = if both { Vec::new() } else { entries(p.in_neighbors(u), p.in_weights(u)) };
+                let mut row: Vec<(u32, f64)> = Vec::with_capacity(out.len() + inc.len());
+                let mut self_w = 0.0;
+                let (mut i, mut j) = (0, 0);
+                while i < out.len() || j < inc.len() {
+                    let from_out = j == inc.len() || (i < out.len() && out[i].0 <= inc[j].0);
+                    let (v, w) = if from_out { out[i] } else { inc[j] };
+                    if from_out {
+                        i += 1;
+                    } else {
+                        j += 1;
+                    }
+                    if v == u {
+                        // Undirected: a self-loop is listed twice in its row;
+                        // directed: count it from the out-row only
+                        if both {
+                            self_w += w / 2.0;
+                        } else if from_out {
+                            self_w += w;
+                        }
+                    } else if row.last().is_some_and(|l| l.0 == v) {
+                        row.last_mut().expect("checked").1 += w;
+                    } else {
+                        row.push((v, w));
+                    }
                 }
-            }
-        }
-        WGraph::from_pairs(n, pairs.into_iter(), vec![0.0; n])
+                (row, self_w)
+            })
+            .collect();
+        WGraph::from_rows(rows)
     }
 
-    /// One node per community of `labels` (`0..count`).
+    /// One node per community of `labels` (`0..count`): members' edges to
+    /// other communities summed, edges inside a community become its
+    /// self-loop. Linear time, in parallel over communities.
     fn aggregate(&self, labels: &[u32], count: usize) -> WGraph {
-        let mut self_w = vec![0.0; count];
-        for (u, &s) in self.self_w.iter().enumerate() {
-            self_w[labels[u] as usize] += s;
+        // Members of each community (counting sort)
+        let mut first = vec![0usize; count + 1];
+        for &l in labels {
+            first[l as usize + 1] += 1;
         }
-        let pairs = (0..self.len() as u32).flat_map(|u| {
-            self.row(u).filter(move |&(v, _)| u < v).map(move |(v, w)| (labels[u as usize], labels[v as usize], w))
-        });
-        WGraph::from_pairs(count, pairs, self_w)
+        for c in 0..count {
+            first[c + 1] += first[c];
+        }
+        let mut fill = first.clone();
+        let mut members = vec![0u32; labels.len()];
+        for (u, &l) in labels.iter().enumerate() {
+            members[fill[l as usize]] = u as u32;
+            fill[l as usize] += 1;
+        }
+        let rows = (0..count as u32)
+            .into_par_iter()
+            .with_min_len(64)
+            .map_init(
+                || Tally::new(count),
+                |tally, c| {
+                    let (mut inside, mut self_w) = (0.0, 0.0);
+                    for &u in &members[first[c as usize]..first[c as usize + 1]] {
+                        self_w += self.self_w[u as usize];
+                        for (v, w) in self.row(u) {
+                            let cv = labels[v as usize];
+                            if cv == c {
+                                inside += w; // seen from both ends
+                            } else {
+                                tally.add(cv, w);
+                            }
+                        }
+                    }
+                    let row = tally.list.iter().map(|&d| (d, tally.sum[d as usize])).collect();
+                    tally.clear();
+                    (row, self_w + inside / 2.0)
+                },
+            )
+            .collect();
+        WGraph::from_rows(rows)
     }
 
     fn two_m(&self) -> f64 {
@@ -517,5 +559,47 @@ mod tests {
         assert!(leiden(&cliques(3), &Leiden { randomness: 0.0, ..Default::default() }).is_err());
         assert!(leiden(&from_edges(0, &[], Direction::Out), &Leiden::default()).unwrap().is_empty());
         assert_eq!(leiden(&from_edges(2, &[], Direction::Out), &Leiden::default()).unwrap(), [vec![0], vec![1]]);
+    }
+
+    /// Modularity of `labels` on a WGraph, from the definition.
+    fn q(g: &WGraph, labels: &[u32]) -> f64 {
+        let two_m = g.two_m();
+        let mut inside = std::collections::HashMap::new();
+        let mut tot = std::collections::HashMap::new();
+        for u in 0..g.len() as u32 {
+            let c = labels[u as usize];
+            *tot.entry(c).or_insert(0.0) += g.k[u as usize];
+            *inside.entry(c).or_insert(0.0) += g.self_w[u as usize];
+            for (v, w) in g.row(u) {
+                if u < v && labels[v as usize] == c {
+                    *inside.entry(c).or_insert(0.0) += w;
+                }
+            }
+        }
+        tot.iter().map(|(c, k)| inside.get(c).unwrap_or(&0.0) / (two_m / 2.0) - (k / two_m).powi(2)).sum()
+    }
+
+    #[test]
+    fn aggregation_keeps_weights_and_modularity() {
+        for (seed, dir) in sweep() {
+            let p = random(seed, 40, 120, dir, seed % 2 == 0);
+            let g = WGraph::of(&p);
+            // Symmetric rows, weights preserved
+            for u in 0..g.len() as u32 {
+                for (v, w) in g.row(u) {
+                    assert!(g.row(v).any(|(x, y)| x == u && y == w));
+                }
+            }
+            let mut labels: Vec<u32> = (0..40).map(|u| (u * 7 + seed as u32) % 9).collect();
+            let count = compact(&mut labels);
+            let agg = g.aggregate(&labels, count);
+            assert!((agg.two_m() - g.two_m()).abs() < 1e-9);
+            let singletons: Vec<u32> = (0..count as u32).collect();
+            assert!((q(&agg, &singletons) - q(&g, &labels)).abs() < 1e-12);
+            // Coarser partitions of the aggregate match the base graph too
+            let halves: Vec<u32> = (0..count as u32).map(|c| c % 2).collect();
+            let lifted: Vec<u32> = labels.iter().map(|&l| l % 2).collect();
+            assert!((q(&agg, &halves) - q(&g, &lifted)).abs() < 1e-12);
+        }
     }
 }

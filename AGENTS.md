@@ -68,7 +68,8 @@ Below is a quick guide to notable functions and where to find them.
 
 ### Core crate (`crates/ironweaver-core/src/`)
 
-- **graph.rs** – `Graph<N, E>`, `Node`, `Edge`, `NodeIx`, `EdgeIx`,
+- **graph.rs** – `Graph<N, E>` (node ids in a `StrMap`: foldhash, seeded
+  per process), `Node`, `Edge`, `NodeIx`, `EdgeIx`,
   `EdgeId`, `Symbol` / `Symbols`: `add_node`, `add_edge`, `insert_edge`
   (explicit id / type), `remove_node`, `remove_edge`, `rename_node`,
   `node_ix`, `edge_ix` (by `EdgeId`; `EdgeIndex`: dense table + sparse
@@ -104,7 +105,8 @@ Below is a quick guide to notable functions and where to find them.
   graph for analytics: CSR adjacency with sorted neighbour lists, optional
   weights, owned node ids, no payloads (`Send + Sync`, a snapshot). Built in
   two steps: `Projection::collect` (reads the graph: node / edge filters,
-  weights) then `RawProjection::finish` (sorts; no graph access, so the
+  weights; one pass over the edge arena, rows by counting sort) then
+  `RawProjection::finish` (sorts rows; no graph access, so the
   bindings release the GIL); `Projection::build` does both. The transposed
   adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
   lazily. New analytics algorithms take `&Projection` and dense `u32` node
@@ -122,8 +124,11 @@ Below is a quick guide to notable functions and where to find them.
   - `dag.rs`: `topological_sort` (Kahn, min-heap), `find_cycle`.
   - `centrality.rs`: `degree_centrality`, `pagerank` + `PageRank` options
     (parallel pull; networkx semantics).
-  - `structure.rs`: `triangles`, `clustering`, `core_number`.
-  - `community.rs`: `label_propagation` (synchronous CDLP).
+  - `structure.rs`: `triangles` / `clustering` (degree-ordered: each
+    triangle once, from its lowest-degree node), `clustering_directed`
+    (LDBC LCC), `core_number`.
+  - `community.rs`: `label_propagation` (synchronous LDBC CDLP: on
+    directed projections in- and out-neighbours count separately).
   - `bfs.rs`: `bfs_levels` (parallel, direction-optimizing).
   - `sssp.rs`: `Search` (reusable single-source BFS / Dijkstra, forwards or
     backwards) and `SimpleRow` (lightest of parallel edges, no self-loops),
@@ -135,7 +140,8 @@ Below is a quick guide to notable functions and where to find them.
   - `similarity.rs`: `Similarity` metrics, `similarity` (pairs),
     `most_similar` (top k per node through common neighbours).
   - `leiden.rs`: `leiden` + `Leiden` options (local moving, refinement,
-    aggregation; repeated from its own result), `modularity`.
+    aggregation in linear time and in parallel; repeated from its own
+    result, `max_iter` 3 by default), `modularity`.
   - `spanning.rs`: `spanning_forest` (Kruskal).
   - `ksp.rs`: `k_shortest_paths` (Yen).
   - `embedding.rs`: `fastrp` + `FastRP` options.
@@ -207,10 +213,13 @@ Below is a quick guide to notable functions and where to find them.
   object creation.
 - **vertex/core.rs** – the `Vertex` class: constructors (`new`, `from_nodes`,
   `from_nodes_with_path`), `add_node` (`labels=`), `add_edge` (`type=`),
-  `get_node`, `get_edge`, `nodes_with_label`, `match`, `has_node`,
+  `add_nodes` / `add_edges` (bulk, in `bulk.rs`), `get_node`, `get_edge`,
+  `nodes_with_label`, `match`, `has_node`,
   `node_count`, `nodes`, GC support (`__traverse__` / `__clear__`), and thin
   wrappers around the modules below.
 - **vertex/manipulation.rs** – `remove_node`, `remove_edge`.
+- **vertex/bulk.rs** – `add_nodes` / `add_edges` (read and check every item
+  first, then insert all; attribute columns; GC paused).
 - **vertex/algorithms.rs** – `expand`, `filter`, `random_walks`.
 - **vertex/pathfinding.rs** – `shortest_path` (Python options → core
   `PathQuery`, `distances=` table heuristic), `path_methods`.

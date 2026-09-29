@@ -11,7 +11,7 @@ Python-level wrappers applied in ironweaver/__init__.py at import time.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Iterator, Literal, final, overload
+from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
 @final
 class ObservedDictionary:
@@ -296,6 +296,20 @@ class Vertex:
     def add_edge(
         self, from_id: str, to_id: str, attr: dict[str, Any] | None = ..., type: str | None = ...
     ) -> Edge: ...
+    def add_nodes(
+        self,
+        nodes: Iterable[str | tuple[str, dict[str, Any]] | list[Any]],
+        *,
+        labels: list[str] | None = ...,
+        attrs: dict[str, Sequence[Any]] | None = ...,
+    ) -> int: ...
+    def add_edges(
+        self,
+        edges: Iterable[tuple[str, str] | tuple[str, str, dict[str, Any]] | list[Any]],
+        *,
+        type: str | None = ...,
+        attrs: dict[str, Sequence[Any]] | None = ...,
+    ) -> int: ...
     def get_edge(self, id: int) -> Edge: ...
     def nodes_with_label(self, label: str) -> list[Node]: ...
     def match(

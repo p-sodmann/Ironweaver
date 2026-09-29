@@ -691,7 +691,7 @@ impl Projection {
     /// largest first. Every community is connected. `seed` makes the
     /// result repeatable. The algorithm runs again from its own result
     /// until that changes nothing, at most `max_iter` times.
-    #[pyo3(signature = (resolution=1.0, *, randomness=0.01, max_iter=10, seed=None))]
+    #[pyo3(signature = (resolution=1.0, *, randomness=0.01, max_iter=3, seed=None))]
     fn leiden(
         &self,
         py: Python<'_>,

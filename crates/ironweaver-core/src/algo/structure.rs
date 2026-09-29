@@ -10,17 +10,58 @@ use super::{intersection_size, Undirected};
 use crate::Projection;
 
 /// Triangles through each node, and each node's degree.
+///
+/// Each triangle is found once, from its lowest-ranked node, where nodes
+/// rank by (degree, index): every node keeps only its higher-ranked
+/// neighbours ("forward" lists, at most `sqrt(2m)` long), and a triangle
+/// `a < b < c` (by rank) is `b` and `c` in `forward(a)` with `c` in
+/// `forward(b)`. That's O(m^1.5) work however skewed the degrees are
+/// (counting all neighbour pairs is quadratic in the hub degrees).
 fn triangles_and_degrees(u: &Undirected) -> Vec<(u64, usize)> {
-    (0..u.len() as u32)
+    let n = u.len();
+    let higher = |a: u32, b: u32| (u.degree(b), b) > (u.degree(a), a);
+    let forward: Vec<Vec<u32>> = (0..n as u32)
         .into_par_iter()
-        .with_min_len(64)
-        .map(|a| {
-            let na = u.neighbors(a);
-            // Each triangle through `a` is seen from both of its other nodes
-            let twice: usize = na.iter().map(|&b| intersection_size(na, u.neighbors(b))).sum();
-            ((twice / 2) as u64, na.len())
-        })
-        .collect()
+        .map(|a| u.neighbors(a).iter().copied().filter(|&b| higher(a, b)).collect())
+        .collect();
+    // Counts per piece of work (at most ~8 per thread, each with two
+    // node-sized arrays), then summed; `mark[x] == a + 1` flags x as in
+    // forward(a), so nothing is cleared between nodes
+    let piece = (n / (8 * rayon::current_num_threads())).max(64);
+    let counts = (0..n as u32)
+        .into_par_iter()
+        .with_min_len(piece)
+        .fold(
+            || (vec![0u64; n], vec![0u32; n]),
+            |(mut count, mut mark), a| {
+                let fa = &forward[a as usize];
+                if fa.len() < 2 {
+                    return (count, mark);
+                }
+                for &b in fa {
+                    mark[b as usize] = a + 1;
+                }
+                for &b in fa {
+                    for &c in &forward[b as usize] {
+                        if mark[c as usize] == a + 1 {
+                            count[a as usize] += 1;
+                            count[b as usize] += 1;
+                            count[c as usize] += 1;
+                        }
+                    }
+                }
+                (count, mark)
+            },
+        )
+        .map(|(count, _)| count)
+        .reduce(
+            || vec![0u64; n],
+            |mut x, y| {
+                x.iter_mut().zip(y).for_each(|(a, b)| *a += b);
+                x
+            },
+        );
+    counts.into_iter().enumerate().map(|(a, t)| (t, u.degree(a as u32))).collect()
 }
 
 /// Number of triangles each node is part of (edges taken as undirected).

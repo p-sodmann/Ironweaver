@@ -9,7 +9,9 @@
 // Nodes get dense indices `0..node_count()` in the graph's slot order. Each
 // neighbour list is sorted by neighbour index (parallel edges stay in
 // insertion order), which enables merge-based set operations (triangles,
-// similarity). Besides the adjacency the projection follows (`out_*`), it
+// similarity); parallel edges keep their edge-slot order (insertion order,
+// unless removed edges' slots were reused). Besides the adjacency the
+// projection follows (`out_*`), it
 // keeps the transposed one (`in_*`); for an undirected projection both are
 // the same array.
 //
@@ -154,17 +156,18 @@ impl Projection {
             }
         }
 
-        // Kept edges and their weights, by edge slot (NaN: not kept)
+        // Kept edges, in slot order: one sequential pass over the edge arena
         let weighted = !matches!(cost, EdgeCost::Unit);
-        let mut edge_weight = vec![f64::NAN; g.edge_bound()];
-        let mut edge_count = 0usize;
+        let mut kept: Vec<(u32, u32, f64)> = Vec::with_capacity(g.edge_count());
         for (e, edge) in g.edges() {
-            if dense[edge.source().slot()] == NONE || dense[edge.target().slot()] == NONE || !edge_ok(e, edge)? {
+            let (s, t) = (dense[edge.source().slot()], dense[edge.target().slot()]);
+            if s == NONE || t == NONE || !edge_ok(e, edge)? {
                 continue;
             }
-            edge_weight[e.slot()] = if weighted { cost.cost::<E, X>(&edge.data)? } else { 0.0 };
-            edge_count += 1;
+            let w = if weighted { cost.cost::<E, X>(&edge.data)? } else { 0.0 };
+            kept.push((s, t, w));
         }
+        let edge_count = kept.len();
 
         let entries = if direction == Direction::Both { 2 * edge_count } else { edge_count };
         if u32::try_from(entries).is_err() || u32::try_from(nodes.len()).is_err() {
@@ -176,18 +179,43 @@ impl Projection {
             ))
             .into());
         }
-        let mut start = Vec::with_capacity(nodes.len() + 1);
-        let mut adj = Vec::with_capacity(entries);
-        start.push(0);
-        for &ix in &nodes {
-            for (e, neighbor) in g.neighbors(ix, direction) {
-                let w = edge_weight[e.slot()];
-                if !w.is_nan() {
-                    adj.push((dense[neighbor.slot()], w));
-                }
+        // Rows by counting sort: a row lists a node's edges in slot order
+        // (outgoing, then incoming for `Both`), sorted by `finish`
+        let (forward, backward) = match direction {
+            Direction::Out => (true, false),
+            Direction::In => (false, true),
+            Direction::Both => (true, true),
+        };
+        let mut start = vec![0u32; nodes.len() + 1];
+        for &(s, t, _) in &kept {
+            if forward {
+                start[s as usize + 1] += 1;
             }
-            start.push(adj.len() as u32);
+            if backward {
+                start[t as usize + 1] += 1;
+            }
         }
+        for i in 0..nodes.len() {
+            start[i + 1] += start[i];
+        }
+        let mut fill: Vec<u32> = start[..nodes.len()].to_vec();
+        let mut adj = vec![(0u32, 0f64); entries];
+        let mut put = |row: u32, neighbor: u32, w: f64| {
+            let at = &mut fill[row as usize];
+            adj[*at as usize] = (neighbor, w);
+            *at += 1;
+        };
+        if forward {
+            for &(s, t, w) in &kept {
+                put(s, t, w);
+            }
+        }
+        if backward {
+            for &(s, t, w) in &kept {
+                put(t, s, w);
+            }
+        }
+        drop(kept);
         Ok(RawProjection { direction, edge_count, start, adj, weighted, nodes, ids, dense })
     }
 

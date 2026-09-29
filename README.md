@@ -460,6 +460,8 @@ proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes
 # proj.minimum_spanning_tree(), proj.k_shortest_paths(source, target, k), proj.fastrp(dimension=128),
 # proj.node2vec_walks(walk_length=80, walks_per_node=10, *, p=1.0, q=1.0)
 node = graph.add_node(id, attr=None, labels=None)       # node.labels, add_label, remove_label, has_label
+graph.add_nodes(ids_or_id_attr_pairs, *, labels=None, attrs=None) -> int     # bulk; attrs as columns
+graph.add_edges(pairs_or_triples, *, type=None, attrs={"weight": [...]}) -> int   # bulk; all-or-nothing
 edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.id (persistent int)
 graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]
 # expressions evaluated in Rust: from ironweaver import attr, label, edge_type

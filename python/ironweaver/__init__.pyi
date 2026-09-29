@@ -10,7 +10,7 @@ This file describes every symbol available after::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Iterator, Literal, final, overload
+from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -716,6 +716,37 @@ class Vertex:
 
         An ``attr["type"]`` str becomes the edge's type. The edge gets a new
         persistent ``id``.
+        """
+        ...
+    def add_nodes(
+        self,
+        nodes: Iterable[str | tuple[str, dict[str, Any]] | list[Any]],
+        *,
+        labels: list[str] | None = ...,
+        attrs: dict[str, Sequence[Any]] | None = ...,
+    ) -> int:
+        """Add many nodes in one call; each item is an id or ``(id, attrs)``.
+
+        *labels* go on every node. *attrs* gives attributes as columns,
+        ``{name: [one value per node]}`` (None: not set; a ``"labels"``
+        column sets labels). Every item is checked first: on an error nothing
+        is added. Returns the number of nodes added.
+        """
+        ...
+    def add_edges(
+        self,
+        edges: Iterable[tuple[str, str] | tuple[str, str, dict[str, Any]] | list[Any]],
+        *,
+        type: str | None = ...,
+        attrs: dict[str, Sequence[Any]] | None = ...,
+    ) -> int:
+        """Add many edges in one call; each item is ``(from_id, to_id)`` or
+        ``(from_id, to_id, attrs)``.
+
+        *type* applies to every edge. *attrs* gives attributes as columns,
+        ``{name: [one value per edge]}`` (None: not set; a ``"type"`` column
+        sets types) — the fastest way to load weights. Every item is checked
+        first: on an error nothing is added. Returns the number of edges added.
         """
         ...
     def get_edge(self, id: int) -> Edge:

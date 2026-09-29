@@ -137,11 +137,11 @@ q = teams.project().modularity(found)             # like networkx.community.modu
 assert 0.3 < q < 0.5
 ```
 
-`leiden(resolution=1.0, *, randomness=0.01, max_iter=10, seed=None)` finds communities by the Leiden algorithm, maximising modularity. It improves on Louvain: every community is guaranteed to be connected, and it usually finds a better partition.
+`leiden(resolution=1.0, *, randomness=0.01, max_iter=3, seed=None)` finds communities by the Leiden algorithm, maximising modularity. It improves on Louvain: every community is guaranteed to be connected, and it usually finds a better partition.
 - Edges count as undirected, weighted by the projection's weights; parallel edges add up.
 - A higher `resolution` gives more, smaller communities.
 - `randomness` controls how randomly the refinement step merges nodes.
-- It runs again from its own result until that changes nothing, at most `max_iter` times.
+- It runs again from its own result until that changes nothing, at most `max_iter` times. More runs gain little: on the benchmark graphs, 10 instead of 3 raise modularity by 0.1–1%, at 2–3× the time.
 
 `modularity(communities, resolution=1.0)` scores a partition: every node must be in exactly one community (lists or sets of ids).
 

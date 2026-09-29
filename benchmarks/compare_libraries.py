@@ -17,7 +17,8 @@ rustworkx, networkit. Every result is checked against ironweaver's (the
 different algorithm or definition, so only compared by a quality measure).
 Edge weights, where used, are deterministic in 1.0..10.9.
 
-Timings are the best of --repeats runs. The "ironweaver" column includes
+Timings are the best of --repeats runs, with Python's cyclic garbage
+collector off while timing (as `timeit` does). The "ironweaver" column includes
 building the projection (`project()`) each time, as a one-off call would;
 "ironweaver (reused)" runs on a projection built beforehand, which is how
 several analyses on one graph run. The "Build" row is the time to create the
@@ -125,13 +126,31 @@ DATASETS: dict[str, Callable[[], Dataset]] = {
 # ---------------------------------------------------------------------------
 
 def build_ironweaver(ds: Dataset):
+    """Bulk loading: `add_nodes`, then `add_edges` with a weight column."""
     from ironweaver import Vertex
     g = Vertex()
-    for i in range(ds.n):
-        g.add_node(str(i))
-    for (a, b), w in zip(ds.edges, ds.weights):
-        g.add_edge(str(a), str(b), {"weight": w})
+    ids = [str(i) for i in range(ds.n)]
+    g.add_nodes(ids)
+    g.add_edges([(ids[a], ids[b]) for a, b in ds.edges], attrs={"weight": ds.weights})
     return g
+
+
+def ironweaver_simple_undirected(g, ds: Dataset):
+    """For communities on a directed dataset: an ironweaver graph with one
+    undirected edge per node pair, the graph the other libraries (and the
+    modularity score) see; a `direction="both"` projection of the directed
+    graph would count a pair joined both ways as a double-weight edge.
+    Built once per graph, outside the timing."""
+    from ironweaver import Vertex
+    if not ds.directed:
+        return g
+    if id(g) not in _UNDIRECTED:
+        pairs = sorted({(min(a, b), max(a, b)) for a, b in ds.edges})
+        u = Vertex()
+        u.add_nodes([str(i) for i in range(ds.n)])
+        u.add_edges([(str(a), str(b)) for a, b in pairs])
+        _UNDIRECTED[id(g)] = (g, u)
+    return _UNDIRECTED[id(g)][1]
 
 
 def build_networkx(ds: Dataset):
@@ -235,6 +254,12 @@ class Projections:
 
     def __init__(self, vertex):
         self.vertex, self.cache = vertex, {}
+
+    def derived(self, key, make):
+        """Another reused-projection wrapper built from this vertex, once."""
+        if key not in self.cache:
+            self.cache[key] = make(self.vertex)
+        return self.cache[key]
 
     def project(self, **kw):
         key = tuple(sorted(kw.items()))
@@ -467,6 +492,11 @@ def op_betweenness():
 def op_communities():
     # Different algorithms: compared by the modularity of what they find
     def ironweaver(g, ds):
+        if ds.directed:  # the simple undirected graph the others get
+            if isinstance(g, Projections):
+                g = g.derived("simple", lambda v: Projections(ironweaver_simple_undirected(v, ds)))
+            else:
+                g = ironweaver_simple_undirected(g, ds)
         return g.project(direction="both").leiden(seed=1)
 
     def networkx(g, ds):
@@ -567,12 +597,20 @@ BETWEENNESS_BUDGET = 5e9
 
 
 def timed(fn: Callable[[], Any], repeats: int) -> tuple[float, Any]:
+    """Best time of `repeats` runs, with Python's cyclic GC off while timing
+    (as `timeit` does): otherwise a run that allocates many objects pays for
+    rescanning everything the benchmark process holds (the datasets, the
+    other libraries' graphs), which is noise, not the library's cost."""
     best, result = math.inf, None
     for _ in range(repeats):
         gc.collect()
-        start = time.perf_counter()
-        result = fn()
-        best = min(best, time.perf_counter() - start)
+        gc.disable()
+        try:
+            start = time.perf_counter()
+            result = fn()
+            best = min(best, time.perf_counter() - start)
+        finally:
+            gc.enable()
     return best, result
 
 

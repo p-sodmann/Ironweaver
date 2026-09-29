@@ -236,9 +236,52 @@ impl Vertex {
         };
         let vertex = slf.clone().unbind();
         let node = Node::handle(py, &vertex, ix)?;
-        let args = PyTuple::new(py, [vertex.into_any(), node.clone_ref(py).into_any()])?;
-        fire(callbacks.bind(py), args)?;
+        if !callbacks.bind(py).is_empty() {
+            let args = PyTuple::new(py, [vertex.into_any(), node.clone_ref(py).into_any()])?;
+            fire(callbacks.bind(py), args)?;
+        }
         Ok(node)
+    }
+
+    /// Add many nodes in one call: each item is an id or ``(id, attrs)``;
+    /// ``labels`` go on every node (an item's ``attrs["labels"]`` adds its
+    /// own). ``attrs`` gives attributes as columns, ``{name: [one value per
+    /// node]}`` (None: not set), which is faster than a dict per node.
+    /// Checks every item first, so on an error nothing is added. Returns the
+    /// number of nodes added. Add-callbacks fire after the batch.
+    ///
+    /// Raises:
+    ///     ValueError: A duplicate id
+    ///     TypeError: An item of the wrong shape
+    #[pyo3(signature = (nodes, *, labels=None, attrs=None))]
+    fn add_nodes(
+        slf: &Bound<'_, Self>,
+        nodes: &Bound<'_, PyAny>,
+        labels: Option<Vec<String>>,
+        attrs: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<usize> {
+        super::bulk::add_nodes(slf, nodes, labels, attrs.as_ref())
+    }
+
+    /// Add many edges in one call: each item is ``(from_id, to_id)`` or
+    /// ``(from_id, to_id, attrs)``; ``type`` applies to every edge (else an
+    /// item's ``attrs["type"]``). ``attrs`` gives attributes as columns,
+    /// ``{name: [one value per edge]}`` (None: not set; a ``"type"`` column
+    /// sets the types), which is faster than a dict per edge. Checks every
+    /// item first, so on an error nothing is added. Returns the number of
+    /// edges added. Add-callbacks fire after the batch.
+    ///
+    /// Raises:
+    ///     ValueError: An unknown node id
+    ///     TypeError: An item of the wrong shape
+    #[pyo3(signature = (edges, *, r#type=None, attrs=None))]
+    fn add_edges(
+        slf: &Bound<'_, Self>,
+        edges: &Bound<'_, PyAny>,
+        r#type: Option<String>,
+        attrs: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<usize> {
+        super::bulk::add_edges(slf, edges, r#type, attrs.as_ref())
     }
 
     /// Add a new edge between two nodes in the graph
@@ -284,8 +327,10 @@ impl Vertex {
         };
         let vertex = slf.clone().unbind();
         let edge = Edge::handle(py, &vertex, ix)?;
-        let args = PyTuple::new(py, [vertex.into_any(), edge.clone_ref(py).into_any()])?;
-        fire(callbacks.bind(py), args)?;
+        if !callbacks.bind(py).is_empty() {
+            let args = PyTuple::new(py, [vertex.into_any(), edge.clone_ref(py).into_any()])?;
+            fire(callbacks.bind(py), args)?;
+        }
         Ok(edge)
     }
 

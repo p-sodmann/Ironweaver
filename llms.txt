@@ -27,6 +27,19 @@ assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # 
 
 `add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
 
+## Bulk loading
+
+```python
+big = Vertex()
+big.add_nodes(["u1", "u2", ("u3", {"age": 7})], labels=["User"])      # ids or (id, attrs); returns the count
+big.add_edges([("u1", "u2"), ("u2", "u3")], type="follows", attrs={"weight": [1.0, 2.5]})  # attrs: columns
+assert big.project(weight="weight").edge_count() == 2
+```
+
+- `add_nodes(nodes, *, labels=None, attrs=None)` and `add_edges(edges, *, type=None, attrs=None)` check every item first: on an error nothing is added.
+- `attrs={name: [value per item]}` columns (None: not set) are the fastest way to load attributes; a "labels" / "type" column sets the fields.
+- Add-callbacks fire after the batch.
+
 ## Labels, edge types, edge ids
 
 ```python
@@ -191,7 +204,7 @@ assert pa.k_shortest_paths("p", "s", 2)[0] == {"nodelist": ["p", "q", "r", "s"],
 - `similarity(pairs, metric="jaccard")`: one score per pair.
   - Metrics: "jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation", "preferential_attachment".
 - `most_similar(ids=None, k=10, *, metric="jaccard", min_score=0.0)`: `{id: [(other, score), ...]}`, or a list for a single id.
-- `leiden(resolution=1.0, *, randomness=0.01, max_iter=10, seed=None)`: communities, each connected; weighted.
+- `leiden(resolution=1.0, *, randomness=0.01, max_iter=3, seed=None)`: communities, each connected; weighted.
 - `modularity(communities, resolution=1.0)`.
 - `minimum_spanning_tree(*, maximum=False)`: `[(id, id, weight), ...]`, a spanning forest.
 - `k_shortest_paths(source, target, k, method=None)`: loopless paths (Yen), each `{"nodelist", "cost"}`.

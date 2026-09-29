@@ -55,6 +55,11 @@ impl Hasher for IxHasher {
 
 /// `HashMap` keyed by node or edge handles.
 pub type IxMap<K, V> = HashMap<K, V, BuildHasherDefault<IxHasher>>;
+
+/// Hash map for string keys (node ids, symbol names): foldhash, several
+/// times faster than the default SipHash on short keys, and seeded randomly
+/// per process, so crafted ids can't force collisions.
+pub type StrMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
 /// `HashSet` of node or edge handles.
 pub type IxSet<K> = HashSet<K, BuildHasherDefault<IxHasher>>;
 
@@ -139,7 +144,7 @@ pub struct Symbol(u32);
 #[derive(Clone, Debug, Default)]
 pub struct Symbols {
     names: Vec<Box<str>>,
-    index: HashMap<Box<str>, Symbol>,
+    index: StrMap<Box<str>, Symbol>,
 }
 
 impl Symbols {
@@ -326,7 +331,7 @@ impl<T> Arena<T> {
 pub struct Graph<N, E> {
     nodes: Arena<Node<N>>,
     edges: Arena<Edge<E>>,
-    index: HashMap<String, NodeIx>,
+    index: StrMap<String, NodeIx>,
     edge_index: EdgeIndex,
     /// The id the next new edge gets.
     next_edge_id: u64,
@@ -350,7 +355,7 @@ impl<N, E> Graph<N, E> {
         Graph {
             nodes: Arena::with_capacity(nodes),
             edges: Arena::with_capacity(edges),
-            index: HashMap::with_capacity(nodes),
+            index: StrMap::with_capacity_and_hasher(nodes, Default::default()),
             edge_index: EdgeIndex { dense: Vec::with_capacity(edges), sparse: IxMap::default() },
             next_edge_id: 0,
             symbols: Symbols::default(),
