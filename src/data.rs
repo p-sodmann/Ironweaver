@@ -172,8 +172,6 @@ pub struct EdgeData {
 
 #[derive(Default)]
 pub struct EdgeExtra {
-    /// Id read from a saved graph (`None` for edges made with `add_edge`).
-    pub id: Option<Box<str>>,
     pub watched_by: PyObjects,
     pub on_meta_change_callbacks: PyObjects,
 }
@@ -198,13 +196,8 @@ impl NodeData {
 }
 
 impl EdgeData {
-    pub fn new(id: Option<Box<str>>, attr: PyAttrs, meta: PyAttrs) -> Self {
-        let extra = id.map(|id| Box::new(EdgeExtra { id: Some(id), ..Default::default() }));
-        EdgeData { attr, meta, extra }
-    }
-
-    pub fn id(&self) -> Option<&str> {
-        self.extra.as_ref().and_then(|x| x.id.as_deref())
+    pub fn new(attr: PyAttrs, meta: PyAttrs) -> Self {
+        EdgeData { attr, meta, extra: None }
     }
 
     /// The rarely set fields, created on first use.
@@ -220,9 +213,9 @@ impl EdgeData {
         self.extra.as_ref().map(|x| &x.on_meta_change_callbacks)
     }
 
-    /// Copy for a derived graph (see `NodeData::copy`); the id is kept.
+    /// Copy for a derived graph (see `NodeData::copy`).
     pub fn copy(&self, py: Python<'_>) -> PyResult<Self> {
-        Ok(EdgeData::new(self.id().map(Into::into), self.attr.share(py), self.meta.share(py)))
+        Ok(EdgeData::new(self.attr.share(py), self.meta.share(py)))
     }
 
     pub fn visit(&self, visit: &mut dyn FnMut(&Py<PyAny>)) {
@@ -336,4 +329,62 @@ impl Attributes for EdgeData {
     fn text(&self, key: &str) -> PyResult<Lookup<String>> {
         text(&self.attr, key)
     }
+}
+
+// Reserved attribute names. An edge's type and a node's labels are graph
+// fields, but Python code that reads or matches `attr["type"]` /
+// `attr["labels"]` keeps working: these helpers answer such lookups from
+// the fields.
+
+/// Edge attribute `key`, where `"type"` is the edge's type.
+pub fn edge_value<'py>(
+    py: Python<'py>,
+    g: &PyGraph,
+    e: ironweaver_core::EdgeIx,
+    key: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Some(edge) = g.edge(e) else { return Ok(None) };
+    if key == "type" {
+        return Ok(g.edge_type_name(e).map(|t| PyString::new(py, t).into_any()));
+    }
+    edge.data.attr.get(py, key)
+}
+
+/// Node attribute `key`, where `"labels"` is the node's label list.
+pub fn node_value<'py>(
+    py: Python<'py>,
+    g: &PyGraph,
+    ix: ironweaver_core::NodeIx,
+    key: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Some(node) = g.node(ix) else { return Ok(None) };
+    if key == "labels" {
+        let labels = g.label_names(ix).unwrap_or_default();
+        return Ok(Some(pyo3::types::PyList::new(py, labels)?.into_any()));
+    }
+    node.data.attr.get(py, key)
+}
+
+/// User attributes given to `add_node` / `add_edge` / `attr = ...`, with a
+/// reserved key moved out: `attr["type"]` (a str) is an edge's type,
+/// `attr["labels"]` (a list of str) a node's labels. Copies the dict once
+/// (the caller's dict is untouched).
+pub fn split_reserved<'py>(
+    attr: Option<&Bound<'py, PyDict>>,
+    key: &str,
+) -> PyResult<(PyAttrs, Option<Bound<'py, PyAny>>)> {
+    let attrs = PyAttrs::from_user(attr)?;
+    let Some(d) = attr else { return Ok((attrs, None)) };
+    let py = d.py();
+    let Some(v) = d.get_item(key)? else { return Ok((attrs, None)) };
+    let movable = match key {
+        "type" => v.is_instance_of::<PyString>(),
+        _ => !v.is_instance_of::<PyString>() && v.extract::<Vec<String>>().is_ok(),
+    };
+    if !movable {
+        return Ok((attrs, None));
+    }
+    let own = attrs.dict(py).expect("copied from a dict that has the key").clone();
+    own.del_item(key)?;
+    Ok((if own.is_empty() { PyAttrs::default() } else { attrs }, Some(v)))
 }

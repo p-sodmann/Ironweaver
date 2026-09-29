@@ -23,7 +23,8 @@ pub fn remove_node(slf: &Bound<'_, Vertex>, id: &str) -> PyResult<Py<Node>> {
 }
 
 /// Remove edges from `from_id` to `to_id`. If `attr` is given, only edges
-/// whose attributes equal every given key/value pair are removed.
+/// whose attributes equal every given key/value pair are removed ("type"
+/// matches the edge's type).
 /// Returns the number of edges removed.
 pub fn remove_edge(slf: &Bound<'_, Vertex>, from_id: &str, to_id: &str, attr: Option<AttrMap>) -> PyResult<usize> {
     let py = slf.py();
@@ -41,7 +42,7 @@ pub fn remove_edge(slf: &Bound<'_, Vertex>, from_id: &str, to_id: &str, attr: Op
             }
             if let Some(filter) = &attr {
                 for (key, expected) in filter {
-                    match edge.data.attr.get(py, key)? {
+                    match crate::data::edge_value(py, &v.graph, e, key)? {
                         Some(value) if value.eq(expected.bind(py))? => {}
                         _ => continue 'edges,
                     }

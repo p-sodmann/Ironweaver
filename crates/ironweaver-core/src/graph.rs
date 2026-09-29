@@ -72,6 +72,59 @@ pub struct EdgeIx {
     generation: u32,
 }
 
+/// Edge id -> edge slot. Ids come from a counter, so they are dense: most
+/// live in a flat table indexed by id (sequential, cache friendly, 4 bytes
+/// per id); ids far beyond the number of edges (explicit ids from replayed
+/// ops or hand-written files) go to a hash map, so memory stays bounded.
+#[derive(Clone, Debug, Default)]
+struct EdgeIndex {
+    /// `slot + 1` of the edge with id `i`, 0 for none.
+    dense: Vec<u32>,
+    sparse: IxMap<EdgeId, u32>,
+}
+
+impl EdgeIndex {
+    fn get(&self, id: EdgeId) -> Option<u32> {
+        match self.dense.get(id.0 as usize) {
+            Some(&s) if s != 0 => Some(s - 1),
+            Some(_) => None,
+            None => self.sparse.get(&id).copied(),
+        }
+    }
+
+    /// Record `id` -> `slot`. `edges` is the number of live edges (sizes the
+    /// dense table).
+    /// The caller checks that `id` is free.
+    fn insert(&mut self, id: EdgeId, slot: u32, edges: usize) {
+        let i = id.0 as usize;
+        let limit = (4 * edges).max(1024) as u64;
+        if i < self.dense.len() || id.0 < limit {
+            if i >= self.dense.len() {
+                let len = (i + 1).max(2 * self.dense.len());
+                self.dense.resize(len, 0);
+            }
+            self.dense[i] = slot + 1;
+        } else {
+            self.sparse.insert(id, slot);
+        }
+    }
+
+    fn remove(&mut self, id: EdgeId) {
+        match self.dense.get_mut(id.0 as usize) {
+            Some(s) => *s = 0,
+            None => {
+                self.sparse.remove(&id);
+            }
+        }
+    }
+
+    fn reserve(&mut self, ids: u64) {
+        if ids <= (u32::MAX as u64) && (ids as usize) > self.dense.len() {
+            self.dense.resize(ids as usize, 0);
+        }
+    }
+}
+
 /// Persistent id of an edge: assigned from a per-graph counter when the
 /// edge is added, never reused, saved with the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -274,7 +327,7 @@ pub struct Graph<N, E> {
     nodes: Arena<Node<N>>,
     edges: Arena<Edge<E>>,
     index: HashMap<String, NodeIx>,
-    edge_index: IxMap<EdgeId, EdgeIx>,
+    edge_index: EdgeIndex,
     /// The id the next new edge gets.
     next_edge_id: u64,
     symbols: Symbols,
@@ -298,7 +351,7 @@ impl<N, E> Graph<N, E> {
             nodes: Arena::with_capacity(nodes),
             edges: Arena::with_capacity(edges),
             index: HashMap::with_capacity(nodes),
-            edge_index: IxMap::with_capacity_and_hasher(edges, Default::default()),
+            edge_index: EdgeIndex { dense: Vec::with_capacity(edges), sparse: IxMap::default() },
             next_edge_id: 0,
             symbols: Symbols::default(),
             labeled: HashMap::new(),
@@ -359,6 +412,7 @@ impl<N, E> Graph<N, E> {
         ty: Option<&str>,
         data: E,
     ) -> Result<EdgeIx, GraphError> {
+        let ty = ty.map(|t| self.symbols.intern(t));
         let ix = self.add_edge_detached(from, to, id, ty, data)?;
         self.attach_out(ix);
         self.attach_in(ix);
@@ -373,30 +427,30 @@ impl<N, E> Graph<N, E> {
         from: NodeIx,
         to: NodeIx,
         id: Option<EdgeId>,
-        ty: Option<&str>,
+        ty: Option<Symbol>,
         data: E,
     ) -> Result<EdgeIx, GraphError> {
         if self.node(from).is_none() || self.node(to).is_none() {
             return Err(GraphError::Stale);
         }
-        let id = match id {
-            Some(id) if self.edge_index.contains_key(&id) => return Err(GraphError::DuplicateEdge(id.0)),
-            Some(id) => id,
-            None => EdgeId(self.next_edge_id),
-        };
+        let id = id.unwrap_or(EdgeId(self.next_edge_id));
+        if self.edge_index.get(id).is_some() {
+            return Err(GraphError::DuplicateEdge(id.0));
+        }
         self.next_edge_id = self
             .next_edge_id
             .max(id.0.checked_add(1).ok_or(GraphError::InvalidArgument("edge id space exhausted".into()))?);
-        let ty = ty.map(|t| self.symbols.intern(t));
         let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data });
         let ix = EdgeIx { slot, generation };
-        self.edge_index.insert(id, ix);
+        self.edge_index.insert(id, slot, self.edges.len);
         Ok(ix)
     }
 
     /// The live edge with this id.
     pub fn edge_ix(&self, id: EdgeId) -> Option<EdgeIx> {
-        self.edge_index.get(&id).copied()
+        let slot = self.edge_index.get(id)?;
+        let generation = self.edges.slots[slot as usize].generation;
+        Some(EdgeIx { slot, generation })
     }
 
     /// The id the next edge added without an explicit id gets.
@@ -431,6 +485,11 @@ impl<N, E> Graph<N, E> {
     /// Text of a label or type.
     pub fn symbol_name(&self, s: Symbol) -> &str {
         self.symbols.name(s)
+    }
+
+    /// The symbol for a label / type name, created if new.
+    pub fn intern(&mut self, name: &str) -> Symbol {
+        self.symbols.intern(name)
     }
 
     /// The symbol for a label / type name, if any node or edge ever used it.
@@ -566,7 +625,7 @@ impl<N, E> Graph<N, E> {
         for &e in &node.out {
             // Self loops appear in both lists; the second visit finds nothing.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
-                self.edge_index.remove(&edge.id);
+                self.edge_index.remove(edge.id);
                 if edge.to != ix {
                     self.node_ref_mut(edge.to).inc.retain(|&x| x != e);
                 }
@@ -574,7 +633,7 @@ impl<N, E> Graph<N, E> {
         }
         for &e in &node.inc {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
-                self.edge_index.remove(&edge.id);
+                self.edge_index.remove(edge.id);
                 if edge.from != ix {
                     self.node_ref_mut(edge.from).out.retain(|&x| x != e);
                 }
@@ -586,7 +645,7 @@ impl<N, E> Graph<N, E> {
     /// Remove one edge; returns it.
     pub fn remove_edge(&mut self, ix: EdgeIx) -> Option<Edge<E>> {
         let edge = self.edges.remove(ix.slot, ix.generation)?;
-        self.edge_index.remove(&edge.id);
+        self.edge_index.remove(edge.id);
         self.node_ref_mut(edge.from).out.retain(|&x| x != ix);
         self.node_ref_mut(edge.to).inc.retain(|&x| x != ix);
         Some(edge)
@@ -659,6 +718,8 @@ impl<N, E> Graph<N, E> {
     ) -> Result<Graph<N2, E2>, X> {
         let keep = keep.into_iter();
         let mut out: Graph<N2, E2> = Graph::with_capacity(keep.size_hint().0, 0);
+        // Same symbols, so labels and types copy without re-interning
+        out.symbols = self.symbols.clone();
         let mut map: IxMap<NodeIx, NodeIx> = IxMap::with_capacity_and_hasher(keep.size_hint().0, Default::default());
         let mut order: Vec<(NodeIx, NodeIx)> = Vec::with_capacity(keep.size_hint().0);
         for ix in keep {
@@ -667,8 +728,11 @@ impl<N, E> Graph<N, E> {
             }
             if let Some(n) = self.node(ix) {
                 let new = out.insert_node(n.id.clone(), node_data(n)?);
-                for &label in &n.labels {
-                    out.add_label(new, self.symbols.name(label)).expect("just added");
+                if !n.labels.is_empty() {
+                    out.node_ref_mut(new).labels = n.labels.clone();
+                    for &label in &n.labels {
+                        out.labeled.entry(label).or_default().insert(new);
+                    }
                 }
                 map.insert(ix, new);
                 order.push((ix, new));
@@ -690,6 +754,7 @@ impl<N, E> Graph<N, E> {
             }
         }
         out.edges.slots.reserve_exact(n_edges);
+        out.edge_index.reserve(self.next_edge_id);
         for (slot, _, n) in out.nodes.iter_mut() {
             n.out.reserve_exact(out_deg[slot as usize] as usize);
             n.inc.reserve_exact(in_deg[slot as usize] as usize);
@@ -699,8 +764,10 @@ impl<N, E> Graph<N, E> {
                 let edge = self.edge_ref(e);
                 if let Some(&to) = map.get(&edge.to) {
                     let data = edge_data(edge)?;
-                    let ty = edge.ty.map(|s| self.symbols.name(s));
-                    out.insert_edge(new, to, Some(edge.id), ty, data).expect("both endpoints were just added");
+                    let ix =
+                        out.add_edge_detached(new, to, Some(edge.id), edge.ty, data).expect("endpoints just added");
+                    out.attach_out(ix);
+                    out.attach_in(ix);
                 }
             }
         }

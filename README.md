@@ -455,6 +455,11 @@ proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes
 # proj.pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6), proj.triangles(),
 # proj.clustering(), proj.core_number(), proj.label_propagation(max_iter=20),
 # proj.bfs_levels(sources, max_depth=None)
+node = graph.add_node(id, attr=None, labels=None)       # node.labels, add_label, remove_label, has_label
+edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.id (persistent int)
+graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]
+# expressions evaluated in Rust: from ironweaver import attr, label, edge_type
+graph.filter((attr("age") > 30) & label("Person")); graph.project(edge_filter=edge_type("knows"))
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters

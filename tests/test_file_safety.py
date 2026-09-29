@@ -2,6 +2,7 @@
 
 import os
 import struct
+import zlib
 
 import pytest
 
@@ -48,16 +49,44 @@ def test_self_containing_value_raises():
         graph_with(loop).save_to_json()
 
 
+def reframe(data, payload):
+    """A binary file (version 2) around `payload`, with a fresh trailer."""
+    return data[:16] + payload + struct.pack("<QI", len(payload), zlib.crc32(payload)) + b"IWND"
+
+
 def test_crafted_deep_binary_file_raises(tmp_path):
     path = tmp_path / "g.bin"
     graph_with(["MARK"]).save_to_binary(str(path))
     data = path.read_bytes()
-    level = struct.pack("<IQ", 6, 1)  # tag of a one-item list, then its length
-    at = data.index(b"MARK") - 12 - len(level)
-    assert data[at:at + len(level)] == level
-    path.write_bytes(data[:at] + level * 100_000 + data[at:])
+    payload = data[16:-16]
+    level = bytes([6, 1])  # postcard: tag of a one-item list, then its length
+    at = payload.index(b"MARK") - 2 - len(level)
+    assert payload[at:at + len(level)] == level
+    path.write_bytes(reframe(data, payload[:at] + level * 100_000 + payload[at:]))
     with pytest.raises(RuntimeError, match="nested more than"):
         Vertex.load_from_binary(str(path))
+
+    # Version 1 (bincode) files: wrap the list at byte 171 of the legacy file
+    legacy = open(os.path.join(os.path.dirname(__file__), "data", "legacy_graph.bin"), "rb").read()
+    v1_level = struct.pack("<IQ", 6, 1)
+    assert legacy[171:175] == struct.pack("<I", 6)
+    path.write_bytes(legacy[:171] + v1_level * 100_000 + legacy[171:])
+    with pytest.raises(RuntimeError, match="nested more than"):
+        Vertex.load_from_binary(str(path))
+
+
+def test_damaged_binary_files_raise(tmp_path):
+    path = tmp_path / "g.bin"
+    graph_with("ok").save_to_binary(str(path))
+    data = path.read_bytes()
+    for damaged, message in [
+        (data[:-1], "truncated"),
+        (data[:20] + data[-16:], "length mismatch"),
+        (data[:30] + bytes([data[30] ^ 1]) + data[31:], "checksum mismatch"),
+    ]:
+        path.write_bytes(damaged)
+        with pytest.raises(RuntimeError, match=message):
+            Vertex.load_from_binary(str(path))
 
 
 def test_graph_dict_loop_raises():

@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
 
-use crate::data::{AttrMap, EdgeData, NodeData, PyAttrs, PyGraph};
+use crate::data::{split_reserved, AttrMap, EdgeData, NodeData, PyAttrs, PyGraph};
 use crate::errors::graph_error;
 use crate::{Edge, Node};
 
@@ -203,20 +203,35 @@ impl Vertex {
     ///
     /// Args:
     ///     id (str): Unique identifier for the node
-    ///     attr (dict, optional): Attributes for the node
-    ///     
+    ///     attr (dict, optional): Attributes for the node. A "labels" entry
+    ///         holding a list of str becomes the node's labels.
+    ///     labels (list[str], optional): Labels of the node
+    ///
     /// Returns:
     ///     Node: The created node
-    ///     
+    ///
     /// Raises:
     ///     ValueError: If a node with the same ID already exists
-    #[pyo3(signature = (id, attr=None))]
-    fn add_node(slf: &Bound<'_, Self>, id: String, attr: Option<Bound<'_, PyDict>>) -> PyResult<Py<Node>> {
+    #[pyo3(signature = (id, attr=None, labels=None))]
+    fn add_node(
+        slf: &Bound<'_, Self>,
+        id: String,
+        attr: Option<Bound<'_, PyDict>>,
+        labels: Option<Vec<String>>,
+    ) -> PyResult<Py<Node>> {
         let py = slf.py();
-        let data = NodeData::new(PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());
+        let (attr, from_attr) = split_reserved(attr.as_ref(), "labels")?;
+        let mut labels = labels.unwrap_or_default();
+        if let Some(l) = from_attr {
+            labels.extend(l.extract::<Vec<String>>()?);
+        }
+        let data = NodeData::new(attr, PyAttrs::default());
         let (ix, callbacks) = {
             let mut v = slf.try_borrow_mut()?;
             let ix = v.graph.add_node(id, data).map_err(graph_error)?;
+            for label in &labels {
+                v.graph.add_label(ix, label).map_err(graph_error)?;
+            }
             (ix, v.on_node_add_callbacks.clone_ref(py))
         };
         let vertex = slf.clone().unbind();
@@ -231,22 +246,31 @@ impl Vertex {
     /// Args:
     ///     from_id (str): ID of the source node
     ///     to_id (str): ID of the target node
-    ///     attr (dict, optional): Attributes for the edge
-    ///     
+    ///     attr (dict, optional): Attributes for the edge. A "type" entry
+    ///         holding a str becomes the edge's type.
+    ///     type (str, optional): Type of the edge
+    ///
     /// Returns:
-    ///     Edge: The created edge
-    ///     
+    ///     Edge: The created edge (``edge.id`` is its persistent integer id)
+    ///
     /// Raises:
     ///     ValueError: If either node doesn't exist
-    #[pyo3(signature = (from_id, to_id, attr=None))]
+    #[pyo3(signature = (from_id, to_id, attr=None, r#type=None))]
     fn add_edge(
         slf: &Bound<'_, Self>,
         from_id: &str,
         to_id: &str,
         attr: Option<Bound<'_, PyDict>>,
+        r#type: Option<String>,
     ) -> PyResult<Py<Edge>> {
         let py = slf.py();
-        let data = EdgeData::new(None, PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());
+        let (attr, from_attr) = split_reserved(attr.as_ref(), "type")?;
+        let ty = match (r#type, from_attr) {
+            (Some(t), _) => Some(t),
+            (None, Some(t)) => Some(t.extract::<String>()?),
+            (None, None) => None,
+        };
+        let data = EdgeData::new(attr, PyAttrs::default());
         let (ix, callbacks) = {
             let mut v = slf.try_borrow_mut()?;
             let lookup = |id: &str| {
@@ -255,7 +279,7 @@ impl Vertex {
                     .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Node with id '{}' not found", id)))
             };
             let (from, to) = (lookup(from_id)?, lookup(to_id)?);
-            let ix = v.graph.add_edge(from, to, data).map_err(graph_error)?;
+            let ix = v.graph.insert_edge(from, to, None, ty.as_deref(), data).map_err(graph_error)?;
             (ix, v.on_edge_add_callbacks.clone_ref(py))
         };
         let vertex = slf.clone().unbind();
@@ -282,6 +306,26 @@ impl Vertex {
             .node_ix(id)
             .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!("Node with id '{}' not found", id)))?;
         Node::handle(slf.py(), &slf.clone().unbind(), ix)
+    }
+
+    /// The edge with this persistent id (``edge.id``)
+    ///
+    /// Raises:
+    ///     KeyError: If no edge has this id
+    fn get_edge(slf: &Bound<'_, Self>, id: u64) -> PyResult<Py<Edge>> {
+        let ix = slf
+            .try_borrow()?
+            .graph
+            .edge_ix(ironweaver_core::EdgeId(id))
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!("Edge with id {} not found", id)))?;
+        Edge::handle(slf.py(), &slf.clone().unbind(), ix)
+    }
+
+    /// Nodes carrying ``label``, in graph order (uses the label index)
+    fn nodes_with_label(slf: &Bound<'_, Self>, label: &str) -> PyResult<Vec<Py<Node>>> {
+        let vertex = slf.clone().unbind();
+        let ixs = slf.try_borrow()?.graph.nodes_with_label(label);
+        ixs.into_iter().map(|ix| Node::handle(slf.py(), &vertex, ix)).collect()
     }
 
     // Serialization methods

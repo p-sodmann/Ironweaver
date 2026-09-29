@@ -1,6 +1,6 @@
 # IronWeaver
 
-> Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict and edges, `Edge`s are directed and carry an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
+> Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict, labels and edges, `Edge`s are directed and carry a type, a persistent integer id and an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
 
 Install from source: `pip install maturin && pip install -e .` — then `from ironweaver import Vertex`.
 
@@ -26,6 +26,23 @@ assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # 
 ```
 
 `add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
+
+## Labels, edge types, edge ids
+
+```python
+g["alice"].add_label("Person")                     # or add_node(id, attr, labels=[...])
+g.add_node("dora", labels=["Person", "Admin"])
+assert [n.id for n in g.nodes_with_label("Person")] == ["alice", "dora"]   # label index
+e = g["alice"].edges[0]
+assert e.type == "knows" and e.attr["type"] == "knows"   # attr {"type": ...} became the type
+e2 = g.add_edge("dora", "acme", type="works_at")
+assert g.get_edge(e2.id) == e2                     # ids: int, unique, never reused, saved
+g.remove_node("dora")
+```
+
+- **Graph fields:** labels, types and edge ids are fields on the graph. Filters, projections and algorithms match them without reading attributes.
+- **Old attribute names still work:** `"labels"` (a list of str) and `"type"` (a str) as attribute names are mapped onto the fields by `add_node` / `add_edge`, by `attr` / `attr_get` / `attr_set`, and by dict filters.
+- **Nodes have no type:** a node's `attr["type"]` stays an ordinary attribute.
 
 ## Read and change attributes
 
@@ -65,7 +82,20 @@ assert sorted(bigger.keys()) == ["acme", "bob"]
 around = g.filter(id="bob").expand(g, direction="both")   # "out" (default), "in", "both"
 ```
 
-`NodeView` offers `n.id`, `n.type`, `n.attr(key, default)`, `n.has_attr(key)`, `n.degree`, `n.in_degree`, `n.has_edge_to(id)`, `n.neighbor_ids`. `EdgeView` offers `e.type`, `e.attr(key, default)`, `e.has_attr(key)`, `e.from_node`, `e.to_node`.
+Expressions are evaluated in Rust (no Python call per node), and also work as `project(node_filter=..., edge_filter=...)`:
+
+```python
+from ironweaver import attr, label, edge_type
+assert sorted(g.filter((attr("age") >= 30) & label("Person")).keys()) == ["alice"]
+assert sorted(g.filter(attr("type").is_in(["company"])).keys()) == ["acme"]
+assert g.project(edge_filter=edge_type("works_at")).edge_count() == 2
+```
+
+The operators are `==`, `!=`, `<`, `<=`, `>`, `>=`, `.is_in(list)`, `.exists()`, `&`, `|`, `~`, and `attr("pos.lat")` reaches into nested dicts.
+- **Parenthesize comparisons:** `&` binds tighter than `>`. Leaving the parentheses out raises TypeError.
+- **Missing attributes:** every comparison is false.
+
+`NodeView` offers `n.id`, `n.type`, `n.labels`, `n.has_label(l)`, `n.attr(key, default)`, `n.has_attr(key)`, `n.degree`, `n.in_degree`, `n.has_edge_to(id)`, `n.neighbor_ids`. `EdgeView` offers `e.type` (the edge type), `e.id`, `e.attr(key, default)`, `e.has_attr(key)`, `e.from_node`, `e.to_node`.
 
 ## Paths
 

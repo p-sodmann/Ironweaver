@@ -66,14 +66,25 @@ impl<'py> Filter<'py> {
         self.wanted.is_empty() && self.callable.is_none() && self.expr.is_none()
     }
 
-    /// Whether every wanted attribute equals the value in `attrs`.
-    fn attrs_match(&self, py: Python<'py>, attrs: &PyAttrs) -> PyResult<bool> {
-        if self.wanted.is_empty() {
-            return Ok(true);
-        }
-        let Some(dict) = attrs.dict(py) else { return Ok(false) };
+    /// Whether every wanted attribute equals the value in `attrs`; the key
+    /// `reserved` ("labels" / "type") is answered by `field` instead.
+    fn attrs_match(
+        &self,
+        py: Python<'py>,
+        attrs: &PyAttrs,
+        reserved: &str,
+        field: impl Fn() -> PyResult<Option<Bound<'py, PyAny>>>,
+    ) -> PyResult<bool> {
         for (key, expected) in &self.wanted {
-            match dict.get_item(key)? {
+            let value = if key.to_str()? == reserved {
+                field()?
+            } else {
+                match attrs.dict(py) {
+                    Some(d) => d.get_item(key)?,
+                    None => None,
+                }
+            };
+            match value {
                 Some(value) if value.eq(expected)? => {}
                 _ => return Ok(false),
             }
@@ -149,7 +160,8 @@ pub(crate) fn collect(
             if nf.is_empty() {
                 return Ok(true);
             }
-            if !nf.attrs_match(py, &node.data.attr)? {
+            let labels = || crate::data::node_value(py, &vertex.graph, ix, "labels");
+            if !nf.attrs_match(py, &node.data.attr, "labels", labels)? {
                 return Ok(false);
             }
             if let Some(x) = &nf.expr {
@@ -166,7 +178,8 @@ pub(crate) fn collect(
             if ef.is_empty() {
                 return Ok(true);
             }
-            if !ef.attrs_match(py, &edge.data.attr)? {
+            let ty = || crate::data::edge_value(py, &vertex.graph, e, "type");
+            if !ef.attrs_match(py, &edge.data.attr, "type", ty)? {
                 return Ok(false);
             }
             if let Some(x) = &ef.expr {

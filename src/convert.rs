@@ -26,7 +26,7 @@ fn dict_key(key: &Bound<'_, PyAny>) -> PyResult<String> {
 }
 
 fn py_err<E: serde::ser::Error>(e: PyErr) -> E {
-    E::custom(e)
+    ironweaver_core::format::ser_error(e)
 }
 
 /// A plain Python value (dict/list/str/number/bool/None) written as ordinary

@@ -259,7 +259,49 @@ fn legacy_files_load() {
         assert_eq!(a.data.meta["note"], Value::from("m"));
         assert_eq!(a.out_edges().len(), 2);
         assert_eq!(a.in_edges().len(), 1);
+        // Version 1 conventions migrate: edge attr "type" -> the edge type
+        let ab = a.out_edges()[0];
+        assert_eq!(g.edge_type_name(ab), Some("knows"));
+        assert!(!g.edge(ab).unwrap().data.attr.contains_key("type"));
+        assert!(g.edge(ab).unwrap().data.attr["weight"].loose_eq(&Value::from(0.25)));
     }
+}
+
+#[test]
+fn format_v2_keeps_ids_labels_and_types() {
+    use ironweaver_core::EdgeId;
+    let (mut g, ix) = diamond();
+    g.add_label(ix["a"], "Start").unwrap();
+    g.add_label(ix["a"], "Node").unwrap();
+    let e = g.insert_edge(ix["e"], ix["a"], None, Some("back"), Record::default()).unwrap();
+    let back = g.edge(e).unwrap().id();
+    // Gaps: remove an edge, and the newest one's successor
+    let first = g.edge_ix(EdgeId(0)).unwrap();
+    g.remove_edge(first).unwrap();
+    let tmp = g.add_edge(ix["a"], ix["b"], Record::default()).unwrap();
+    g.remove_edge(tmp).unwrap();
+    let next = g.next_edge_id();
+    let meta = HashMap::new();
+    for loaded in [
+        format::from_json(&format::to_json(&g, &meta, false).unwrap()).unwrap().0,
+        format::from_binary(&format::to_binary(&g, &meta, false).unwrap()).unwrap().0,
+    ] {
+        assert_same(&g, &loaded);
+        let a = loaded.node_ix("a").unwrap();
+        assert_eq!(loaded.label_names(a).unwrap(), ["Start", "Node"]);
+        assert_eq!(loaded.nodes_with_label("Node"), [a]);
+        let mut want: Vec<EdgeId> = g.edges().map(|(_, e)| e.id()).collect();
+        let mut got: Vec<EdgeId> = loaded.edges().map(|(_, e)| e.id()).collect();
+        want.sort();
+        got.sort();
+        assert_eq!(got, want);
+        assert_eq!(loaded.edge_type_name(loaded.edge_ix(back).unwrap()), Some("back"));
+        assert_eq!(loaded.edge_ix(EdgeId(0)), None);
+        assert_eq!(loaded.next_edge_id(), next); // removed ids are not reused
+    }
+    let json = String::from_utf8(format::to_json(&g, &meta, false).unwrap()).unwrap();
+    assert!(json.contains(r#""version":{"String":"2.0"}"#), "{json}");
+    assert!(format::from_json(json.replace(r#"{"String":"2.0"}"#, r#"{"String":"3.0"}"#).as_bytes()).is_err());
 }
 
 #[test]

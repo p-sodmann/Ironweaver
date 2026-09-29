@@ -122,17 +122,10 @@ def parse_lgf(
             
             if graph.has_node(node_id):
                 current_node = graph.get_node(node_id)
-                # Merge new labels into existing labels
-                existing_labels = current_node.attr_get("labels") or []
-                merged = list(existing_labels)
                 for lbl in labels:
-                    if lbl not in merged:
-                        merged.append(lbl)
-                current_node.attr_set("labels", merged)
+                    current_node.add_label(lbl)
             else:
-                attrs = {"labels": labels}
-                graph.add_node(node_id, attrs)
-                current_node = graph.get_node(node_id)
+                current_node = graph.add_node(node_id, labels=labels)
             current_edge = None
             continue
 
@@ -155,7 +148,7 @@ def parse_lgf(
                 if relationship and target:  # Ensure both are non-empty
                     if not graph.has_node(target):
                         graph.add_node(target, {})
-                    current_edge = graph.add_edge(current_node.id, target, {"type": relationship})
+                    current_edge = graph.add_edge(current_node.id, target, type=relationship)
                     edge_indent = indent
                     continue
 
@@ -173,7 +166,7 @@ def parse_lgf(
                         if not graph.has_node(target):
                             graph.add_node(target, {})
                         # Create edge from target to current_node (inverse direction)
-                        current_edge = graph.add_edge(target, current_node.id, {"type": relationship})
+                        current_edge = graph.add_edge(target, current_node.id, type=relationship)
                         edge_indent = indent
                         continue
 

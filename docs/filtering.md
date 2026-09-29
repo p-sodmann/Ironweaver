@@ -65,6 +65,33 @@ sub = v.filter(p_and(
 ))
 ```
 
+## Expressions (evaluated in Rust)
+
+`attr`, `label` and `edge_type` build expressions that ironweaver evaluates in Rust, without calling Python for every node. That is much faster than a lambda on large graphs, and the same expression works as a node or edge filter in `vertex.project(...)`.
+
+```python
+from ironweaver import attr, label
+
+active = v.filter((attr("score") < 0.8) & (attr("status") == "active"))
+assert active.keys() == ["test_a"]
+
+red_unset = v.filter(attr("color").is_in(["red", "green"]) & ~attr("status").exists())
+assert red_unset.keys() == ["b"]
+
+v["c"].add_label("Blue")
+assert v.filter(label("Blue")).keys() == ["c"]
+assert v.filter(where=label("Blue")).keys() == ["c"]        # the same, as a keyword
+```
+
+- **Building blocks:**
+  - `attr("name")`: `attr("pos.lat")` reaches into nested dicts; for a name containing dots, pass a list (`attr(["a.b"])`).
+  - Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`, `.is_in([...])`, `.exists()`.
+  - `label("L")` for nodes and `edge_type("t")` for edges.
+  - Combine with `&`, `|` and `~`.
+- **Parentheses:** Python's `&` and `|` bind tighter than comparisons, so write `(attr("a") > 1) & label("L")`. Leaving the parentheses out, or using `and` / `or` / `not`, raises a `TypeError` that says so.
+- **Missing values:** a missing or `None` attribute makes every comparison false, like SQL `NULL`, so `attr("status") != "x"` is false for nodes without a status. Use `~` or `.exists()` to say otherwise.
+- **Types:** numbers compare across `int` and `float`; `<`, `<=`, `>`, `>=` hold only between two numbers, two strings or two bools.
+
 ## Filter by ID
 
 ```python

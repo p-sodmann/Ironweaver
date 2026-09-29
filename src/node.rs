@@ -9,7 +9,7 @@ use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
 use std::hash::{Hash, Hasher};
 
-use crate::data::{AttrMap, EdgeData, NodeData, PyAttrs, PyGraph, PyObjects};
+use crate::data::{node_value, AttrMap, EdgeData, NodeData, PyAttrs, PyGraph, PyObjects};
 use crate::errors::Error;
 use crate::vertex::callbacks::fire;
 use crate::vertex::subgraph::build_subgraph;
@@ -107,12 +107,18 @@ pub(crate) fn edge_predicate<'a>(
         filter.iter().flatten().map(|(k, v)| (PyString::intern(py, k), v.bind(py).clone())).collect();
     move |e, edge| {
         if !wanted.is_empty() {
-            let attr = match edge.data.attr.dict(py) {
-                Some(d) => d,
-                None => return Ok(false),
-            };
             for (key, expected) in &wanted {
-                match attr.get_item(key)? {
+                // "type" is the edge's type field
+                let value = if key.to_str()? == "type" {
+                    let v = vertex.bind(py).try_borrow().map_err(PyErr::from)?;
+                    v.graph.edge_type_name(e).map(|t| PyString::new(py, t).into_any())
+                } else {
+                    match edge.data.attr.dict(py) {
+                        Some(d) => d.get_item(key)?,
+                        None => None,
+                    }
+                };
+                match value {
                     Some(value) if value.eq(expected)? => {}
                     _ => return Ok(false),
                 }
@@ -195,18 +201,66 @@ impl Node {
         v.graph.rename_node(self.ix, id).map_err(crate::errors::graph_error)
     }
 
-    /// A copy of the attributes.
+    /// A copy of the attributes, with the node's labels under "labels" (if
+    /// it has any).
     #[getter]
     fn attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        self.read(py, |n| n.data.attr.to_dict(py))?
+        let d = self.read(py, |n| n.data.attr.to_dict(py))??;
+        let labels = self.labels(py)?;
+        if !labels.is_empty() {
+            d.set_item("labels", labels)?;
+        }
+        Ok(d)
+    }
+
+    /// The node's labels (a new list). Assigning replaces them.
+    #[getter]
+    fn labels(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        let v = self.vertex.try_borrow(py)?;
+        let labels = v.graph.label_names(self.ix).ok_or_else(stale)?;
+        Ok(labels.into_iter().map(str::to_owned).collect())
     }
 
     #[setter]
+    fn set_labels(&self, py: Python<'_>, labels: Vec<String>) -> PyResult<()> {
+        let mut v = self.vertex.try_borrow_mut(py)?;
+        let old: Vec<String> = v.graph.label_names(self.ix).ok_or_else(stale)?.into_iter().map(str::to_owned).collect();
+        for l in old.iter().filter(|l| !labels.contains(l)) {
+            v.graph.remove_label(self.ix, l).map_err(crate::errors::graph_error)?;
+        }
+        for l in &labels {
+            v.graph.add_label(self.ix, l).map_err(crate::errors::graph_error)?;
+        }
+        Ok(())
+    }
+
+    /// Add a label; returns False if the node already had it.
+    fn add_label(&self, py: Python<'_>, label: &str) -> PyResult<bool> {
+        let mut v = self.vertex.try_borrow_mut(py)?;
+        v.graph.add_label(self.ix, label).map_err(crate::errors::graph_error)
+    }
+
+    /// Remove a label; returns False if the node didn't have it.
+    fn remove_label(&self, py: Python<'_>, label: &str) -> PyResult<bool> {
+        let mut v = self.vertex.try_borrow_mut(py)?;
+        v.graph.remove_label(self.ix, label).map_err(crate::errors::graph_error)
+    }
+
+    fn has_label(&self, py: Python<'_>, label: &str) -> PyResult<bool> {
+        let v = self.vertex.try_borrow(py)?;
+        let node = v.graph.node(self.ix).ok_or_else(stale)?;
+        Ok(v.graph.symbol(label).is_some_and(|s| node.has_label(s)))
+    }
+
+    /// Replace the attributes; a list of str under "labels" sets the node's
+    /// labels (no "labels" clears them).
+    #[setter]
     fn set_attr(&self, py: Python<'_>, attr: Bound<'_, PyDict>) -> PyResult<()> {
-        let attr = PyAttrs::from_user(Some(&attr))?;
+        let (attr, labels) = crate::data::split_reserved(Some(&attr), "labels")?;
+        let labels: Vec<String> = labels.map(|l| l.extract()).transpose()?.unwrap_or_default();
         let old = self.write(py, |n| std::mem::replace(&mut n.data.attr, attr))?;
         drop(old); // after the borrow ends, in case a value's __del__ touches the graph
-        Ok(())
+        self.set_labels(py, labels)
     }
 
     /// A copy of the node's metadata.
@@ -309,10 +363,12 @@ impl Node {
         path.map(|_| Node::handle(py, &self.vertex, target)).transpose()
     }
 
-    /// Retrieve a value from ``attr`` by key.
+    /// Retrieve a value from ``attr`` by key ("labels" gives the labels).
     /// Returns ``None`` if the key does not exist.
     fn attr_get(&self, py: Python<'_>, key: &str) -> PyResult<Option<Py<PyAny>>> {
-        Ok(self.read(py, |n| n.data.attr.get(py, key))??.map(Bound::unbind))
+        let v = self.vertex.try_borrow(py)?;
+        v.graph.node(self.ix).ok_or_else(stale)?;
+        Ok(node_value(py, &v.graph, self.ix, key)?.map(Bound::unbind))
     }
 
     /// Set a value in ``attr`` under ``key``.
@@ -320,14 +376,25 @@ impl Node {
     fn attr_set(slf: &Bound<'_, Self>, key: String, value: Py<PyAny>) -> PyResult<()> {
         let py = slf.py();
         let this = slf.get();
-        let old = this.read(py, |n| n.data.attr.get(py, &key))??;
+        let old = {
+            let v = this.vertex.try_borrow(py)?;
+            v.graph.node(this.ix).ok_or_else(stale)?;
+            node_value(py, &v.graph, this.ix, &key)?
+        };
         let changed = match &old {
             Some(o) => !o.rich_compare(value.bind(py), CompareOp::Eq)?.is_truthy()?,
             None => true,
         };
-        // Fetch the (unshared) dict only now: the comparison above may have
-        // run Python code that derived a graph sharing it.
-        this.attr_dict(py)?.bind(py).set_item(&key, &value)?;
+        if key == "labels" {
+            let labels: Vec<String> = value
+                .extract(py)
+                .map_err(|_| pyo3::exceptions::PyTypeError::new_err("a node's \"labels\" must be a list of str"))?;
+            this.set_labels(py, labels)?;
+        } else {
+            // Fetch the (unshared) dict only now: the comparison above may
+            // have run Python code that derived a graph sharing it.
+            this.attr_dict(py)?.bind(py).set_item(&key, &value)?;
+        }
         let old = old.map(Bound::unbind);
 
         if changed {

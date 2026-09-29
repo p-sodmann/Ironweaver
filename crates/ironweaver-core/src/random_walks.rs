@@ -93,9 +93,15 @@ impl WalkIndex {
                 let edge = g.edge_ref(e);
                 let target = dense[edge.target().slot()];
                 let type_idx = if include_edges {
-                    let name = match edge.data.text(type_field)? {
-                        Lookup::Found(s) => s,
-                        Lookup::Missing | Lookup::Invalid => "unknown".to_string(),
+                    // "type" is the edge's type field (or, failing that, the
+                    // attribute); other names are attributes
+                    let field = (type_field == "type").then(|| edge.edge_type()).flatten();
+                    let name = match field {
+                        Some(t) => g.symbol_name(t).to_owned(),
+                        None => match edge.data.text(type_field)? {
+                            Lookup::Found(s) => s,
+                            Lookup::Missing | Lookup::Invalid => "unknown".to_string(),
+                        },
                     };
                     match type_index.get(&name) {
                         Some(&t) => t,

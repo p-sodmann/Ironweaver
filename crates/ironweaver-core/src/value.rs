@@ -27,7 +27,7 @@ pub enum Value {
 /// Serde helpers for the contents of a list / dict value: count the nesting
 /// depth (per thread) and refuse to go deeper than `MAX_DEPTH`.
 mod nested {
-    use serde::{de, ser, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::cell::Cell;
 
     use crate::format::MAX_DEPTH;
@@ -61,11 +61,11 @@ mod nested {
     }
 
     pub fn serialize<S: Serializer, T: Serialize>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-        enter(|| <S::Error as ser::Error>::custom(message()), || v.serialize(s))
+        enter(|| crate::format::ser_error::<S::Error>(message()), || v.serialize(s))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
-        enter(|| <D::Error as de::Error>::custom(message()), || T::deserialize(d))
+        enter(|| crate::format::de_error::<D::Error>(message()), || T::deserialize(d))
     }
 }
 

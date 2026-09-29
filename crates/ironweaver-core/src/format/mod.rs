@@ -1,16 +1,36 @@
 // format/mod.rs
 //
-// On-disk graph format (JSON via sonic-rs, binary via bincode).
+// On-disk graph format, version 2: JSON (sonic-rs) or binary (postcard).
 //
 // Document shape (the same for both encodings):
 //
-//   { nodes:    { id: { id, attr, meta, edge_ids, inverse_edge_ids } },
-//     edges:    { edge_id: { id, from_id, to_id, attr, meta } },
+//   { nodes:    { id: { id, labels, attr, meta, edge_ids, inverse_edge_ids } },
+//     edges:    { edge_id: { id, from_id, to_id, type, attr, meta } },
 //     meta:     { .. },
-//     metadata: { version, node_count, edge_count, timestamp } }
+//     metadata: { version: "2.0", node_count, edge_count, timestamp,
+//                 next_edge_id } }
 //
-// Every attribute value is encoded as an externally tagged `Value` (e.g.
-// `{"Float": 1.5}`); files written by older versions still load.
+// Edge ids are the `EdgeId`s in decimal; `next_edge_id` (a decimal string)
+// keeps ids of removed edges from being reused after loading. Every
+// attribute value is an externally tagged `Value` (e.g. `{"Float": 1.5}`).
+//
+// Binary files are framed:
+//
+//   header  (16 bytes): b"IRONWEAV", u16 format version, u16 flags (0),
+//                       u32 reserved (0)
+//   payload:            the document, postcard-encoded
+//   trailer (16 bytes): u64 payload length, u32 CRC32 of the payload,
+//                       b"IWND"
+//
+// (little-endian). The trailer is written last, so the payload streams, and
+// a truncated or corrupted file is detected before parsing.
+//
+// Version 1 files still load: JSON with `metadata.version` "1.x" (or none)
+// and bincode files without the header. Their edge ids (strings like
+// `edge_0_a_to_b`) are replaced by new `EdgeId`s (loaders can read the old
+// one with `LoadEdge::id`), and the old conventions are migrated: a node
+// attribute `labels` holding a list of strings becomes the node's labels, an
+// edge attribute `type` holding a string becomes the edge's type.
 //
 // Saving streams the graph straight into the serializer (`GraphWriter`),
 // asking a `Codec` to encode the payloads. Loading parses into borrowed
@@ -20,6 +40,103 @@
 
 mod load;
 mod save;
+
+/// The format version written.
+pub const FORMAT_VERSION: &str = "2.0";
+
+thread_local! {
+    // First error message raised through `ser_error` / `de_error` since the
+    // last `take_error` on this thread
+    static LAST_ERROR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn remember(msg: &str) {
+    LAST_ERROR.with(|e| {
+        let mut e = e.borrow_mut();
+        if e.is_none() {
+            *e = Some(msg.to_owned());
+        }
+    });
+}
+
+/// The remembered error message, if any; clears it.
+fn take_error() -> Option<String> {
+    LAST_ERROR.with(|e| e.borrow_mut().take())
+}
+
+/// A serde serialization error with `msg`. Use it for custom errors raised
+/// while saving: the binary encoder (postcard) drops custom messages, so
+/// `write_binary` reports the remembered one instead.
+pub fn ser_error<E: serde::ser::Error>(msg: impl std::fmt::Display) -> E {
+    let msg = msg.to_string();
+    remember(&msg);
+    E::custom(msg)
+}
+
+/// The same for errors raised while loading.
+pub fn de_error<E: serde::de::Error>(msg: impl std::fmt::Display) -> E {
+    let msg = msg.to_string();
+    remember(&msg);
+    E::custom(msg)
+}
+
+/// A postcard error, with the message of the custom error behind it.
+fn postcard_error(e: postcard::Error) -> GraphError {
+    GraphError::Format(take_error().unwrap_or_else(|| e.to_string()))
+}
+
+const MAGIC: &[u8; 8] = b"IRONWEAV";
+const END: &[u8; 4] = b"IWND";
+const HEADER_LEN: usize = 16;
+const TRAILER_LEN: usize = 16;
+
+fn binary_header() -> [u8; HEADER_LEN] {
+    let mut h = [0u8; HEADER_LEN];
+    h[..8].copy_from_slice(MAGIC);
+    h[8..10].copy_from_slice(&2u16.to_le_bytes());
+    h
+}
+
+fn binary_trailer(len: u64, crc: u32) -> [u8; TRAILER_LEN] {
+    let mut t = [0u8; TRAILER_LEN];
+    t[..8].copy_from_slice(&len.to_le_bytes());
+    t[8..12].copy_from_slice(&crc.to_le_bytes());
+    t[12..].copy_from_slice(END);
+    t
+}
+
+/// The postcard payload of a framed binary file (after checking header,
+/// length and checksum), or `None` if `bytes` is not framed (a version 1
+/// bincode file).
+fn binary_payload(bytes: &[u8]) -> Result<Option<&[u8]>, GraphError> {
+    if !bytes.starts_with(MAGIC) {
+        return Ok(None);
+    }
+    let bad = |what: &str| GraphError::Format(format!("invalid ironweaver binary file: {}", what));
+    if bytes.len() < HEADER_LEN + TRAILER_LEN {
+        return Err(bad("truncated"));
+    }
+    let version = u16::from_le_bytes([bytes[8], bytes[9]]);
+    if version != 2 {
+        return Err(GraphError::Format(format!(
+            "binary format version {} is not supported (written by a newer ironweaver?)",
+            version
+        )));
+    }
+    let (body, trailer) = bytes[HEADER_LEN..].split_at(bytes.len() - HEADER_LEN - TRAILER_LEN);
+    if &trailer[12..] != END {
+        return Err(bad("truncated (no trailer)"));
+    }
+    let len = u64::from_le_bytes(trailer[..8].try_into().expect("8 bytes"));
+    let crc = u32::from_le_bytes(trailer[8..12].try_into().expect("4 bytes"));
+    if len != body.len() as u64 {
+        return Err(bad("length mismatch (truncated?)"));
+    }
+    if crc32fast::hash(body) != crc {
+        return Err(bad("checksum mismatch (corrupted)"));
+    }
+    Ok(Some(body))
+}
 
 pub use load::{LoadAttrs, LoadEdge, LoadGraph, LoadKind, LoadNode, LoadValue, MAX_DEPTH};
 pub use save::{tagged, Codec, GraphWriter, RecordCodec};

@@ -33,12 +33,22 @@ pub fn to_networkx(vertex: &Vertex, py: Python<'_>) -> PyResult<Py<PyAny>> {
     let graph = &vertex.graph;
     let node_items = PyList::empty(py);
     let edge_items = PyList::empty(py);
-    for (_, node) in graph.nodes() {
-        node_items.append((node.id(), node.data.attr.to_dict(py)?))?;
+    // Labels and types become the attributes "labels" / "type", as networkx
+    // has no such fields.
+    for (ix, node) in graph.nodes() {
+        let attr = node.data.attr.to_dict(py)?;
+        if !node.labels().is_empty() {
+            attr.set_item("labels", graph.label_names(ix).expect("live"))?;
+        }
+        node_items.append((node.id(), attr))?;
         for &e in node.out_edges() {
             let edge = graph.edge(e).expect("listed edges are live");
             let to = graph.node(edge.target()).expect("edge targets are live");
-            edge_items.append((node.id(), to.id(), edge.data.attr.to_dict(py)?))?;
+            let attr = edge.data.attr.to_dict(py)?;
+            if let Some(t) = graph.edge_type_name(e) {
+                attr.set_item("type", t)?;
+            }
+            edge_items.append((node.id(), to.id(), attr))?;
         }
     }
 

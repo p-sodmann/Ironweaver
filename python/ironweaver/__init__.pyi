@@ -40,6 +40,11 @@ class NodeView:
         """Shortcut for ``node.attr.get("type")``. Returns None if not set."""
         ...
     @property
+    def labels(self) -> list[str]:
+        """The node's labels."""
+        ...
+    def has_label(self, label: str) -> bool: ...
+    @property
     def edges(self) -> list[Edge]:
         """Outgoing edges from this node."""
         ...
@@ -102,7 +107,11 @@ class EdgeView:
 
     @property
     def type(self) -> str | None:
-        """Shortcut for ``edge.attr.get("type")``. Returns None if not set."""
+        """The edge's type (``edge.type``), or None."""
+        ...
+    @property
+    def id(self) -> int:
+        """The edge's persistent id."""
         ...
     @property
     def from_node(self) -> Node:
@@ -170,10 +179,16 @@ class Edge:
         def cb(vertex, edge, key, new_value, old_value) -> bool: ...
     """
 
-    id: str | None
-    """Id the edge was saved under (None for edges made with add_edge)."""
+    @property
+    def id(self) -> int:
+        """Persistent id: unique in its graph, never reused, kept by save/load
+        and derived graphs (``Vertex.get_edge(id)``)."""
+        ...
+    type: str | None
+    """The edge's type (settable; None clears it)."""
     attr: dict[str, Any]
-    """Edge attributes (a copy), e.g. {"type": "knows", "since": 2020}."""
+    """Edge attributes (a copy), e.g. {"since": 2020, "type": "knows"}. The type
+    shows up under "type"; assigning a dict with a str "type" sets it."""
     watched_by: list[Any]
     meta: dict[str, Any]
     on_meta_change_callbacks: list[Callable[..., Any]]
@@ -235,8 +250,18 @@ class Node:
 
     id: str
     """Unique node identifier (assigning renames the node; ValueError if taken)."""
+    labels: list[str]
+    """The node's labels (a copy; assigning replaces them)."""
     attr: dict[str, Any]
-    """Node attributes (a copy), e.g. {"type": "Person", "age": 30}."""
+    """Node attributes (a copy), e.g. {"type": "Person", "age": 30}. Labels show
+    up under "labels"; assigning a dict with a list of str "labels" sets them."""
+    def add_label(self, label: str) -> bool:
+        """Add a label; False if the node already had it."""
+        ...
+    def remove_label(self, label: str) -> bool:
+        """Remove a label; False if the node didn't have it."""
+        ...
+    def has_label(self, label: str) -> bool: ...
     meta: dict[str, Any]
     on_edge_add_callbacks: list[Callable[..., Any]]
     @property
@@ -561,11 +586,28 @@ class Vertex:
     # Mutation
     # ------------------------------------------------------------------
 
-    def add_node(self, id: str, attr: dict[str, Any] | None = ...) -> Node:
-        """Add a node and return it. Raises ValueError if *id* already exists."""
+    def add_node(
+        self, id: str, attr: dict[str, Any] | None = ..., labels: list[str] | None = ...
+    ) -> Node:
+        """Add a node and return it. Raises ValueError if *id* already exists.
+
+        An ``attr["labels"]`` list of str becomes the node's labels.
+        """
         ...
-    def add_edge(self, from_id: str, to_id: str, attr: dict[str, Any] | None = ...) -> Edge:
-        """Add a directed edge and return it. Raises ValueError if either node is missing."""
+    def add_edge(
+        self, from_id: str, to_id: str, attr: dict[str, Any] | None = ..., type: str | None = ...
+    ) -> Edge:
+        """Add a directed edge and return it. Raises ValueError if either node is missing.
+
+        An ``attr["type"]`` str becomes the edge's type. The edge gets a new
+        persistent ``id``.
+        """
+        ...
+    def get_edge(self, id: int) -> Edge:
+        """The edge with this persistent id. Raises KeyError if there is none."""
+        ...
+    def nodes_with_label(self, label: str) -> list[Node]:
+        """Nodes carrying *label*, in graph order (label index)."""
         ...
     def remove_node(self, id: str) -> Node:
         """Remove a node and every edge attached to it.
@@ -832,10 +874,11 @@ class Vertex:
         ...
     def filter(
         self,
-        predicate: Callable[[NodeView], bool] | None = ...,
+        predicate: Callable[[NodeView], bool] | Expr | None = ...,
         *,
         ids: list[str] | None = ...,
         id: str | None = ...,
+        where: Expr | None = ...,
         **kwargs: Any,
     ) -> Vertex:
         """Return a new Vertex containing only matching nodes and their shared edges.
@@ -998,6 +1041,56 @@ def parse_lgf_file(
     ...
 
 # ---------------------------------------------------------------------------
+# Expressions — filters evaluated in Rust
+# ---------------------------------------------------------------------------
+
+@final
+class Expr:
+    """A filter over a node or an edge, evaluated in Rust. Build with
+    :func:`attr`, :func:`label`, :func:`edge_type`; combine with ``&``, ``|``,
+    ``~`` (parenthesize comparisons: ``(attr("a") > 1) & label("L")``).
+    A missing attribute makes every comparison false.
+    """
+
+    def __and__(self, other: Expr) -> Expr: ...
+    def __or__(self, other: Expr) -> Expr: ...
+    def __invert__(self) -> Expr: ...
+    def __bool__(self) -> bool:
+        """Always raises TypeError (use & | ~, not and / or / not)."""
+        ...
+    def __repr__(self) -> str: ...
+
+@final
+class Attr:
+    """An attribute reference made by :func:`attr`; comparing it gives an :class:`Expr`."""
+
+    def __eq__(self, other: object) -> Expr: ...  # type: ignore[override]
+    def __ne__(self, other: object) -> Expr: ...  # type: ignore[override]
+    def __lt__(self, other: Any) -> Expr: ...
+    def __le__(self, other: Any) -> Expr: ...
+    def __gt__(self, other: Any) -> Expr: ...
+    def __ge__(self, other: Any) -> Expr: ...
+    def is_in(self, values: list[Any]) -> Expr:
+        """True if the attribute equals one of *values*."""
+        ...
+    def exists(self) -> Expr:
+        """True if the attribute exists and is not None."""
+        ...
+
+def attr(path: str | list[str]) -> Attr:
+    """An attribute of the node / edge: ``attr("age") > 30``; ``attr("pos.lat")``
+    reaches into nested dicts, ``attr(["a.b"])`` for names containing dots."""
+    ...
+
+def label(name: str) -> Expr:
+    """Nodes carrying this label (always False for edges)."""
+    ...
+
+def edge_type(name: str) -> Expr:
+    """Edges of this type (always False for nodes)."""
+    ...
+
+# ---------------------------------------------------------------------------
 # Re-exports
 # ---------------------------------------------------------------------------
 
@@ -1010,6 +1103,11 @@ __all__ = [
     "Path",
     "Projection",
     "ObservedDictionary",
+    "Expr",
+    "Attr",
+    "attr",
+    "label",
+    "edge_type",
     "parse_lgf",
     "parse_lgf_file",
 ]

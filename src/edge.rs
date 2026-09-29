@@ -8,7 +8,7 @@ use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
 use std::hash::{Hash, Hasher};
 
-use crate::data::{EdgeData, PyAttrs, PyObjects};
+use crate::data::{edge_value, EdgeData, PyAttrs, PyObjects};
 use crate::vertex::callbacks::fire;
 use crate::{Node, Vertex};
 
@@ -71,14 +71,7 @@ impl Edge {
             Some(e) => e,
             None => return "<removed edge>".to_string(),
         };
-        let typ = edge
-            .data
-            .attr
-            .get(py, "type")
-            .ok()
-            .flatten()
-            .and_then(|t| t.extract::<String>().ok())
-            .unwrap_or_else(|| "unknown".to_string());
+        let typ = v.graph.edge_type_name(self.ix).unwrap_or("unknown");
         let id = |n| v.graph.node(n).map_or("?", |n| n.id());
         format!("{}: {} --> {}", typ, id(edge.source()), id(edge.target()))
     }
@@ -110,15 +103,26 @@ impl Edge {
         visit.call(&self.vertex)
     }
 
-    /// The id the edge was saved under (None for edges made with `add_edge`).
+    /// The edge's persistent id: unique in its graph, never reused, kept when
+    /// saving, loading and filtering (``Vertex.get_edge(id)``).
     #[getter]
-    fn id(&self, py: Python<'_>) -> PyResult<Option<String>> {
-        self.read(py, |e| e.data.id().map(str::to_owned))
+    fn id(&self, py: Python<'_>) -> PyResult<u64> {
+        self.read(py, |e| e.id().0)
+    }
+
+    /// The edge's type (a str), or None.
+    #[getter]
+    fn r#type(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        let v = self.vertex.try_borrow(py)?;
+        v.graph.edge(self.ix).ok_or_else(stale)?;
+        Ok(v.graph.edge_type_name(self.ix).map(str::to_owned))
     }
 
     #[setter]
-    fn set_id(&self, py: Python<'_>, id: Option<String>) -> PyResult<()> {
-        self.write(py, |e| e.data.extra_mut().id = id.map(String::into_boxed_str))
+    fn set_type(&self, py: Python<'_>, ty: Option<String>) -> PyResult<()> {
+        let mut v = self.vertex.try_borrow_mut(py)?;
+        v.graph.set_edge_type(self.ix, ty.as_deref()).map_err(crate::errors::graph_error)?;
+        Ok(())
     }
 
     #[getter]
@@ -134,18 +138,26 @@ impl Edge {
         Node::handle(py, &self.vertex, ix)
     }
 
-    /// A copy of the attributes.
+    /// A copy of the attributes, with the edge's type under "type" (if it
+    /// has one).
     #[getter]
     fn attr<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        self.read(py, |e| e.data.attr.to_dict(py))?
+        let d = self.read(py, |e| e.data.attr.to_dict(py))??;
+        if let Some(t) = self.r#type(py)? {
+            d.set_item("type", t)?;
+        }
+        Ok(d)
     }
 
+    /// Replace the attributes; a str under "type" sets the edge's type (no
+    /// "type" clears it).
     #[setter]
     fn set_attr(&self, py: Python<'_>, attr: Bound<'_, PyDict>) -> PyResult<()> {
-        let attr = PyAttrs::from_user(Some(&attr))?;
+        let (attr, ty) = crate::data::split_reserved(Some(&attr), "type")?;
+        let ty: Option<String> = ty.map(|t| t.extract()).transpose()?;
         let old = self.write(py, |e| std::mem::replace(&mut e.data.attr, attr))?;
         drop(old); // after the borrow ends, in case a value's __del__ touches the graph
-        Ok(())
+        self.set_type(py, ty)
     }
 
     /// A copy of the edge's metadata.
@@ -200,25 +212,41 @@ impl Edge {
         self.vertex.clone_ref(py)
     }
 
-    /// Return the edge's attributes as a dict (for JSON encoders).
+    /// Return the edge's attributes as a dict (for JSON encoders), with its
+    /// "type" if it has one.
     #[allow(non_snake_case)]
     fn toJSON<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        self.attr(py)
+        let d = self.attr(py)?;
+        if let Some(t) = self.r#type(py)? {
+            d.set_item("type", t)?;
+        }
+        Ok(d)
     }
 
-    /// Set a value in ``attr`` under ``key``.
+    /// Set a value in ``attr`` under ``key`` ("type" sets the edge's type).
     /// Fires the vertex's ``on_edge_update_callbacks`` if the value changed.
     fn attr_set(slf: &Bound<'_, Self>, key: String, value: Py<PyAny>) -> PyResult<()> {
         let py = slf.py();
         let this = slf.get();
-        let old = this.read(py, |e| e.data.attr.get(py, &key))??;
+        let old = {
+            let v = this.vertex.try_borrow(py)?;
+            v.graph.edge(this.ix).ok_or_else(stale)?;
+            edge_value(py, &v.graph, this.ix, &key)?
+        };
         let changed = match &old {
             Some(o) => !o.rich_compare(value.bind(py), CompareOp::Eq)?.is_truthy()?,
             None => true,
         };
-        // Fetch the (unshared) dict only now: the comparison above may have
-        // run Python code that derived a graph sharing it.
-        this.attr_dict(py)?.bind(py).set_item(&key, &value)?;
+        if key == "type" {
+            let ty: Option<String> = value
+                .extract(py)
+                .map_err(|_| pyo3::exceptions::PyTypeError::new_err("an edge's \"type\" must be a str or None"))?;
+            this.set_type(py, ty)?;
+        } else {
+            // Fetch the (unshared) dict only now: the comparison above may
+            // have run Python code that derived a graph sharing it.
+            this.attr_dict(py)?.bind(py).set_item(&key, &value)?;
+        }
         let old = old.map(Bound::unbind);
 
         if changed {
@@ -238,9 +266,11 @@ impl Edge {
         Ok(())
     }
 
-    /// Retrieve a value from ``attr`` by key.
+    /// Retrieve a value from ``attr`` by key ("type" gives the edge's type).
     /// Returns ``None`` if the key does not exist.
     fn attr_get(&self, py: Python<'_>, key: &str) -> PyResult<Option<Py<PyAny>>> {
-        Ok(self.read(py, |e| e.data.attr.get(py, key))??.map(Bound::unbind))
+        let v = self.vertex.try_borrow(py)?;
+        v.graph.edge(self.ix).ok_or_else(stale)?;
+        Ok(edge_value(py, &v.graph, self.ix, key)?.map(Bound::unbind))
     }
 }

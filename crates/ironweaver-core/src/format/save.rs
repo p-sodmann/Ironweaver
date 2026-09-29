@@ -4,8 +4,6 @@ use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct, Serializer};
 use serde::Serialize;
 use std::io::Write;
 
-use bincode::Options;
-
 use crate::{Attrs, Edge, Graph, GraphError, Node, Record, Value};
 
 /// Encoders for the tagged `Value` representation, for codecs that encode
@@ -70,7 +68,7 @@ pub mod tagged {
     pub fn check_depth<E: serde::ser::Error>(depth: usize) -> Result<(), E> {
         let max = crate::format::MAX_DEPTH;
         if depth > max {
-            return Err(E::custom(format_args!(
+            return Err(crate::format::ser_error(format_args!(
                 "attribute values nested more than {max} levels deep (or containing themselves) cannot be saved"
             )));
         }
@@ -179,11 +177,12 @@ impl Codec<Record, Record> for RecordCodec<'_> {
     }
 }
 
-/// Serializable view of a whole graph.
+/// Serializable view of a whole graph (format version 2).
 ///
-/// Edges are numbered in node order, then in each node's outgoing-edge
-/// order, and get the id `edge_{n}_{from}_to_{to}`. Each node's `edge_ids` /
-/// `inverse_edge_ids` list its outgoing / incoming edges in order.
+/// Edges are keyed by their `EdgeId` in decimal and written in node order,
+/// then in each node's outgoing-edge order. Each node's `edge_ids` /
+/// `inverse_edge_ids` list its outgoing / incoming edges in order. Field
+/// order matters for the binary encoding and must match `load.rs`.
 pub struct GraphWriter<'a, N, E, C> {
     graph: &'a Graph<N, E>,
     codec: &'a C,
@@ -194,13 +193,8 @@ pub struct GraphWriter<'a, N, E, C> {
 impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
     pub fn new(graph: &'a Graph<N, E>, codec: &'a C) -> Self {
         let mut ids = vec![String::new(); graph.edge_bound()];
-        let mut n = 0usize;
-        for (_, node) in graph.nodes() {
-            for &e in node.out_edges() {
-                let to = graph.node(graph.edge_ref(e).target()).expect("live edge target");
-                ids[e.slot()] = format!("edge_{}_{}_to_{}", n, node.id(), to.id());
-                n += 1;
-            }
+        for (e, edge) in graph.edges() {
+            ids[e.slot()] = edge.id().0.to_string();
         }
         GraphWriter { graph, codec, ids }
     }
@@ -211,10 +205,37 @@ impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
         bytes.map_err(|e| GraphError::Format(e.to_string()))
     }
 
-    /// Write the graph with bincode (fixed-width integer encoding).
-    pub fn write_binary<W: Write>(&self, writer: W) -> Result<(), GraphError> {
-        let options = bincode::DefaultOptions::new().with_fixint_encoding();
-        self.serialize(&mut bincode::Serializer::new(writer, options)).map_err(|e| GraphError::Format(e.to_string()))
+    /// Write the graph in the binary format: header, postcard payload,
+    /// trailer with the payload's length and CRC32 (see `format/mod.rs`).
+    pub fn write_binary<W: Write>(&self, mut writer: W) -> Result<(), GraphError> {
+        let io = |e: std::io::Error| GraphError::Format(e.to_string());
+        writer.write_all(&super::binary_header()).map_err(io)?;
+        let mut body = Checksummed { inner: writer, crc: crc32fast::Hasher::new(), len: 0 };
+        super::take_error();
+        postcard::to_io(self, &mut body).map_err(super::postcard_error)?;
+        let Checksummed { mut inner, crc, len } = body;
+        inner.write_all(&super::binary_trailer(len, crc.finalize())).map_err(io)?;
+        Ok(())
+    }
+}
+
+/// Passes writes through, counting bytes and computing their CRC32.
+struct Checksummed<W> {
+    inner: W,
+    crc: crc32fast::Hasher,
+    len: u64,
+}
+
+impl<W: Write> Write for Checksummed<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.crc.update(&buf[..n]);
+        self.len += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -253,16 +274,19 @@ struct GraphMeta<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
 struct Metadata {
     node_count: usize,
     edge_count: usize,
+    next_edge_id: u64,
 }
 
 impl Serialize for Metadata {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let timestamp = chrono::Utc::now().to_rfc3339();
-        let entries: [(&str, Value); 4] = [
-            ("version", Value::String("1.0".to_string())),
+        let entries: [(&str, Value); 5] = [
+            ("version", Value::String(super::FORMAT_VERSION.to_string())),
             ("node_count", Value::Int(self.node_count as i64)),
             ("edge_count", Value::Int(self.edge_count as i64)),
             ("timestamp", Value::String(timestamp)),
+            // A string: the full u64 range doesn't fit an Int
+            ("next_edge_id", Value::String(self.next_edge_id.to_string())),
         ];
         let mut map = s.serialize_map(Some(entries.len()))?;
         for (k, value) in &entries {
@@ -276,8 +300,11 @@ impl<N, E, C: Codec<N, E>> Serialize for NodeView<'_, N, E, C> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let (codec, ids) = (self.writer.codec, &self.writer.ids);
         let data = &self.node.data;
-        let mut st = s.serialize_struct("SerializableNode", 5)?;
+        let graph = self.writer.graph;
+        let labels: Vec<&str> = self.node.labels().iter().map(|&l| graph.symbol_name(l)).collect();
+        let mut st = s.serialize_struct("SerializableNode", 6)?;
         st.serialize_field("id", self.node.id())?;
+        st.serialize_field("labels", &labels)?;
         st.serialize_field("attr", &NodePart::<N, E, C> { codec, data, meta: false, _e: std::marker::PhantomData })?;
         st.serialize_field("meta", &NodePart::<N, E, C> { codec, data, meta: true, _e: std::marker::PhantomData })?;
         st.serialize_field("edge_ids", &IdList { ids, edges: self.node.out_edges() })?;
@@ -338,10 +365,12 @@ impl<N, E, C: Codec<N, E>> Serialize for EdgeView<'_, N, E, C> {
         let data = &self.edge.data;
         let from = graph.node(self.edge.source()).expect("live edge source");
         let to = graph.node(self.edge.target()).expect("live edge target");
-        let mut st = s.serialize_struct("SerializableEdge", 5)?;
+        let ty = self.edge.edge_type().map(|t| graph.symbol_name(t));
+        let mut st = s.serialize_struct("SerializableEdge", 6)?;
         st.serialize_field("id", self.id)?;
         st.serialize_field("from_id", from.id())?;
         st.serialize_field("to_id", to.id())?;
+        st.serialize_field("type", &ty)?;
         st.serialize_field("attr", &EdgePart::<N, E, C> { codec, data, meta: false, _n: std::marker::PhantomData })?;
         st.serialize_field("meta", &EdgePart::<N, E, C> { codec, data, meta: true, _n: std::marker::PhantomData })?;
         st.end()
@@ -378,7 +407,11 @@ impl<N, E, C: Codec<N, E>> Serialize for GraphWriter<'_, N, E, C> {
         st.serialize_field("meta", &GraphMeta(self))?;
         st.serialize_field(
             "metadata",
-            &Metadata { node_count: self.graph.node_count(), edge_count: self.graph.edge_count() },
+            &Metadata {
+                node_count: self.graph.node_count(),
+                edge_count: self.graph.edge_count(),
+                next_edge_id: self.graph.next_edge_id().0,
+            },
         )?;
         st.end()
     }

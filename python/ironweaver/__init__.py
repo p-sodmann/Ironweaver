@@ -83,6 +83,14 @@ class NodeView:
         return self._node.attr.get("type")
 
     @property
+    def labels(self) -> list:
+        """The node's labels."""
+        return self._node.labels
+
+    def has_label(self, label: str) -> bool:
+        return self._node.has_label(label)
+
+    @property
     def edges(self):
         return self._node.edges
 
@@ -193,8 +201,13 @@ class EdgeView:
 
     @property
     def type(self):
-        """Shortcut for ``edge.attr.get("type")``."""
-        return self._edge.attr.get("type")
+        """The edge's type (``edge.type``)."""
+        return self._edge.type
+
+    @property
+    def id(self) -> int:
+        """The edge's persistent id."""
+        return self._edge.id
 
     @property
     def from_node(self):

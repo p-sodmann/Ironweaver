@@ -18,7 +18,14 @@
 - The core `Graph<N, E>` owns all nodes and edges (slot arenas addressed by
   `NodeIx` / `EdgeIx`; a handle to something removed never resolves again).
   Every edge is listed once in its source's out-list and once in its
-  target's in-list.
+  target's in-list. Handles are per process; what persists is node ids,
+  `EdgeId`s (per-graph counter, never reused), node labels and edge types
+  (interned `Symbol`s, with a label -> nodes index).
+- In Python, `"labels"` (nodes) and `"type"` (edges) are reserved attribute
+  names mapped onto those fields (`data::split_reserved`, `node_value` /
+  `edge_value`): `add_node` / `add_edge`, `attr` getters and setters,
+  `attr_get` / `attr_set`, dict filters and `remove_edge` all go through
+  them. New code that reads or matches attributes by name must too.
 - The bindings store `Graph<NodeData, EdgeData>` inside the Python `Vertex`;
   attribute values are Python objects. Python `Node` / `Edge` objects are
   frozen handles `(vertex, index)`: they compare with `==`, and every getter
@@ -61,10 +68,21 @@ Below is a quick guide to notable functions and where to find them.
 
 ### Core crate (`crates/ironweaver-core/src/`)
 
-- **graph.rs** – `Graph<N, E>`, `Node`, `Edge`, `NodeIx`, `EdgeIx`:
-  `add_node`, `add_edge`, `remove_node`, `remove_edge`, `rename_node`,
-  `node_ix`, `node`, `edge`, `nodes`, `edges`, `neighbors`,
-  `induced_subgraph` (shared by filter/expand/shortest paths/traversals).
+- **graph.rs** – `Graph<N, E>`, `Node`, `Edge`, `NodeIx`, `EdgeIx`,
+  `EdgeId`, `Symbol` / `Symbols`: `add_node`, `add_edge`, `insert_edge`
+  (explicit id / type), `remove_node`, `remove_edge`, `rename_node`,
+  `node_ix`, `edge_ix` (by `EdgeId`; `EdgeIndex`: dense table + sparse
+  map), `next_edge_id` / `reserve_edge_ids`, `add_label` / `remove_label` /
+  `nodes_with_label`, `set_edge_type` / `edge_type_name`, `edges_between`,
+  `nodes`, `edges`, `neighbors`, `induced_subgraph` (shared by
+  filter/expand/shortest paths/traversals; keeps ids, labels, types).
+- **ops.rs** – `Op<N, E>` (changes as data, nodes by id, edges by
+  `EdgeId`; serde), `Graph::apply` (checks first, returns the undo ops),
+  `apply_all` (atomic), `AttrPatch` (per-attribute ops; `Record` has it).
+- **expr.rs** – `Expr` / `CmpOp`: filter expressions (compare / in / exists
+  on attribute paths, `Label`, `Type`, and / or / not), `matches_node` /
+  `matches_edge`, read through `Attributes::with_value`. Missing values make
+  comparisons false.
 - **error.rs** – `GraphError` (its `Display` text is the user-facing message).
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
@@ -110,8 +128,16 @@ Below is a quick guide to notable functions and where to find them.
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `WalkPlan::items`,
   `random_walks` convenience.
-- **format/** – on-disk format (JSON via sonic-rs, binary via bincode);
-  legacy files in `tests/data/` must keep loading.
+- **format/** – on-disk format version 2 (JSON via sonic-rs; binary:
+  header + postcard payload + trailer with length and CRC32; layout in the
+  comment at the top of `mod.rs`). Version 1 files (JSON "1.x", headerless
+  bincode) keep loading: `load.rs` `V1*` structs, `migrate_v1` (attr
+  "labels" / "type" -> fields), new edge ids (Python keeps the old one in
+  `meta["legacy_id"]`); `tests/data/legacy_*` (v1) and
+  `tests/data/v2_*` (v2 golden files) must keep loading. The
+  binary field order is positional: save.rs and load.rs structs must match.
+  postcard drops custom error messages, so raise them with `ser_error` /
+  `de_error`.
   - `save.rs`: `GraphWriter` streams a graph into the serializer, payloads
     encoded by a `Codec` (`RecordCodec` for `Record`); `tagged` encoders.
   - `load.rs`: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
@@ -127,15 +153,21 @@ Below is a quick guide to notable functions and where to find them.
 
 - **lib.rs** – exposes the Python module and re-exports the classes.
 - **data.rs** – `NodeData` / `EdgeData` payloads (Python attribute values),
-  `PyGraph`, their `Attributes` impls.
+  `PyGraph`, their `Attributes` impls; reserved-name helpers
+  `split_reserved`, `node_value`, `edge_value`.
 - **errors.rs** – `graph_error` (GraphError → Python exception), `Error`.
 - **convert.rs** – `PyCodec` (Python values → tagged values while saving),
   `to_python` / `to_attr_map` (loaded values → Python, string sharing),
-  `dict_to_json`.
-- **node.rs** – `Node` handle: getters/setters, `_traverse` (wrapped as
-  `traverse` in `__init__.py`), `bfs`, `bfs_search`, `attr_get`, `attr_set`,
+  `dict_to_json`, `to_value` (Python → core `Value`, for expressions).
+- **expr.rs** – `Expr` / `Attr` classes and `attr` / `label` / `edge_type`
+  (build core `Expr`s; guards against `and` / `or` / chained comparisons and
+  missing parentheses; nesting capped, `&` / `|` chains flattened).
+- **node.rs** – `Node` handle: getters/setters, `labels` / `add_label` /
+  `remove_label` / `has_label`, `_traverse` (wrapped as `traverse` in
+  `__init__.py`), `bfs`, `bfs_search`, `attr_get`, `attr_set`,
   `attr_list_append`; `edge_predicate` (dict / callable edge filters).
-- **edge.rs** – `Edge` handle: getters/setters, `attr_get`, `attr_set`, `toJSON`.
+- **edge.rs** – `Edge` handle: `id` (the `EdgeId`), `type`, getters/setters,
+  `attr_get`, `attr_set`, `toJSON`.
 - **path.rs** – `Path`. **observed_dictionary.rs** – `ObservedDictionary`.
 - **projection.rs** – the `Projection` class (queries and analytics
   methods release the GIL),
@@ -146,7 +178,8 @@ Below is a quick guide to notable functions and where to find them.
 - **gc_pause.rs** – `GcPause` guard that pauses Python's cyclic GC during bulk
   object creation.
 - **vertex/core.rs** – the `Vertex` class: constructors (`new`, `from_nodes`,
-  `from_nodes_with_path`), `add_node`, `add_edge`, `get_node`, `has_node`,
+  `from_nodes_with_path`), `add_node` (`labels=`), `add_edge` (`type=`),
+  `get_node`, `get_edge`, `nodes_with_label`, `has_node`,
   `node_count`, `nodes`, GC support (`__traverse__` / `__clear__`), and thin
   wrappers around the modules below.
 - **vertex/manipulation.rs** – `remove_node`, `remove_edge`.

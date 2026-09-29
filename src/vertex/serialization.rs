@@ -62,6 +62,7 @@ pub fn save_to_binary_f16(vertex: &Vertex, py: Python<'_>, file_path: String) ->
 fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
     let _gc = GcPause::new(py);
     let strings: RefCell<Strings<'_>> = RefCell::new(Strings::new());
+    let legacy = doc.version() < 2;
     let graph = doc.build(
         |n| -> Result<NodeData, Error> {
             let mut s = strings.borrow_mut();
@@ -69,7 +70,12 @@ fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
         },
         |e| -> Result<EdgeData, Error> {
             let mut s = strings.borrow_mut();
-            Ok(EdgeData::new(Some(e.id().into()), to_attrs(py, e.attr(), &mut s)?, to_attrs(py, e.meta(), &mut s)?))
+            let mut meta = to_attrs(py, e.meta(), &mut s)?;
+            if legacy {
+                // Version 1 files had string edge ids; keep them findable
+                meta.unique(py)?.bind(py).set_item("legacy_id", e.id())?;
+            }
+            Ok(EdgeData::new(to_attrs(py, e.attr(), &mut s)?, meta))
         },
     );
     let graph = graph?;

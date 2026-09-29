@@ -50,25 +50,72 @@ fn loading_too_deep_json_fails() {
     assert!(err.to_string().contains("nested more than"), "{err}");
 }
 
+/// Re-frame a binary file around a modified payload (fresh length and CRC).
+fn reframe(file: &[u8], payload: &[u8]) -> Vec<u8> {
+    let mut out = file[..16].to_vec();
+    out.extend_from_slice(payload);
+    out.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    out.extend_from_slice(&crc32fast::hash(payload).to_le_bytes());
+    out.extend_from_slice(b"IWND");
+    out
+}
+
 #[test]
 fn loading_crafted_deep_binary_fails_without_overflowing_the_stack() {
-    // Binary layout of a one-item list: variant tag 6 (u32), length 1 (u64)
-    let mut level = 6u32.to_le_bytes().to_vec();
-    level.extend(1u64.to_le_bytes());
-
-    let bytes = format::to_binary(&nested(2), &Attrs::new(), false).unwrap();
+    // Version 2 (postcard): a one-item list is variant 6 then length 1,
+    // both one-byte varints
+    let level = [6u8, 1];
+    let file = format::to_binary(&nested(2), &Attrs::new(), false).unwrap();
+    let payload = &file[16..file.len() - 16];
     // The existing list header sits right before the string's tag and length
-    let at = find(&bytes, b"MARK") - 12 - level.len();
-    assert_eq!(bytes[at..at + level.len()], level[..]);
+    let at = find(payload, b"MARK") - 2 - level.len();
+    assert_eq!(payload[at..at + 2], level);
     for extra in [MAX_DEPTH - 1, 100_000] {
-        let mut crafted = bytes[..at].to_vec();
+        let mut crafted = payload[..at].to_vec();
         for _ in 0..extra {
-            crafted.extend(&level);
+            crafted.extend(level);
         }
-        crafted.extend(&bytes[at..]);
-        let err = format::from_binary(&crafted).err().unwrap();
+        crafted.extend(&payload[at..]);
+        let err = format::from_binary(&reframe(&file, &crafted)).err().unwrap();
         assert!(err.to_string().contains("nested more than"), "{err}");
     }
+
+    // Version 1 (bincode): wrap the 3-item list at byte 171 of the legacy
+    // file in many one-item lists (variant 6 as u32, length 1 as u64)
+    let legacy = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/legacy_graph.bin")).unwrap();
+    assert_eq!(legacy[171..175], 6u32.to_le_bytes());
+    let mut v1_level = 6u32.to_le_bytes().to_vec();
+    v1_level.extend(1u64.to_le_bytes());
+    let mut crafted = legacy[..171].to_vec();
+    for _ in 0..100_000 {
+        crafted.extend(&v1_level);
+    }
+    crafted.extend(&legacy[171..]);
+    let err = format::from_binary(&crafted).err().unwrap();
+    assert!(err.to_string().contains("nested more than"), "{err}");
+}
+
+#[test]
+fn damaged_binary_files_are_rejected() {
+    let file = format::to_binary(&nested(3), &Attrs::new(), false).unwrap();
+    format::from_binary(&file).unwrap();
+    let check = |bytes: &[u8], want: &str| {
+        let err = format::from_binary(bytes).err().unwrap().to_string();
+        assert!(err.contains(want), "{want}: {err}");
+    };
+    check(&file[..file.len() - 1], "truncated");
+    check(&file[..20], "truncated");
+    let mut short = file[..30].to_vec(); // payload cut, trailer kept
+    short.extend(&file[file.len() - 16..]);
+    check(&short, "length mismatch");
+    let mut flipped = file.clone();
+    flipped[20] ^= 1;
+    check(&flipped, "checksum mismatch");
+    let mut newer = file.clone();
+    newer[8] = 3;
+    check(&newer, "version 3 is not supported");
+    // A valid frame around garbage: a parse error, not a panic
+    check(&reframe(&file, &[0xff; 40]), "");
 }
 
 #[test]
