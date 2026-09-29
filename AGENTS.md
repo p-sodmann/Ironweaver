@@ -47,6 +47,12 @@ cargo test -p ironweaver-core
 (use a ```text fence for signatures or sketches). When you change the public
 API, update `llms.txt`, the `.pyi` stubs and the docs together.
 
+CI (`.github/workflows/ci.yml`) also runs `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo audit`
+(ignored advisories, with reasons, are in `.cargo/audit.toml`), a check that
+the core does not depend on pyo3, and pytest on Python 3.9-3.13 (Linux) plus
+macOS and Windows. Run fmt and clippy before pushing.
+
 ## Function Reference
 Below is a quick guide to notable functions and where to find them.
 

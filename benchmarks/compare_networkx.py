@@ -39,6 +39,14 @@ DEFAULT_OUTPUT = os.path.join(
 )
 EDGE_TYPES = ("knows", "likes", "follows")
 
+# Name of the edge list in node-link JSON: `edges=` since networkx 3.4,
+# `link=` before (3.2 is the last release for Python 3.9)
+try:
+    nx.node_link_data(nx.Graph(), edges="edges")
+    NODE_LINK = {"edges": "edges"}
+except TypeError:
+    NODE_LINK = {"link": "edges"}
+
 
 @dataclass
 class Result:
@@ -334,11 +342,11 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
 
     # Serialization --------------------------------------------------------
     t_iw, s_iw = best_of(lambda: iw.save_to_json(), repeats)
-    t_nx, s_nx = best_of(lambda: json.dumps(nx.node_link_data(g, edges="edges")), repeats)
+    t_nx, s_nx = best_of(lambda: json.dumps(nx.node_link_data(g, **NODE_LINK)), repeats)
     add(Result("Serialize to JSON string", "`save_to_json()` vs `node_link_data` + `json.dumps`", t_iw, t_nx))
 
     t_iw, r_iw = best_of(lambda: Vertex.load_from_json(s_iw), repeats)
-    t_nx, r_nx = best_of(lambda: nx.node_link_graph(json.loads(s_nx), edges="edges"), repeats)
+    t_nx, r_nx = best_of(lambda: nx.node_link_graph(json.loads(s_nx), **NODE_LINK), repeats)
     assert r_iw.node_count() == r_nx.number_of_nodes()
     add(Result("Load from JSON string", "`load_from_json()` vs `json.loads` + `node_link_graph`", t_iw, t_nx))
 
