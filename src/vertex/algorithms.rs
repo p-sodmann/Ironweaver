@@ -14,6 +14,7 @@ use super::subgraph::build_subgraph;
 use super::Vertex;
 use crate::data::AttrMap;
 use crate::errors::{graph_error, Error};
+use crate::expr::PyExpr;
 use crate::gc_pause::GcPause;
 
 /// `Vertex.expand`: the source's nodes within `depth` edges of this
@@ -31,13 +32,29 @@ pub fn expand(
     build_subgraph(py, source, found, PyDict::new(py).unbind(), false)
 }
 
-/// `Vertex.filter(ids=..., id=..., **attr)`: the selected nodes and the edges
-/// between them. The result shares `meta` and the callback lists.
+/// `Vertex.filter(ids=..., id=..., where=Expr, **attr)`: the selected nodes
+/// and the edges between them. The result shares `meta` and the callback
+/// lists.
 pub fn filter(vertex: &Vertex, py: Python<'_>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Py<Vertex>> {
-    let no_criteria = || PyValueError::new_err("Must specify ids, id, or attribute filters");
+    let no_criteria = || PyValueError::new_err("Must specify ids, id, where, or attribute filters");
     let mut filters: AttrMap = kwargs.ok_or_else(no_criteria)?.extract()?;
 
-    let keep = if let Some(ids) = filters.remove("ids") {
+    let keep = if let Some(expr) = filters.remove("where") {
+        let expr = expr
+            .bind(py)
+            .cast::<PyExpr>()
+            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("where= takes an Expr (attr(...) > 1, label(...))"))?
+            .get()
+            .inner
+            .clone();
+        let mut matches = Vec::new();
+        for (ix, _) in vertex.graph.nodes() {
+            if expr.matches_node(&vertex.graph, ix)? {
+                matches.push(ix);
+            }
+        }
+        matches
+    } else if let Some(ids) = filters.remove("ids") {
         by_ids(vertex, ids.extract(py)?)?
     } else if let Some(id) = filters.remove("id") {
         by_ids(vertex, vec![id.extract(py)?])?

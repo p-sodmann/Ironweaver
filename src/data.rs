@@ -295,8 +295,19 @@ fn text(attr: &PyAttrs, key: &str) -> PyResult<Lookup<String>> {
     })
 }
 
+fn with_value<R>(attr: &PyAttrs, path: &[String], f: impl FnOnce(Option<&ironweaver_core::Value>) -> R) -> PyResult<R> {
+    Python::attach(|py| match lookup(py, attr, path)? {
+        None => Ok(f(None)),
+        Some(v) => Ok(f(Some(&crate::convert::to_value(&v)?))),
+    })
+}
+
 impl Attributes for NodeData {
     type Error = PyErr;
+
+    fn with_value<R>(&self, path: &[String], f: impl FnOnce(Option<&ironweaver_core::Value>) -> R) -> PyResult<R> {
+        with_value(&self.attr, path, f)
+    }
 
     fn number(&self, path: &[String]) -> PyResult<Lookup<f64>> {
         number(&self.attr, path)
@@ -311,6 +322,10 @@ impl Attributes for NodeData {
 
 impl Attributes for EdgeData {
     type Error = PyErr;
+
+    fn with_value<R>(&self, path: &[String], f: impl FnOnce(Option<&ironweaver_core::Value>) -> R) -> PyResult<R> {
+        with_value(&self.attr, path, f)
+    }
 
     fn number(&self, path: &[String]) -> PyResult<Lookup<f64>> {
         number(&self.attr, path)

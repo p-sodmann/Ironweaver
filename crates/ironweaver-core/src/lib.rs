@@ -37,6 +37,7 @@ pub mod algo;
 pub mod batch;
 pub mod direction;
 pub mod error;
+pub mod expr;
 pub mod format;
 pub mod graph;
 pub mod ops;
@@ -49,6 +50,7 @@ pub mod value;
 
 pub use direction::Direction;
 pub use error::GraphError;
+pub use expr::{CmpOp, Expr};
 pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
 pub use ops::{AttrPatch, Op};
 pub use projection::Projection;

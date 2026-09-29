@@ -231,6 +231,48 @@ impl Codec<NodeData, EdgeData> for PyCodec<'_> {
     }
 }
 
+/// A Python value as a core `Value` (for filter expressions): None, bool,
+/// int (float if out of i64 range), float, str, list / tuple, dict (keys as
+/// strings); anything else as `str(value)`. Fails beyond `MAX_DEPTH` levels.
+pub fn to_value(v: &Bound<'_, PyAny>) -> PyResult<ironweaver_core::Value> {
+    fn go(v: &Bound<'_, PyAny>, depth: usize) -> PyResult<ironweaver_core::Value> {
+        use ironweaver_core::Value;
+        if depth > ironweaver_core::format::MAX_DEPTH {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "values nested more than {} levels deep",
+                ironweaver_core::format::MAX_DEPTH
+            )));
+        }
+        Ok(if v.is_none() {
+            Value::None
+        } else if let Ok(b) = v.cast::<PyBool>() {
+            Value::Bool(b.is_true())
+        } else if let Ok(i) = v.cast::<PyInt>() {
+            match i.extract::<i64>() {
+                Ok(n) => Value::Int(n),
+                Err(_) => Value::Float(i.extract::<f64>()?),
+            }
+        } else if let Ok(f) = v.cast::<PyFloat>() {
+            Value::Float(f.value())
+        } else if let Ok(s) = v.cast::<PyString>() {
+            Value::String(s.to_str()?.to_owned())
+        } else if let Ok(d) = v.cast::<PyDict>() {
+            let mut out = HashMap::with_capacity(d.len());
+            for (k, x) in d.iter() {
+                out.insert(dict_key(&k)?, go(&x, depth + 1)?);
+            }
+            Value::Dict(out)
+        } else if let Ok(l) = v.cast::<PyList>() {
+            Value::List(l.iter().map(|x| go(&x, depth + 1)).collect::<PyResult<_>>()?)
+        } else if let Ok(t) = v.cast::<PyTuple>() {
+            Value::List(t.iter().map(|x| go(&x, depth + 1)).collect::<PyResult<_>>()?)
+        } else {
+            Value::String(v.str()?.to_str()?.to_owned())
+        })
+    }
+    go(v, 1)
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------

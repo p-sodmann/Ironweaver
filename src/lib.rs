@@ -9,6 +9,7 @@ mod convert;
 mod data;
 mod edge;
 mod errors;
+mod expr;
 mod gc_pause;
 mod node;
 mod observed_dictionary;
@@ -34,5 +35,10 @@ fn _ironweaver(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Path>()?;
     m.add_class::<Projection>()?;
     m.add_class::<Vertex>()?;
+    m.add_class::<expr::PyExpr>()?;
+    m.add_class::<expr::PyAttr>()?;
+    m.add_function(wrap_pyfunction!(expr::attr, m)?)?;
+    m.add_function(wrap_pyfunction!(expr::label, m)?)?;
+    m.add_function(wrap_pyfunction!(expr::edge_type, m)?)?;
     Ok(())
 }

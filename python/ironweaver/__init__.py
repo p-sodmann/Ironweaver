@@ -30,7 +30,7 @@ copies; use ``node.attr_set(key, value)`` to change an attribute. See
 # Import the Rust extension module classes
 from typing import Callable, Iterable
 
-from ._ironweaver import Vertex, Node, Edge, Path, Projection, ObservedDictionary
+from ._ironweaver import Vertex, Node, Edge, Path, Projection, ObservedDictionary, Expr, Attr, attr, label, edge_type
 
 # Import the Python LGF parser
 from .lgf_parser import parse_lgf, parse_lgf_file
@@ -263,9 +263,10 @@ def _filter(self, predicate=None, **kwargs):
 
     Parameters
     ----------
-    predicate : Callable[[NodeView], bool], optional
+    predicate : Callable[[NodeView], bool] or Expr, optional
         A callable (typically a lambda) that receives a :class:`NodeView` and
-        returns ``True`` for nodes that should be kept.  The ``NodeView``
+        returns ``True`` for nodes that should be kept, or an :class:`Expr`
+        (``(attr("score") < 0.8) & label("Person")``) evaluated in Rust.  The ``NodeView``
         exposes a clean API::
 
             n.id                    # node id (str)
@@ -317,6 +318,10 @@ def _filter(self, predicate=None, **kwargs):
             "Cannot mix filtering modes: provide either a predicate function "
             "or keyword arguments, not both"
         )
+
+    if isinstance(predicate, Expr):
+        # Evaluated in Rust: (attr("age") > 30) & label("Person")
+        return self._original_filter(where=predicate)
 
     if predicate is not None:
         # Predicate-based filtering — wrap each node in a NodeView
@@ -527,6 +532,11 @@ __all__ = [
     "Path",
     "Projection",
     "ObservedDictionary",
+    "Expr",
+    "Attr",
+    "attr",
+    "label",
+    "edge_type",
     "parse_lgf",
     "parse_lgf_file",
 ]

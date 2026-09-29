@@ -21,20 +21,23 @@ use std::collections::{HashMap, HashSet};
 
 use crate::data::PyAttrs;
 use crate::errors::{graph_error, Error};
+use crate::expr::PyExpr;
 use crate::gc_pause::GcPause;
 use crate::{Edge, Node, Vertex};
 
-/// A node or edge filter: attribute equality (a dict) and/or a callable
-/// taking the `Node` / `Edge` (Python's `project` wrapper passes views).
+/// A node or edge filter: attribute equality (a dict), an `Expr`
+/// (evaluated in Rust) or a callable taking the `Node` / `Edge` (Python's
+/// `project` wrapper passes views).
 pub(crate) struct Filter<'py> {
     wanted: Vec<(Bound<'py, PyString>, Bound<'py, PyAny>)>,
     callable: Option<Bound<'py, PyAny>>,
+    expr: Option<ironweaver_core::Expr>,
 }
 
 impl<'py> Filter<'py> {
-    /// `None`, a dict (attribute equality) or a callable.
+    /// `None`, a dict (attribute equality), an `Expr` or a callable.
     pub(crate) fn parse(py: Python<'py>, spec: Option<&Bound<'py, PyAny>>, what: &str) -> PyResult<Self> {
-        let mut filter = Filter { wanted: Vec::new(), callable: None };
+        let mut filter = Filter { wanted: Vec::new(), callable: None, expr: None };
         match spec {
             None => {}
             Some(s) if s.is_none() => {}
@@ -44,11 +47,13 @@ impl<'py> Filter<'py> {
                         let key: String = k.extract()?;
                         filter.wanted.push((PyString::intern(py, &key), v));
                     }
+                } else if let Ok(e) = s.cast::<PyExpr>() {
+                    filter.expr = Some(e.get().inner.clone());
                 } else if s.is_callable() {
                     filter.callable = Some(s.clone());
                 } else {
                     return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                        "{} must be a dict of attribute values or a callable",
+                        "{} must be a dict of attribute values, an Expr or a callable",
                         what
                     )));
                 }
@@ -58,7 +63,7 @@ impl<'py> Filter<'py> {
     }
 
     fn is_empty(&self) -> bool {
-        self.wanted.is_empty() && self.callable.is_none()
+        self.wanted.is_empty() && self.callable.is_none() && self.expr.is_none()
     }
 
     /// Whether every wanted attribute equals the value in `attrs`.
@@ -147,6 +152,11 @@ pub(crate) fn collect(
             if !nf.attrs_match(py, &node.data.attr)? {
                 return Ok(false);
             }
+            if let Some(x) = &nf.expr {
+                if !x.matches_node(&vertex.graph, ix)? {
+                    return Ok(false);
+                }
+            }
             Ok(match handle {
                 Some(h) if nf.callable.is_some() => nf.call(Node::handle(py, h, ix)?.into_any())?,
                 _ => true,
@@ -158,6 +168,11 @@ pub(crate) fn collect(
             }
             if !ef.attrs_match(py, &edge.data.attr)? {
                 return Ok(false);
+            }
+            if let Some(x) = &ef.expr {
+                if !x.matches_edge(&vertex.graph, e)? {
+                    return Ok(false);
+                }
             }
             Ok(match handle {
                 Some(h) if ef.callable.is_some() => ef.call(Edge::handle(py, h, e)?.into_any())?,

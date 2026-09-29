@@ -90,6 +90,32 @@ impl Value {
     pub fn is_none(&self) -> bool {
         matches!(self, Value::None)
     }
+
+    /// Equality across numeric types (`Int(1)` equals `Float(1.0)`);
+    /// otherwise the same variant with equal contents.
+    pub fn loose_eq(&self, other: &Value) -> bool {
+        match (self.as_f64(), other.as_f64()) {
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) | (None, Some(_)) => false,
+            (None, None) => match (self, other) {
+                (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.loose_eq(y)),
+                (Value::Dict(a), Value::Dict(b)) => {
+                    a.len() == b.len() && a.iter().all(|(k, x)| b.get(k).is_some_and(|y| x.loose_eq(y)))
+                }
+                _ => self == other,
+            },
+        }
+    }
+
+    /// Order of two numbers, two strings or two bools; `None` for other
+    /// pairs (and NaN).
+    pub fn loose_cmp(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
+            (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
+            _ => self.as_f64()?.partial_cmp(&other.as_f64()?),
+        }
+    }
 }
 
 impl From<&str> for Value {

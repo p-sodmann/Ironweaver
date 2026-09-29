@@ -33,6 +33,10 @@ pub trait Attributes {
     fn numbers(&self, path: &[String]) -> Result<Lookup<Vec<f64>>, Self::Error>;
 
     fn text(&self, key: &str) -> Result<Lookup<String>, Self::Error>;
+
+    /// Call `f` with the value at `path` (`None` if missing or none), for
+    /// filter expressions. Payloads that don't store `Value`s convert.
+    fn with_value<R>(&self, path: &[String], f: impl FnOnce(Option<&Value>) -> R) -> Result<R, Self::Error>;
 }
 
 /// Attribute map of a [`Record`].
@@ -71,6 +75,10 @@ impl Record {
 
 impl Attributes for Record {
     type Error = GraphError;
+
+    fn with_value<R>(&self, path: &[String], f: impl FnOnce(Option<&Value>) -> R) -> Result<R, GraphError> {
+        Ok(f(self.at(path)))
+    }
 
     fn number(&self, path: &[String]) -> Result<Lookup<f64>, GraphError> {
         Ok(match self.at(path) {
