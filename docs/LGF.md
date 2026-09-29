@@ -271,7 +271,7 @@ for edge in alice.edges:
     print(f"Alice {edge.attr['type']} {edge.to_node.id}")
 
 # Use graph algorithms
-shortest_path = graph.shortest_path_bfs("alice", "charlie")
+shortest_path = graph.shortest_path("alice", "charlie", method="bfs")
 print(f"Path from Alice to Charlie: {list(shortest_path.keys())}")
 
 # Convert to NetworkX for visualization

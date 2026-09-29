@@ -31,6 +31,7 @@ copies; use ``node.attr_set(key, value)`` to change an attribute. See
 from typing import Callable, Iterable
 
 from ._ironweaver import Vertex, Node, Edge, Path, Projection, ObservedDictionary, Expr, Attr, attr, label, edge_type
+from ._ironweaver import __version__
 
 # Import the Python LGF parser
 from .lgf_parser import parse_lgf, parse_lgf_file

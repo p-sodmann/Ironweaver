@@ -229,13 +229,13 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
                "both use bidirectional BFS"))
 
     # Paths ----------------------------------------------------------------
-    t_iw, r_iw = best_of(lambda: iw.shortest_path_bfs(src, dst), repeats)
+    t_iw, r_iw = best_of(lambda: iw.shortest_path(src, dst, method="bfs"), repeats)
     t_nx, r_nx = best_of(lambda: nx.shortest_path(g, src, dst), repeats)
     assert len(r_iw.meta["nodelist"]) == len(r_nx)
     add(Result("Shortest path (unweighted)", "BFS shortest path", t_iw, t_nx,
                f"{len(r_nx) - 1} hops; both use bidirectional BFS"))
 
-    t_iw, r_iw = best_of(lambda: iw.shortest_path_dijkstra(src, dst, weight="weight"), repeats)
+    t_iw, r_iw = best_of(lambda: iw.shortest_path(src, dst, method="dijkstra", weight="weight"), repeats)
     t_nx, r_nx = best_of(lambda: nx.dijkstra_path(g, src, dst, weight="weight"), repeats)
     assert abs(r_iw.meta["cost"] - path_cost(g, r_nx)) < 1e-6
     add(Result("Shortest path (Dijkstra)", "weighted by `weight` attribute", t_iw, t_nx,
@@ -248,7 +248,7 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     t_nx, r_nx = best_of(lambda: [nx.dijkstra_path_length(g, s, t, weight="weight")
                                   if nx.has_path(g, s, t) else None for s, t in pairs], repeats)
     assert all((a is None and b is None) or abs(a["cost"] - b) < 1e-6 for a, b in zip(r_iw, r_nx))
-    t_loop, _ = best_of(lambda: [iw.shortest_path_dijkstra(s, t, weight="weight") if r else None
+    t_loop, _ = best_of(lambda: [iw.shortest_path(s, t, method="dijkstra", weight="weight") if r else None
                                  for (s, t), r in zip(pairs, r_iw)], repeats)
     add(Result("Batch shortest paths", f"{len(pairs)} Dijkstra pairs in one `shortest_paths` call", t_iw, t_nx,
                f"one `shortest_path` call per pair: {fmt_time(t_loop)}"))

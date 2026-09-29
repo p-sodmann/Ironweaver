@@ -40,5 +40,6 @@ fn _ironweaver(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expr::attr, m)?)?;
     m.add_function(wrap_pyfunction!(expr::label, m)?)?;
     m.add_function(wrap_pyfunction!(expr::edge_type, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

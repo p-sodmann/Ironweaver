@@ -114,7 +114,7 @@ path.meta["cost"]                                            # 2.1
 path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth=10)
 ```
 
-`shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands for `method="bfs"` and `method="dijkstra"`.
+The older `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` still work but are deprecated (they emit a `DeprecationWarning`): use `method="bfs"` and `method="dijkstra"`.
 
 #### A* — `method="astar"`
 

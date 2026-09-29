@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
+from typing_extensions import deprecated
+
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
 # ---------------------------------------------------------------------------
@@ -128,10 +130,6 @@ class EdgeView:
     @property
     def edge(self) -> Edge:
         """The underlying :class:`Edge` object."""
-        ...
-    @property
-    def id(self) -> str | None:
-        """The edge's optional identifier."""
         ...
 
     def attr(self, key: str, default: Any = ...) -> Any:
@@ -971,6 +969,7 @@ class Vertex:
         *max_cost* (only *targets*, if given), computed in parallel like
         ``shortest_paths``."""
         ...
+    @deprecated("Use shortest_path(root, target, method=\"bfs\")")
     def shortest_path_bfs(
         self,
         root_node_id: str,
@@ -978,7 +977,7 @@ class Vertex:
         max_depth: int | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
-        """Shorthand for ``shortest_path(..., method="bfs")``: the path with the fewest edges.
+        """Deprecated: use ``shortest_path(..., method="bfs")``. The path with the fewest edges.
 
         The ordered sequence of node IDs is in ``result.meta["nodelist"]``.
         *direction* selects which edges are followed: ``"out"`` (default),
@@ -988,6 +987,7 @@ class Vertex:
         Raises ValueError if either node is missing or the target is unreachable.
         """
         ...
+    @deprecated("Use shortest_path(root, target, method=\"dijkstra\")")
     def shortest_path_dijkstra(
         self,
         root_node_id: str,
@@ -997,7 +997,7 @@ class Vertex:
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
     ) -> Vertex:
-        """Shorthand for ``shortest_path(..., method="dijkstra")``: the cheapest path.
+        """Deprecated: use ``shortest_path(..., method="dijkstra")``. The cheapest path.
 
         Edge costs are read from the *weight* attribute (default ``"weight"``);
         edges without it cost *default_weight* (default 1.0). Paths costing
@@ -1009,7 +1009,7 @@ class Vertex:
 
         Example::
 
-            path = graph.shortest_path_dijkstra("a", "z", weight="distance")
+            path = graph.shortest_path("a", "z", method="dijkstra", weight="distance")
             path.meta["nodelist"], path.meta["cost"]
         """
         ...

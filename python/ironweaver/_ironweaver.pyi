@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
+from typing_extensions import deprecated
+
 @final
 class ObservedDictionary:
     """A dict-like container that fires per-key callbacks on value changes."""
@@ -390,6 +392,7 @@ class Vertex:
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
     ) -> dict[str, dict[str, float]]: ...
+    @deprecated("Use shortest_path(root, target, method=\"bfs\")")
     def shortest_path_bfs(
         self,
         root_node_id: str,
@@ -399,6 +402,7 @@ class Vertex:
     ) -> Vertex:
         """Ordered path is in ``result.meta["nodelist"]``. Raises ValueError if unreachable."""
         ...
+    @deprecated("Use shortest_path(root, target, method=\"dijkstra\")")
     def shortest_path_dijkstra(
         self,
         root_node_id: str,

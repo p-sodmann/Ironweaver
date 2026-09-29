@@ -110,7 +110,7 @@ See the [Filtering Documentation](docs/filtering.md) for the full `NodeView` API
 ```python
 # Returns a Vertex subgraph containing only the path nodes.
 # Raises ValueError if either node is missing or the target is unreachable.
-result = graph.shortest_path_bfs('node1', 'node3')
+result = graph.shortest_path('node1', 'node3', method='bfs')
 print(f"Path order: {result.meta['nodelist']}")  # ordered node IDs
 print(f"Path nodes: {result.keys()}")
 
@@ -121,11 +121,11 @@ plt.title("Shortest Path from node1 to node3")
 plt.show()
 
 # Ignore edge direction, or walk edges backwards
-result = graph.shortest_path_bfs('node3', 'node1', direction='both')
+result = graph.shortest_path('node3', 'node1', method='bfs', direction='both')
 
 # Weighted shortest path (Dijkstra). Costs come from the "weight" edge
 # attribute; edges without it cost default_weight (1.0).
-result = graph.shortest_path_dijkstra('node1', 'node3', weight='weight')
+result = graph.shortest_path('node1', 'node3', method='dijkstra', weight='weight')
 print(result.meta['nodelist'], result.meta['cost'])
 
 # One entry point for every algorithm: method="bfs", "dijkstra" or "astar"
@@ -377,8 +377,7 @@ These behaviours surprise people (and LLMs) most often:
 - **`vertex.meta` and the `on_*_callbacks` lists are live** Python objects:
   `vertex.meta["k"] = v` and `vertex.on_node_add_callbacks.append(cb)` work.
 - **Result graphs.** `node.bfs()`, `node.traverse()`, `filter`, `expand`
-  and `shortest_path` (and its `shortest_path_bfs` / `shortest_path_dijkstra`
-  shorthands) return new graphs with *copies* of the nodes and edges, so
+  and `shortest_path` return new graphs with *copies* of the nodes and edges, so
   changing them does not touch the source graph (a `filter` result does
   share the source's `meta` dict and callback lists).
 - **Nodes and edges are handles.** The graph data lives in Rust; a `Node` or
@@ -434,13 +433,8 @@ result = graph.shortest_path(source: str, target: str, method: str = None,
 # or distances="<vertex.meta key>"). None: astar if an A* option is given,
 # dijkstra if weight is given, else bfs. meta: nodelist, cost, method, expanded.
 methods = Vertex.path_methods() -> dict   # {name: description}
-result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None,
-                                 direction: str = "out") -> Vertex
 # result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable
-result = graph.shortest_path_dijkstra(start: str, end: str, weight: str = "weight",
-                                      default_weight: float = 1.0, max_cost: float = None,
-                                      direction: str = "out") -> Vertex
-# result.meta["cost"] holds the total path cost
+# shortest_path_bfs / shortest_path_dijkstra are deprecated: use method="bfs" / "dijkstra"
 paths = graph.shortest_paths(pairs: list[tuple[str, str]], method=None, *, weight=None,
                              default_weight=None, max_cost=None, direction="out")
 # -> [{"nodelist": [...], "cost": ...} or None, ...]; many queries in parallel, GIL released
@@ -534,7 +528,7 @@ attrs = edge.attr           # Edge attributes dict (a copy; use edge.attr_set)
 
 #### `Path`
 
-> **Note:** No current public API method returns a `Path` object directly. `shortest_path_bfs` and the traversal methods return a `Vertex` subgraph — use `result.meta["nodelist"]` for the ordered list of node IDs. `Path` is reserved for future use.
+`Node.paths(...)` returns `Path` objects: `path.nodes`, `path.edges`, `path.ids()`, and `len(path)` (the number of edges). `shortest_path` and the traversals return a `Vertex` subgraph instead; its `meta["nodelist"]` holds the ordered node ids.
 
 ## Using the Rust core directly
 

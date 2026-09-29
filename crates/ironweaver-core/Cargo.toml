@@ -1,6 +1,6 @@
 [package]
 name = "ironweaver-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Directed property graph and graph algorithms behind ironweaver (pure Rust, no Python)"
 license = "MIT"

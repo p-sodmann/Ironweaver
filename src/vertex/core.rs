@@ -483,6 +483,8 @@ impl Vertex {
     }
 
     // Algorithm methods
+    /// Deprecated: use ``shortest_path(root, target, method="bfs")``.
+    ///
     /// Find the shortest path between source and target nodes using Breadth-First Search
     ///
     /// Args:
@@ -506,6 +508,7 @@ impl Vertex {
         max_depth: Option<usize>,
         direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
+        deprecated(py, "shortest_path_bfs", "bfs")?;
         let options = PyDict::new(py);
         options.set_item("max_depth", max_depth)?;
         pathfinding::shortest_path(
@@ -522,6 +525,8 @@ impl Vertex {
         )
     }
 
+    /// Deprecated: use ``shortest_path(root, target, method="dijkstra")``.
+    ///
     /// Find the cheapest path between two nodes using Dijkstra's algorithm
     ///
     /// Args:
@@ -551,6 +556,7 @@ impl Vertex {
         max_cost: Option<f64>,
         direction: Option<&str>,
     ) -> PyResult<Py<Vertex>> {
+        deprecated(py, "shortest_path_dijkstra", "dijkstra")?;
         pathfinding::shortest_path(
             self,
             py,
@@ -887,4 +893,14 @@ impl Vertex {
             seed,
         )
     }
+}
+
+/// Warn that a legacy method is deprecated in favour of `shortest_path`.
+fn deprecated(py: Python<'_>, name: &str, method: &str) -> PyResult<()> {
+    let message = format!(
+        "{name}() is deprecated and will be removed in a future release; \
+         use shortest_path(root, target, method=\"{method}\") instead"
+    );
+    let message = std::ffi::CString::new(message).expect("no NUL bytes");
+    PyErr::warn(py, &py.get_type::<pyo3::exceptions::PyDeprecationWarning>(), &message, 1)
 }
