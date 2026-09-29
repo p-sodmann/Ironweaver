@@ -165,6 +165,33 @@ def build_networkit(ds: Dataset):
     return g
 
 
+def networkit_undirected(g, ds: Dataset):
+    """An undirected networkit graph of the dataset: one edge per node pair,
+    with the lighter weight. Built from the edge list because networkit
+    11.2's `graphtools.toUndirected` miscounts edges when a directed graph
+    has both u -> v and v -> u (`numberOfEdges()` drops by one per pair),
+    which makes later algorithms such as `KruskalMSF` corrupt the heap."""
+    import networkit as nk
+    if not ds.directed:
+        return g
+    # Built once per graph and reused: the conversion (a Python loop) is
+    # not what's being timed
+    if id(g) in _UNDIRECTED:
+        return _UNDIRECTED[id(g)][1]
+    lightest: dict[tuple[int, int], float] = {}
+    for (a, b), w in zip(ds.edges, ds.weights):
+        key = (min(a, b), max(a, b))
+        lightest[key] = min(w, lightest.get(key, w))
+    u = nk.Graph(ds.n, weighted=True, directed=False)
+    for (a, b), w in lightest.items():
+        u.addEdge(a, b, w)
+    _UNDIRECTED[id(g)] = (g, u)  # keeps g alive, so its id stays unique
+    return u
+
+
+_UNDIRECTED: dict[int, tuple[Any, Any]] = {}
+
+
 BUILDERS = {
     "ironweaver": build_ironweaver,
     "networkx": build_networkx,
@@ -380,8 +407,7 @@ def op_core():
 
     def networkit(g, ds):
         import networkit as nk
-        u = nk.graphtools.toUndirected(g) if ds.directed else g
-        u.removeMultiEdges()
+        u = networkit_undirected(g, ds)
         c = nk.centrality.CoreDecomposition(u)
         c.run()
         return {v: int(x) for v, x in enumerate(c.scores())}
@@ -403,8 +429,7 @@ def op_clustering():
 
     def networkit(g, ds):
         import networkit as nk
-        u = nk.graphtools.toUndirected(g) if ds.directed else g
-        u.removeMultiEdges()
+        u = networkit_undirected(g, ds)
         c = nk.centrality.LocalClusteringCoefficient(u)
         c.run()
         return dense(c.scores())
@@ -457,8 +482,7 @@ def op_communities():
     def networkit(g, ds):
         import networkit as nk
         nk.engineering.setSeed(1, True)
-        u = nk.graphtools.toUndirected(g) if ds.directed else g
-        u = nk.graphtools.toUnweighted(u)
+        u = nk.graphtools.toUnweighted(networkit_undirected(g, ds))
         pl = nk.community.ParallelLeiden(u)
         pl.run()
         groups: dict[int, list[int]] = {}
@@ -475,8 +499,14 @@ def op_mst():
 
     def networkx(g, ds):
         import networkx as nx
-        u = g.to_undirected() if ds.directed else g
-        return sum(d["weight"] for _, _, d in nx.minimum_spanning_edges(u, data=True))
+        # A multigraph keeps both edges of a u -> v / v -> u pair (to_undirected
+        # would keep one of them), so the lighter one can be picked
+        if ds.directed:
+            u = nx.MultiGraph()
+            u.add_edges_from(g.edges(data=True))
+        else:
+            u = g
+        return sum(e[-1]["weight"] for e in nx.minimum_spanning_edges(u, data=True))  # multigraphs add keys
 
     def igraph(g, ds):
         u = g.as_undirected(combine_edges="min") if ds.directed else g
@@ -484,12 +514,12 @@ def op_mst():
 
     def rustworkx(g, ds):
         import rustworkx as rx
-        u = g.to_undirected(multigraph=False) if ds.directed else g
+        u = g.to_undirected(multigraph=True) if ds.directed else g  # both edges of a pair
         return sum(w for _, _, w in rx.minimum_spanning_edges(u, weight_fn=float))
 
     def networkit(g, ds):
         import networkit as nk
-        u = nk.graphtools.toUndirected(g) if ds.directed else g
+        u = networkit_undirected(g, ds)
         k = nk.graph.KruskalMSF(u)
         k.run()
         return k.getTotalWeight()
