@@ -417,6 +417,53 @@ class Projection:
     ) -> dict[str, dict[str, float]]:
         """Like :meth:`Vertex.distances`, on this projection."""
         ...
+    def weakly_connected_components(self) -> list[list[str]]:
+        """Components ignoring edge direction: lists of ids, largest first."""
+        ...
+    def strongly_connected_components(self) -> list[list[str]]:
+        """Strongly connected components along the edges: lists of ids, largest first."""
+        ...
+    def topological_sort(self) -> list[str]:
+        """Ids with every edge pointing forwards (ties in projection order).
+
+        Raises ValueError if the projection has a cycle.
+        """
+        ...
+    def find_cycle(self) -> list[str] | None:
+        """One cycle (the last id has an edge back to the first), or None."""
+        ...
+    def degree_centrality(self, direction: Literal["out", "in"] | None = ...) -> dict[str, float]:
+        """``{id: degree / (n - 1)}``, one per edge."""
+        ...
+    def pagerank(
+        self,
+        alpha: float = ...,
+        *,
+        personalization: dict[str, float] | None = ...,
+        max_iter: int = ...,
+        tol: float = ...,
+    ) -> dict[str, float]:
+        """``{id: rank}``, like ``networkx.pagerank``; uses the projection's weights.
+
+        *personalization* biases the random jumps (personalized PageRank).
+        Raises ValueError for invalid options or if it does not converge.
+        """
+        ...
+    def triangles(self) -> dict[str, int]:
+        """``{id: triangles through the node}`` (edges as undirected)."""
+        ...
+    def clustering(self) -> dict[str, float]:
+        """``{id: local clustering coefficient}`` (edges as undirected)."""
+        ...
+    def core_number(self) -> dict[str, int]:
+        """``{id: k-core number}`` (edges as undirected)."""
+        ...
+    def label_propagation(self, max_iter: int = ...) -> list[list[str]]:
+        """Communities by synchronous label propagation (deterministic), largest first."""
+        ...
+    def bfs_levels(self, sources: list[str], max_depth: int | None = ...) -> dict[str, int]:
+        """``{id: hops from the nearest source}`` for every node reached."""
+        ...
 
 # ---------------------------------------------------------------------------
 # Vertex — main graph class  (PyO3 extension class — cannot be subclassed)

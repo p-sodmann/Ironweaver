@@ -9,6 +9,7 @@
 // run with the GIL released. A Projection owns its data, so it stays valid
 // (a snapshot) when the graph changes afterwards.
 
+use ironweaver_core::algo;
 use ironweaver_core::batch::{self, DensePath};
 use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind};
 use ironweaver_core::projection::RawProjection;
@@ -16,7 +17,7 @@ use ironweaver_core::{Direction, NodeIx};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::data::PyAttrs;
 use crate::errors::{graph_error, Error};
@@ -262,6 +263,30 @@ pub(crate) fn distances_to_py(
     Ok(out.unbind())
 }
 
+/// `{id: value}` for every node.
+fn per_node<'py, T: IntoPyObject<'py> + Copy>(
+    py: Python<'py>,
+    p: &ironweaver_core::Projection,
+    values: &[T],
+) -> PyResult<Py<PyDict>> {
+    let _gc = GcPause::new(py);
+    let out = PyDict::new(py);
+    for (u, &value) in values.iter().enumerate() {
+        out.set_item(p.id(u as u32), value)?;
+    }
+    Ok(out.unbind())
+}
+
+/// Groups of nodes as lists of ids.
+fn groups_to_py(py: Python<'_>, p: &ironweaver_core::Projection, groups: &[Vec<u32>]) -> PyResult<Py<PyList>> {
+    let _gc = GcPause::new(py);
+    let out = PyList::empty(py);
+    for g in groups {
+        out.append(g.iter().map(|&u| p.id(u)).collect::<Vec<_>>())?;
+    }
+    Ok(out.unbind())
+}
+
 fn parse_side(direction: Option<&str>) -> PyResult<bool> {
     match direction.unwrap_or("out") {
         "out" => Ok(true),
@@ -376,6 +401,122 @@ impl Projection {
         let p = &self.inner;
         let results = py.detach(|| batch::distances(p, &sources, weighted, max_cost)).map_err(graph_error)?;
         distances_to_py(py, p, &sources, results, targets.as_ref(), weighted)
+    }
+
+    /// Weakly connected components (edges in either direction), as lists of
+    /// ids: largest first, members in projection order.
+    fn weakly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        let p = &self.inner;
+        let groups = py.detach(|| algo::weakly_connected_components(p));
+        groups_to_py(py, p, &groups)
+    }
+
+    /// Strongly connected components along the projection's edges, as
+    /// lists of ids: largest first, members in projection order.
+    fn strongly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        let p = &self.inner;
+        let groups = py.detach(|| algo::strongly_connected_components(p));
+        groups_to_py(py, p, &groups)
+    }
+
+    /// Node ids ordered so that every edge goes from an earlier to a later
+    /// node (ties in projection order). Raises ValueError on a cycle.
+    fn topological_sort(&self, py: Python<'_>) -> PyResult<Vec<&str>> {
+        let p = &self.inner;
+        let order = py.detach(|| algo::topological_sort(p)).map_err(graph_error)?;
+        Ok(order.iter().map(|&u| p.id(u)).collect())
+    }
+
+    /// One cycle as a list of ids (the last has an edge back to the first),
+    /// or None if the projection has no cycle.
+    fn find_cycle(&self, py: Python<'_>) -> Option<Vec<&str>> {
+        let p = &self.inner;
+        py.detach(|| algo::find_cycle(p)).map(|c| c.iter().map(|&u| p.id(u)).collect())
+    }
+
+    /// {id: degree / (n - 1)}, counting edges leaving ("out") or entering
+    /// ("in") each node.
+    #[pyo3(signature = (direction=None))]
+    fn degree_centrality(&self, py: Python<'_>, direction: Option<&str>) -> PyResult<Py<PyDict>> {
+        let incoming = !parse_side(direction)?;
+        let p = &self.inner;
+        let values = py.detach(|| algo::degree_centrality(p, incoming));
+        per_node(py, p, &values)
+    }
+
+    /// {id: PageRank}, like networkx.pagerank. Uses the projection's
+    /// weights if it has them. `personalization` ({id: weight}) biases the
+    /// random jumps towards some nodes (personalized PageRank).
+    #[pyo3(signature = (alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6))]
+    fn pagerank(
+        &self,
+        py: Python<'_>,
+        alpha: f64,
+        personalization: Option<HashMap<String, f64>>,
+        max_iter: usize,
+        tol: f64,
+    ) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let personalization = match personalization {
+            None => None,
+            Some(map) => {
+                let mut v = vec![0.0; p.node_count()];
+                for (id, weight) in map {
+                    v[self.index(&id, "Node")? as usize] = weight;
+                }
+                Some(v)
+            }
+        };
+        let opts = algo::PageRank { alpha, personalization, max_iter, tol };
+        let ranks = py.detach(|| algo::pagerank(p, &opts)).map_err(graph_error)?;
+        per_node(py, p, &ranks)
+    }
+
+    /// {id: number of triangles through the node} (edges as undirected).
+    fn triangles(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let values = py.detach(|| algo::triangles(p));
+        per_node(py, p, &values)
+    }
+
+    /// {id: local clustering coefficient} (edges as undirected).
+    fn clustering(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let values = py.detach(|| algo::clustering(p));
+        per_node(py, p, &values)
+    }
+
+    /// {id: core number} (k-core decomposition, edges as undirected).
+    fn core_number(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let values = py.detach(|| algo::core_number(p));
+        per_node(py, p, &values)
+    }
+
+    /// Communities by synchronous label propagation (edges as undirected;
+    /// deterministic), as lists of ids, largest first.
+    #[pyo3(signature = (max_iter=20))]
+    fn label_propagation(&self, py: Python<'_>, max_iter: usize) -> PyResult<Py<PyList>> {
+        let p = &self.inner;
+        let (groups, _) = py.detach(|| algo::label_propagation(p, max_iter));
+        groups_to_py(py, p, &groups)
+    }
+
+    /// {id: hops from the nearest source} for every node reached (within
+    /// `max_depth`), by parallel direction-optimizing BFS.
+    #[pyo3(signature = (sources, max_depth=None))]
+    fn bfs_levels(&self, py: Python<'_>, sources: Vec<String>, max_depth: Option<u32>) -> PyResult<Py<PyDict>> {
+        let dense: Vec<u32> = sources.iter().map(|s| self.index(s, "Root node")).collect::<PyResult<_>>()?;
+        let p = &self.inner;
+        let levels = py.detach(|| algo::bfs_levels(p, &dense, max_depth)).map_err(graph_error)?;
+        let _gc = GcPause::new(py);
+        let out = PyDict::new(py);
+        for (u, &l) in levels.iter().enumerate() {
+            if l != algo::NONE {
+                out.set_item(p.id(u as u32), l)?;
+            }
+        }
+        Ok(out.unbind())
     }
 
     fn __repr__(&self) -> String {

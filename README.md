@@ -450,6 +450,11 @@ proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes
                      node_filter=None, edge_filter=None) -> Projection
 # compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None),
 # proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
+# analytics (docs/analytics.md): proj.weakly_connected_components(), proj.strongly_connected_components(),
+# proj.topological_sort(), proj.find_cycle(), proj.degree_centrality("out"|"in"),
+# proj.pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6), proj.triangles(),
+# proj.clustering(), proj.core_number(), proj.label_propagation(max_iter=20),
+# proj.bfs_levels(sources, max_depth=None)
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters

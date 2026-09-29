@@ -124,6 +124,35 @@ knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; u
 
 Later graph changes don't affect it.
 
+## Analytics (on a Projection)
+
+```python
+a = Vertex()
+for id in "pqrs":
+    a.add_node(id)
+for s, t in [("p", "q"), ("q", "r"), ("r", "p"), ("r", "s")]:           # a cycle p-q-r, and r -> s
+    a.add_edge(s, t)
+pa = a.project()
+assert pa.strongly_connected_components() == [["p", "q", "r"], ["s"]]   # largest first
+assert pa.weakly_connected_components() == [["p", "q", "r", "s"]]
+assert pa.find_cycle() == ["p", "q", "r"]                                # topological_sort() raises ValueError
+assert pa.triangles()["p"] == 1 and pa.core_number()["s"] == 1
+pr = pa.pagerank()                                                      # {id: rank}, like networkx.pagerank
+assert pa.bfs_levels(["p"]) == {"p": 0, "q": 1, "r": 2, "s": 3}
+```
+
+`Projection` analytics methods:
+
+- `weakly_connected_components()` / `strongly_connected_components()`: lists of ids, largest first.
+- `topological_sort()`: raises ValueError on a cycle. `find_cycle()`: a list of ids or None.
+- `degree_centrality("out"|"in")`.
+- `pagerank(alpha=0.85, *, personalization={id: w}, max_iter=100, tol=1e-6)`: uses the projection's weights.
+- `triangles()`, `clustering()`, `core_number()`: these treat edges as undirected and ignore self-loops and parallel edges.
+- `label_propagation(max_iter=20)`: synchronous CDLP, deterministic.
+- `bfs_levels(sources, max_depth=None)`: parallel, direction-optimizing.
+
+Directed algorithms follow the projection's `direction` ("in" reverses edges, "both" makes them undirected). Details: docs/analytics.md.
+
 ## Random walks
 
 ```python

@@ -259,6 +259,61 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     add(Result("Distances from sources", f"Dijkstra from {len(sources)} sources to every reachable node", t_iw, t_nx,
                f"{sum(len(d) for d in r_nx):,} distances"))
 
+    # Analytics on a projection ---------------------------------------------
+    # ironweaver times include building the projection each time.
+    t_iw, proj = best_of(lambda: iw.project(weight="weight"), repeats)
+    add(Result("Project graph", "`project(weight=...)`: compact read-only copy for analytics", t_iw, None,
+               f"{proj.memory_usage() / 1e6:.1f} MB"))
+
+    def simple(graph):
+        s = nx.Graph(graph.to_undirected(as_view=True))
+        s.remove_edges_from(list(nx.selfloop_edges(s)))
+        return s
+
+    t_iw, r_iw = best_of(lambda: iw.project().weakly_connected_components(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.weakly_connected_components(g)), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Weakly connected components", "`project().weakly_connected_components()`", t_iw, t_nx,
+               f"{len(r_iw):,} components"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().strongly_connected_components(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.strongly_connected_components(g)), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Strongly connected components", "`project().strongly_connected_components()`", t_iw, t_nx,
+               f"{len(r_iw):,} components"))
+
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").pagerank(), repeats)
+    try:
+        t_nx, r_nx = best_of(lambda: nx.pagerank(g, weight="weight"), repeats)
+        assert max(abs(r_iw[k] - r_nx[k]) for k in r_nx) < 1e-5
+        note = ""
+    except ImportError:  # networkx.pagerank needs scipy
+        t_nx, note = None, "networkx needs scipy (not installed)"
+    add(Result("PageRank", "weighted, `project(weight=...).pagerank()`", t_iw, t_nx, note))
+
+    t_iw, r_iw = best_of(lambda: iw.project().triangles(), repeats)
+    t_nx, r_nx = best_of(lambda: nx.triangles(simple(g)), repeats)
+    assert r_iw == r_nx
+    add(Result("Triangles", "per node, edges as undirected (networkx: incl. `nx.Graph` conversion)", t_iw, t_nx,
+               f"{sum(r_iw.values()) // 3:,} triangles"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().core_number(), repeats)
+    t_nx, r_nx = best_of(lambda: nx.core_number(simple(g)), repeats)
+    assert r_iw == r_nx
+    add(Result("Core number", "k-core decomposition (networkx: incl. `nx.Graph` conversion)", t_iw, t_nx,
+               f"max core {max(r_iw.values(), default=0)}"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().label_propagation(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.community.label_propagation_communities(simple(g))), repeats)
+    add(Result("Label propagation", "communities; networkx uses its semi-synchronous variant", t_iw, t_nx,
+               f"{len(r_iw):,} vs {len(r_nx):,} communities"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().bfs_levels(["n0"]), repeats)
+    t_nx, r_nx = best_of(lambda: nx.single_source_shortest_path_length(g, "n0"), repeats)
+    assert r_iw == r_nx
+    add(Result("BFS levels", "hop distance from one node to all (parallel, direction-optimizing)", t_iw, t_nx,
+               f"{len(r_iw):,} reached"))
+
     # Weighted grid: A* vs Dijkstra ------------------------------------------
     side = max(2, int(n_nodes ** 0.5))
     giw, gnx = build_grid(side, seed)

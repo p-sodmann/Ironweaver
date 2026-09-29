@@ -93,6 +93,20 @@ Below is a quick guide to notable functions and where to find them.
   indices.
 - **batch.rs** – `shortest_paths` / `distances` on a `Projection`: many
   queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS.
+- **algo/** – analytics on a `Projection` (dense indices in, `Vec`s / groups
+  out; the comment in `mod.rs` is the recipe for adding one). Tests compare
+  against brute-force references (`algo::testing` graphs); Python tests in
+  `tests/test_algorithms.py` compare against networkx.
+  - `mod.rs`: `Undirected` (simple undirected view: sorted, deduplicated,
+    no self-loops), `groups` (largest first), `NONE`.
+  - `components.rs`: `weakly_connected_components` (union-find),
+    `strongly_connected_components` (iterative Tarjan).
+  - `dag.rs`: `topological_sort` (Kahn, min-heap), `find_cycle`.
+  - `centrality.rs`: `degree_centrality`, `pagerank` + `PageRank` options
+    (parallel pull; networkx semantics).
+  - `structure.rs`: `triangles`, `clustering`, `core_number`.
+  - `community.rs`: `label_propagation` (synchronous CDLP).
+  - `bfs.rs`: `bfs_levels` (parallel, direction-optimizing).
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `WalkPlan::items`,
   `random_walks` convenience.
@@ -123,7 +137,8 @@ Below is a quick guide to notable functions and where to find them.
   `attr_list_append`; `edge_predicate` (dict / callable edge filters).
 - **edge.rs** – `Edge` handle: getters/setters, `attr_get`, `attr_set`, `toJSON`.
 - **path.rs** – `Path`. **observed_dictionary.rs** – `ObservedDictionary`.
-- **projection.rs** – the `Projection` class (queries release the GIL),
+- **projection.rs** – the `Projection` class (queries and analytics
+  methods release the GIL),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
   core `RawProjection`), result conversion shared with `vertex/batch.rs`.
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
