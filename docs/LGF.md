@@ -386,6 +386,6 @@ More examples can be found in the `examples/` directory:
 
 ## See Also
 
-- [IronWeaver API Documentation](API.md)
-- [Graph Algorithms Guide](algorithms.md)
-- [Performance Benchmarks](../performance_results/README.md)
+- [API reference](api.md)
+- [Analytics guide](analytics.md) and [traversal and paths](traversal.md)
+- [Benchmarks](benchmarks.md)

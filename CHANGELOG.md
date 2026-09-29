@@ -17,7 +17,7 @@ a query layer and database foundations.
   binary header, a checksum, labels, edge types and edge ids. Files saved by
   0.1 (format 1) still load and are migrated (`attr["labels"]` / `attr["type"]`
   become labels and types; an old edge id is kept in `meta["legacy_id"]`), but
-  0.1 can't read files saved by 0.2. See [docs/format.md](docs/format.md).
+  0.1 can't read files saved by 0.2. See [the file format docs](https://github.com/p-sodmann/Ironweaver/blob/main/docs/format.md).
 - **Labels and edge types are graph fields.** `attr["labels"]` (a list of str)
   on nodes and `attr["type"]` (a str) on edges are stored as labels and types.
   Reading and writing them through `attr`, `attr_get` / `attr_set`, dict

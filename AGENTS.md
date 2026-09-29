@@ -63,6 +63,13 @@ version (1.85, `rust-version` in both Cargo.toml files), rustdoc with
 docs, so its example runs as a doctest), and pytest on Python 3.9-3.14
 (Linux) plus macOS and Windows. Run fmt and clippy before pushing.
 
+Docs site: `mkdocs.yml` (MkDocs Material; `pip install -r docs/requirements.txt`,
+then `mkdocs serve`), published to GitHub Pages by `.github/workflows/docs.yml`,
+which builds with `--strict` (broken links fail). A new page in `docs/` goes
+into the `nav` of `mkdocs.yml`. `docs/api.md` is generated from the `.pyi`
+stubs (mkdocstrings), so keep their docstrings current; `docs/benchmarks.md`
+and `docs/changelog.md` include files from the repo.
+
 Releases: see RELEASING.md (version in Cargo.toml, CHANGELOG.md, a `v*` tag
 builds and publishes wheels and the core crate).
 

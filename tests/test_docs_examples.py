@@ -24,8 +24,12 @@ except Exception as e:  # pragma: no cover - module unavailable
     pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Site pages generated from other files, without examples of their own
+GENERATED = {"api.md", "benchmarks.md", "changelog.md"}
 DOC_FILES = ["README.md", "llms.txt"] + sorted(
-    os.path.join("docs", f) for f in os.listdir(os.path.join(ROOT, "docs")) if f.endswith(".md")
+    os.path.join("docs", f)
+    for f in os.listdir(os.path.join(ROOT, "docs"))
+    if f.endswith(".md") and f not in GENERATED
 )
 BLOCK = re.compile(r"^```python\n(.*?)^```", re.S | re.M)
 
