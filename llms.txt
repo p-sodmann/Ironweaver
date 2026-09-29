@@ -303,6 +303,7 @@ Also `on_edge_add_callbacks (vertex, edge)` and `on_edge_update_callbacks (verte
 
 ```python
 meta = g.get_metadata()                 # node_count, edge_count, average_degree, node_ids
+size = g.memory_usage(deep=True)        # bytes: structure (+ attribute dicts and values with deep)
 nxg = g.to_networkx()                   # networkx.DiGraph with node/edge attributes
 ```
 

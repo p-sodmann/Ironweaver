@@ -131,6 +131,16 @@ impl EdgeIndex {
     }
 }
 
+/// Bytes of a hashbrown table with room for `capacity` entries: buckets
+/// (about 8/7 of the capacity) of `entry` bytes plus a control byte each.
+pub(crate) fn hash_table_bytes(capacity: usize, entry: usize) -> usize {
+    if capacity == 0 {
+        0
+    } else {
+        (capacity * 8 / 7 + 1).next_power_of_two() * (entry + 1)
+    }
+}
+
 /// Persistent id of an edge: assigned from a per-graph counter when the
 /// edge is added, never reused, saved with the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -273,16 +283,22 @@ impl<T> Arena<T> {
         Arena { slots: Vec::with_capacity(n), free: Vec::new(), len: 0 }
     }
 
-    fn insert(&mut self, value: T) -> (u32, u32) {
-        self.len += 1;
+    /// Store `value`; fails once `u32::MAX` slots are in use. `what` names
+    /// the items for the error.
+    fn insert(&mut self, value: T, what: &str) -> Result<(u32, u32), GraphError> {
         if let Some(slot) = self.free.pop() {
             let s = &mut self.slots[slot as usize];
             s.value = Some(value);
-            return (slot, s.generation);
+            self.len += 1;
+            return Ok((slot, s.generation));
         }
-        let slot = u32::try_from(self.slots.len()).expect("graph too large");
+        let slot = u32::try_from(self.slots.len())
+            .ok()
+            .filter(|&s| s < u32::MAX)
+            .ok_or_else(|| GraphError::Capacity(format!("a graph holds at most {} {what}", u32::MAX - 1)))?;
         self.slots.push(Slot { generation: 0, value: Some(value) });
-        (slot, 0)
+        self.len += 1;
+        Ok((slot, 0))
     }
 
     fn get(&self, slot: u32, generation: u32) -> Option<&T> {
@@ -305,8 +321,12 @@ impl<T> Arena<T> {
             return None;
         }
         let value = s.value.take()?;
-        s.generation = s.generation.wrapping_add(1);
-        self.free.push(slot);
+        // A slot whose generations ran out is retired, so no old handle can
+        // ever resolve to a new item
+        if s.generation < u32::MAX {
+            s.generation += 1;
+            self.free.push(slot);
+        }
         self.len -= 1;
         Some(value)
     }
@@ -395,16 +415,17 @@ impl<N, E> Graph<N, E> {
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateNode(id));
         }
-        Ok(self.insert_node(id, data))
+        self.insert_node(id, data)
     }
 
-    fn insert_node(&mut self, id: String, data: N) -> NodeIx {
-        let (slot, generation) =
-            self.nodes.insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data });
+    fn insert_node(&mut self, id: String, data: N) -> Result<NodeIx, GraphError> {
+        let (slot, generation) = self
+            .nodes
+            .insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data }, "nodes")?;
         let ix = NodeIx { slot, generation };
         self.index.insert(id, ix);
         self.indexes.touch(ix);
-        ix
+        Ok(ix)
     }
 
     /// Add an edge from `from` to `to` (both must be live), with a new id.
@@ -450,7 +471,7 @@ impl<N, E> Graph<N, E> {
         self.next_edge_id = self
             .next_edge_id
             .max(id.0.checked_add(1).ok_or(GraphError::InvalidArgument("edge id space exhausted".into()))?);
-        let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data });
+        let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data }, "edges")?;
         let ix = EdgeIx { slot, generation };
         self.edge_index.insert(id, slot, self.edges.len);
         Ok(ix)
@@ -689,6 +710,33 @@ impl<N, E> Graph<N, E> {
         }
     }
 
+    /// Approximate bytes used by the graph's structure: node and edge slots
+    /// (including the payloads' inline size), ids, adjacency lists, labels,
+    /// the id, edge-id and label indexes and the property indexes. Memory
+    /// that payloads own elsewhere (attribute maps, Python objects) is not
+    /// counted.
+    pub fn memory_usage(&self) -> usize {
+        use std::mem::size_of;
+        let mut total = size_of::<Self>();
+        total += self.nodes.slots.capacity() * size_of::<Slot<Node<N>>>() + self.nodes.free.capacity() * 4;
+        total += self.edges.slots.capacity() * size_of::<Slot<Edge<E>>>() + self.edges.free.capacity() * 4;
+        for (_, n) in self.nodes() {
+            total += n.id.capacity() + n.labels.capacity() * size_of::<Symbol>();
+            total += (n.out.capacity() + n.inc.capacity()) * size_of::<EdgeIx>();
+        }
+        // The id index holds a second copy of every id
+        total += hash_table_bytes(self.index.capacity(), size_of::<(String, NodeIx)>());
+        total += self.index.keys().map(String::capacity).sum::<usize>();
+        total += self.edge_index.dense.capacity() * 4;
+        total += hash_table_bytes(self.edge_index.sparse.capacity(), size_of::<(EdgeId, u32)>());
+        total += self.symbols.names.iter().map(|n| 2 * n.len()).sum::<usize>();
+        total += self.symbols.names.capacity() * size_of::<Box<str>>();
+        total += hash_table_bytes(self.symbols.index.capacity(), size_of::<(Box<str>, Symbol)>());
+        total += hash_table_bytes(self.labeled.capacity(), size_of::<(Symbol, IxSet<NodeIx>)>());
+        total += self.labeled.values().map(|s| hash_table_bytes(s.capacity(), size_of::<NodeIx>())).sum::<usize>();
+        total + self.indexes.memory_usage()
+    }
+
     /// All nodes, in slot order.
     pub fn nodes(&self) -> impl Iterator<Item = (NodeIx, &Node<N>)> + '_ {
         self.nodes.iter().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
@@ -750,7 +798,8 @@ impl<N, E> Graph<N, E> {
                 continue;
             }
             if let Some(n) = self.node(ix) {
-                let new = out.insert_node(n.id.clone(), node_data(n)?);
+                let new =
+                    out.insert_node(n.id.clone(), node_data(n)?).expect("a subgraph has no more nodes than its graph");
                 if !n.labels.is_empty() {
                     out.node_ref_mut(new).labels = n.labels.clone();
                     for &label in &n.labels {
@@ -935,5 +984,37 @@ mod tests {
         assert_eq!(e.data, 30);
         assert!(sub.node_ix("b").is_none());
         let _ = b;
+    }
+
+    #[test]
+    fn exhausted_slots_are_retired() {
+        let mut g: Graph<(), ()> = Graph::new();
+        let a = g.add_node("a", ()).unwrap();
+        g.nodes.slots[a.slot()].generation = u32::MAX - 1;
+        let a = NodeIx { slot: 0, generation: u32::MAX - 1 };
+        g.remove_node(a).unwrap();
+        let b = g.add_node("b", ()).unwrap();
+        assert_eq!((b.slot(), b.generation), (0, u32::MAX));
+        g.remove_node(b).unwrap();
+        // Slot 0 can't take another generation: the next node goes elsewhere
+        let c = g.add_node("c", ()).unwrap();
+        assert_eq!(c.slot(), 1);
+        assert!(g.node(b).is_none() && g.node(a).is_none());
+    }
+
+    #[test]
+    fn memory_usage_grows_with_the_graph() {
+        let (g, _) = triangle();
+        let small = g.memory_usage();
+        let mut big: Graph<(), u32> = Graph::new();
+        let ix: Vec<NodeIx> = (0..1000).map(|i| big.add_node(format!("node{i}"), ()).unwrap()).collect();
+        for w in ix.windows(2) {
+            big.add_edge(w[0], w[1], 0).unwrap();
+        }
+        let m = big.memory_usage();
+        assert!(small < m, "{small} {m}");
+        // At least the ids (twice), slots and adjacency entries
+        assert!(m > 1000 * (2 * 7 + 2 * std::mem::size_of::<EdgeIx>()), "{m}");
+        assert!(m < 1000 * 400, "{m}");
     }
 }

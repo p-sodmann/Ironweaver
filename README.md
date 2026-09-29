@@ -491,6 +491,7 @@ walks = graph.random_walks(start_node_id, max_length, num_attempts,
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph
 metadata = graph.get_metadata() -> dict
+graph.memory_usage(*, deep=False) -> int   # bytes (deep: plus attribute dicts and values)
 
 # Persistence
 graph.save_to_json("path.json")              # write to file

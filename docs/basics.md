@@ -144,6 +144,8 @@ Saving to a file is atomic: the graph is written to a temporary file next to the
 ```python
 v.meta["project"] = "demo"
 v.get_metadata()      # dict with node_count, edge_count, etc.
+v.memory_usage()      # bytes used by the structure (ids, adjacency, labels, indexes)
+v.memory_usage(deep=True)  # plus the attribute dicts and their values
 G = v.to_networkx()   # convert to networkx.DiGraph
 ```
 

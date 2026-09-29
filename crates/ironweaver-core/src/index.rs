@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use crate::graph::{IxMap, IxSet};
+use crate::graph::{hash_table_bytes, IxMap, IxSet};
 use crate::{Attributes, CmpOp, Expr, Graph, GraphError, Key, NodeIx, Value};
 
 /// The nodes under one key: usually one (a unique property), sometimes very
@@ -131,6 +131,29 @@ impl Indexes {
             self.all_dirty = true;
             self.dirty.clear();
         }
+    }
+
+    /// Approximate bytes used (see `Graph::memory_usage`).
+    pub(crate) fn memory_usage(&self) -> usize {
+        use std::mem::size_of;
+        let heap = |k: &Key| match k {
+            Key::String(s) => s.capacity(),
+            Key::Bytes(b) => b.capacity(),
+            _ => 0,
+        };
+        let mut total = hash_table_bytes(self.dirty.capacity(), size_of::<NodeIx>());
+        for index in &self.list {
+            // B-tree nodes hold up to 11 entries; assume two thirds full
+            total += index.map.len() * (size_of::<Key>() + size_of::<Posting>()) * 3 / 2;
+            for (k, p) in &index.map {
+                total += 2 * heap(k);
+                if let Posting::Many(set) = p {
+                    total += hash_table_bytes(set.capacity(), size_of::<NodeIx>());
+                }
+            }
+            total += hash_table_bytes(index.keys.capacity(), size_of::<(NodeIx, Key)>());
+        }
+        total
     }
 
     pub(crate) fn remove(&mut self, ix: NodeIx) {

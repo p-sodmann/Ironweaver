@@ -84,6 +84,9 @@ a query layer and database foundations.
   `Graph::create_index`, `find_nodes`, `find_nodes_in_range`,
   `index_candidates`, with exact results while payload changes are pending
   (`flush_indexes`).
+- `Vertex.memory_usage(deep=False)` (and `Graph::memory_usage` in the
+  core): bytes used by the structure, with `deep` also the attribute dicts
+  and their values.
 - **Ctrl+C stops long computations:** projection algorithms, batch
   shortest paths / distances, random walks, `Vertex.match`, `Node.paths`,
   `shortest_path` and traversals raise `KeyboardInterrupt` shortly after
@@ -96,6 +99,11 @@ a query layer and database foundations.
   networkit (`benchmarks/compare_libraries.py`).
 
 ### Changed
+
+- Size limits raise errors instead of panicking: more than 2^32 - 2 node
+  or edge slots gives `GraphError::Capacity` (`OverflowError` in Python). A
+  slot whose generation counter runs out is retired, so a handle to a
+  removed node or edge can never resolve to a new one.
 
 - Saving is atomic (temporary file, fsync, rename); loading refuses values
   nested deeper than 100 levels and checks the binary checksum.

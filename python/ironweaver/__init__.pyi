@@ -681,6 +681,14 @@ class Vertex:
 
     def has_node(self, id: str) -> bool: ...
     def node_count(self) -> int: ...
+    def memory_usage(self, *, deep: bool = ...) -> int:
+        """Approximate bytes used by the graph structure (nodes, edges, ids,
+        adjacency, labels, indexes).
+
+        With *deep*, also the attribute / meta dicts and their values
+        (``sys.getsizeof``, containers recursively, shared objects once).
+        """
+        ...
     def get_metadata(self) -> dict[str, Any]:
         """Return summary metadata about the graph.
 

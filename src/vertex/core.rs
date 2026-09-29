@@ -510,6 +510,15 @@ impl Vertex {
         serialization::load_from_binary(py, file_path)
     }
 
+    /// Approximate memory used by the graph, in bytes: its structure (nodes,
+    /// edges, ids, adjacency, labels, indexes). With ``deep=True``, plus
+    /// the attribute and meta dicts and the values in them
+    /// (``sys.getsizeof``, containers recursively, shared objects once).
+    #[pyo3(signature = (*, deep=false))]
+    fn memory_usage(slf: &Bound<'_, Self>, deep: bool) -> PyResult<usize> {
+        analysis::memory_usage(slf, deep)
+    }
+
     // Analysis methods
     /// Get metadata about the graph (node count, edge count, etc.)
     fn get_metadata(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {

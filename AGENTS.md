@@ -264,7 +264,8 @@ Below is a quick guide to notable functions and where to find them.
 - **vertex/subgraph.rs** – `build_subgraph` (new Vertex from part of another).
 - **vertex/serialization.rs** – `save_to_json`, `save_to_binary`,
   `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
-- **vertex/analysis.rs** – `get_metadata`, `to_networkx`.
+- **vertex/analysis.rs** – `get_metadata`, `memory_usage` (`deep`: getsizeof
+  of attribute dicts and values, outside the borrow), `to_networkx`.
 - **vertex/callbacks.rs** – `fire` (runs a callback list).
 - **vertex/query.rs** – `match_pattern` (`Vertex.match`: `where` Exprs,
   `ids`, results as Node / Edge / list[Edge]) and `node_paths`

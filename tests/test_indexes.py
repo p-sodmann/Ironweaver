@@ -115,3 +115,18 @@ def test_randomized_against_scans():
                 assert ids(g.find("x", probe)) == ids(reference.find("x", probe)), probe
             for lo, hi in [(0, 2), (-5, None), (None, "az"), (False, True)]:
                 assert ids(g.find_range("x", lo, hi)) == ids(reference.find_range("x", lo, hi))
+
+
+def test_memory_usage():
+    g = iw.Vertex()
+    empty = g.memory_usage()
+    assert empty == g.memory_usage(deep=True) > 0
+    g.add_nodes([f"n{i}" for i in range(1000)], attrs={"name": [f"name{i}" for i in range(1000)]})
+    g.add_edges([(f"n{i}", f"n{i + 1}") for i in range(999)])
+    structure = g.memory_usage()
+    assert structure > empty + 1000 * 40
+    deep = g.memory_usage(deep=True)
+    # 1000 attribute dicts and names on top
+    assert deep > structure + 1000 * 100
+    g.create_index("name")
+    assert g.memory_usage() > structure
