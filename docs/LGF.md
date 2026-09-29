@@ -271,7 +271,7 @@ for edge in alice.edges:
     print(f"Alice {edge.attr['type']} {edge.to_node.id}")
 
 # Use graph algorithms
-shortest_path = graph.shortest_path_bfs("alice", "charlie")
+shortest_path = graph.shortest_path("alice", "charlie", method="bfs")
 print(f"Path from Alice to Charlie: {list(shortest_path.keys())}")
 
 # Convert to NetworkX for visualization
@@ -386,6 +386,6 @@ More examples can be found in the `examples/` directory:
 
 ## See Also
 
-- [IronWeaver API Documentation](API.md)
-- [Graph Algorithms Guide](algorithms.md)
-- [Performance Benchmarks](../performance_results/README.md)
+- [API reference](api.md)
+- [Analytics guide](analytics.md) and [traversal and paths](traversal.md)
+- [Benchmarks](benchmarks.md)

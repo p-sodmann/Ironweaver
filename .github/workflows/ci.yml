@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, core tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p ironweaver-core
+      - name: The core does not depend on pyo3
+        run: |
+          if cargo tree -p ironweaver-core -e normal | grep -q pyo3; then
+            echo "ironweaver-core must not depend on pyo3" >&2
+            exit 1
+          fi
+
+  msrv:
+    name: Rust 1.85 (minimum supported version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      # Keep in step with rust-version in both Cargo.toml files
+      - run: cargo check --workspace --all-targets
+
+  docs-rs:
+    name: Core API docs (rustdoc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc -p ironweaver-core --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: The crate packages for crates.io
+        run: cargo package -p ironweaver-core
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # Ignored advisories are listed, with reasons, in .cargo/audit.toml
+      - run: cargo audit
+
+  python:
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin pytest networkx numpy scipy psutil
+          python -m pip install -e .
+      # Includes tests/test_docs_examples.py (README, llms.txt, docs/*.md)
+      - run: python -m pytest -q

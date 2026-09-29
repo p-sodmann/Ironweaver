@@ -24,8 +24,12 @@ except Exception as e:  # pragma: no cover - module unavailable
     pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Site pages generated from other files, without examples of their own
+GENERATED = {"api.md", "benchmarks.md", "changelog.md"}
 DOC_FILES = ["README.md", "llms.txt"] + sorted(
-    os.path.join("docs", f) for f in os.listdir(os.path.join(ROOT, "docs")) if f.endswith(".md")
+    os.path.join("docs", f)
+    for f in os.listdir(os.path.join(ROOT, "docs"))
+    if f.endswith(".md") and f not in GENERATED
 )
 BLOCK = re.compile(r"^```python\n(.*?)^```", re.S | re.M)
 
@@ -121,12 +125,15 @@ def test_documented_gotchas_hold():
     g.on_node_add_callbacks.append(lambda v, n: None)
     assert len(g.on_node_add_callbacks) == 1
 
-    # bfs/traverse share nodes with the source; filter copies them
-    assert a.bfs()["a"] is a
-    assert a.traverse()["a"] is a
+    # Nodes are handles: equal (not necessarily identical) per node
+    assert g["a"] == a and hash(g["a"]) == hash(a)
+    assert a.vertex is g
+
+    # bfs/traverse/filter results hold copies of the nodes
+    for sub in (a.bfs(), a.traverse(), g.filter(ids=["a", "b"])):
+        assert sub["a"] != a
+        sub["a"].attr_set("x", 99)
+        assert a.attr_get("x") == 4
     sub = g.filter(ids=["a", "b"])
-    assert sub["a"] is not a
-    sub["a"].attr_set("x", 99)
-    assert a.attr_get("x") == 4
     # ... but a filter result shares vertex.meta with its source
     assert sub.meta is g.meta

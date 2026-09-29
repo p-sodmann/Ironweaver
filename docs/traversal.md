@@ -4,7 +4,7 @@ Ironweaver provides several traversal methods on both `Node` and `Vertex`.
 
 ## Node-level traversal
 
-All node-level methods start from a single node and follow outgoing edges. They return a `Vertex` with the discovered nodes and a `meta["nodelist"]` recording visit order. The result holds the *original* node objects (not copies).
+All node-level methods start from a single node and follow outgoing edges. They return a new `Vertex` with copies of the discovered nodes (and the edges between them) and a `meta["nodelist"]` recording visit order. A callable `filter` may read the graph but must not change it (adding or removing nodes or edges, setting attributes): that can raise `RuntimeError`.
 
 The examples below use this graph:
 
@@ -114,7 +114,7 @@ path.meta["cost"]                                            # 2.1
 path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth=10)
 ```
 
-`shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands for `method="bfs"` and `method="dijkstra"`.
+The older `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` still work but are deprecated (they emit a `DeprecationWarning`): use `method="bfs"` and `method="dijkstra"`.
 
 #### A* — `method="astar"`
 
@@ -158,7 +158,60 @@ Nodes without coordinates or without a table entry get estimate 0 (always safe, 
 
 #### Adding a path algorithm
 
-Algorithms live in `src/vertex/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated query (source and target nodes, direction, edge costs, `max_cost`, options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`), best-first search (`best_first.rs`) and result building — are reusable. See the comment at the top of `mod.rs`.
+Algorithms live in the pure-Rust core crate, `crates/ironweaver-core/src/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated `PathQuery` (direction, edge costs, `max_cost`, method options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`) and best-first search (`best_first.rs`) — are reusable. The Python keyword options are parsed into the query in `src/vertex/pathfinding.rs`. See the comment at the top of the core `mod.rs`.
+
+### Batch queries (parallel) — `vertex.shortest_paths(pairs, ...)`, `vertex.distances(sources, ...)`
+
+For many queries at once. The graph's structure and edge costs are copied into a compact projection once (see below), then every query runs in parallel on all cores with the GIL released (other Python threads keep running). The snapshot costs one pass over the graph, so for a single query `shortest_path` is cheaper.
+
+```python
+res = v.shortest_paths([("root", "target"), ("root", "z"), ("z", "root")], weight="weight")
+assert res[0]["nodelist"] == ["root", "a", "b", "target"]
+assert abs(res[0]["cost"] - (0.9 + 0.4 + 0.8)) < 1e-9
+assert res[2] is None                                  # unreachable: None, not an error
+
+hops = v.shortest_paths([("root", "target")])          # method="bfs": number of edges
+assert hops[0]["cost"] == 3
+
+d = v.distances(["root", "a"], weight="weight", max_cost=1.5)
+assert set(d["root"]) == {"root", "a", "b"}            # {source: {node: cost}}
+assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
+```
+
+Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `"astar"` is not available here. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+
+### Projections — `vertex.project(...)`
+
+Each `shortest_paths` / `distances` call copies the graph first. To run several batches (and, later, other analytics) on the same graph, copy it once into a `Projection`: a compact, read-only copy of the structure (sorted neighbour lists in both directions), at most one weight per edge and the node ids, but no attributes. Queries on it run in parallel with the GIL released, from any number of Python threads.
+
+```python
+p = v.project(weight="weight")                      # all nodes and edges, weighted
+assert (p.node_count(), p.edge_count(), p.weighted) == (5, 4, True)
+assert p.neighbors("a") == ["b", "z"] and p.neighbors("a", "in") == ["root"]
+assert p.shortest_paths([("root", "target")])[0]["cost"] == res[0]["cost"]
+assert p.distances(["root"], targets=["z"], method="bfs") == {"root": {"z": 2}}
+
+knows = v.project(edge_filter={"type": "knows"}, direction="both")   # undirected, one edge type
+assert sorted(knows.neighbors("a")) == ["root", "z"]
+sub = v.project(nodes=["root", "a", "b"], node_filter=lambda n: n.id != "b")
+assert sub.ids() == ["root", "a"]
+```
+
+`project(weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None)`:
+
+- Without `weight` and `default_weight` the projection is unweighted (only `"bfs"` queries).
+- `direction`: `"out"` keeps edges as they are, `"in"` reverses them, `"both"` makes them undirected.
+- `nodes` limits the projection to those ids.
+- `node_filter` / `edge_filter` take a dict (attribute equality) or a callable receiving a `NodeView` / `EdgeView`. The edge filter is asked once per edge between kept nodes.
+- Weights are read and validated for the kept edges only.
+
+A projection is a snapshot: later changes to the graph don't affect it. Don't change the graph from inside a filter.
+
+Projection methods:
+
+- `shortest_paths(pairs, method=None, *, max_cost=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
+- `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
+- `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `memory_usage()` (bytes).
 
 ### Random walks — `vertex.random_walks(...)`
 

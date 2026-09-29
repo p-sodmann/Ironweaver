@@ -1,6 +1,6 @@
 # IronWeaver
 
-> Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict and edges, `Edge`s are directed and carry an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
+> Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict, labels and edges, `Edge`s are directed and carry a type, a persistent integer id and an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
 
 Install from source: `pip install maturin && pip install -e .` — then `from ironweaver import Vertex`.
 
@@ -27,6 +27,43 @@ assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # 
 
 `add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
 
+## Bulk loading
+
+```python
+big = Vertex()
+big.add_nodes(["u1", "u2", ("u3", {"age": 7})], labels=["User"])      # ids or (id, attrs); returns the count
+big.add_edges([("u1", "u2"), ("u2", "u3")], type="follows", attrs={"weight": [1.0, 2.5]})  # attrs: columns
+assert big.project(weight="weight").edge_count() == 2
+```
+
+- `add_nodes(nodes, *, labels=None, attrs=None)` and `add_edges(edges, *, type=None, attrs=None)` check every item first: on an error nothing is added.
+- `attrs={name: [value per item]}` columns (None: not set) are the fastest way to load attributes; a "labels" / "type" column sets the fields.
+- Add-callbacks fire after the batch.
+
+## Labels, edge types, edge ids
+
+```python
+g["alice"].add_label("Person")                     # or add_node(id, attr, labels=[...])
+g.add_node("dora", labels=["Person", "Admin"])
+assert [n.id for n in g.nodes_with_label("Person")] == ["alice", "dora"]   # label index
+e = g["alice"].edges[0]
+assert e.type == "knows" and e.attr["type"] == "knows"   # attr {"type": ...} became the type
+e2 = g.add_edge("dora", "acme", type="works_at")
+assert g.get_edge(e2.id) == e2                     # ids: int, unique, never reused, saved
+g.remove_node("dora")
+```
+
+```python
+g.create_index("age")                              # optional: find / find_range / filter / match use it
+assert [n.id for n in g.find("age", 30)] == ["alice"]
+assert [n.id for n in g.find_range("age", 20, 30, inclusive="left")] == ["bob"]
+```
+
+- **Indexes:** `find(name, value)` / `find_range(name, low=None, high=None, *, inclusive="both")` work without an index (scan) and use one if it exists; indexes follow changes and are not saved.
+- **Graph fields:** labels, types and edge ids are fields on the graph. Filters, projections and algorithms match them without reading attributes.
+- **Old attribute names still work:** `"labels"` (a list of str) and `"type"` (a str) as attribute names are mapped onto the fields by `add_node` / `add_edge`, by `attr` / `attr_get` / `attr_set`, and by dict filters.
+- **Nodes have no type:** a node's `attr["type"]` stays an ordinary attribute.
+
 ## Read and change attributes
 
 ```python
@@ -41,7 +78,7 @@ assert edge.attr_get("weight") == 1.5
 
 ## Traverse from a node
 
-Results are new `Vertex` objects holding the original nodes; the visit order is in `meta["nodelist"]`.
+Results are new `Vertex` objects holding copies of the reached nodes (and the edges between them); the visit order is in `meta["nodelist"]`.
 
 ```python
 r = alice.bfs()                                    # breadth-first, all reachable
@@ -50,7 +87,7 @@ r = alice.bfs(depth=1)                             # at most one hop
 r = alice.traverse(depth=2)                        # depth-first (pre-order)
 r = alice.bfs(filter={"type": "knows"})            # follow edges whose attr matches
 r = alice.bfs(filter=lambda e: e.attr("weight", 0) < 3)   # callable gets an EdgeView
-assert alice.bfs_search("acme", depth=2) is g["acme"]     # Node or None
+assert alice.bfs_search("acme", depth=2) == g["acme"]     # Node or None
 ```
 
 ## Filter and expand (results contain copies of nodes and edges)
@@ -65,7 +102,20 @@ assert sorted(bigger.keys()) == ["acme", "bob"]
 around = g.filter(id="bob").expand(g, direction="both")   # "out" (default), "in", "both"
 ```
 
-`NodeView` offers `n.id`, `n.type`, `n.attr(key, default)`, `n.has_attr(key)`, `n.degree`, `n.in_degree`, `n.has_edge_to(id)`, `n.neighbor_ids`. `EdgeView` offers `e.type`, `e.attr(key, default)`, `e.has_attr(key)`, `e.from_node`, `e.to_node`.
+Expressions are evaluated in Rust (no Python call per node), and also work as `project(node_filter=..., edge_filter=...)`:
+
+```python
+from ironweaver import attr, label, edge_type
+assert sorted(g.filter((attr("age") >= 30) & label("Person")).keys()) == ["alice"]
+assert sorted(g.filter(attr("type").is_in(["company"])).keys()) == ["acme"]
+assert g.project(edge_filter=edge_type("works_at")).edge_count() == 2
+```
+
+The operators are `==`, `!=`, `<`, `<=`, `>`, `>=`, `.is_in(list)`, `.exists()`, `&`, `|`, `~`, and `attr("pos.lat")` reaches into nested dicts.
+- **Parenthesize comparisons:** `&` binds tighter than `>`. Leaving the parentheses out raises TypeError.
+- **Missing attributes:** every comparison is false.
+
+`NodeView` offers `n.id`, `n.type`, `n.labels`, `n.has_label(l)`, `n.attr(key, default)`, `n.has_attr(key)`, `n.degree`, `n.in_degree`, `n.has_edge_to(id)`, `n.neighbor_ids`. `EdgeView` offers `e.type` (the edge type), `e.id`, `e.attr(key, default)`, `e.has_attr(key)`, `e.from_node`, `e.to_node`.
 
 ## Paths
 
@@ -87,7 +137,118 @@ m.meta["est"] = {"a": 2.0, "b": 1.0}                          # {node: estimate}
 p = m.shortest_path("a", "c", distances="est")                # estimates from vertex.meta["est"]
 ```
 
-`shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands.
+`shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` are deprecated (DeprecationWarning): use `method=`.
+
+Batches run in parallel on all cores (GIL released); unreachable pairs give `None`:
+
+```python
+res = g.shortest_paths([("alice", "acme"), ("acme", "alice")], weight="weight")
+assert res[0]["nodelist"] == ["alice", "bob", "acme"] and res[1] is None   # {"nodelist", "cost"} or None
+d = g.distances(["alice"], weight="weight")                                # {source: {node: cost}}
+assert d["alice"]["acme"] == res[0]["cost"]
+assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
+```
+
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+
+Copy the graph once with `project` to run many batches (or other analytics) on it:
+
+```python
+p = g.project(weight="weight")                 # compact read-only snapshot: structure, weights, ids
+assert p.shortest_paths([("alice", "acme")]) == res[:1]
+assert p.neighbors("bob", "in") == ["alice"] and p.degree("alice") == 2
+knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; undirected
+```
+
+`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter)`:
+
+- Unweighted unless `weight` or `default_weight` is given.
+- `direction` `"out"`/`"in"` (reversed)/`"both"` (undirected).
+- Filters take a dict (attribute equality) or a callable (NodeView / EdgeView).
+
+`Projection` methods:
+
+- `shortest_paths(pairs, method=None, *, max_cost)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means dijkstra if the projection is weighted, else bfs.
+- `neighbors(id, direction="out"|"in")`, `degree(id, direction)`.
+- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `memory_usage()`.
+
+Later graph changes don't affect it.
+
+## Analytics (on a Projection)
+
+```python
+a = Vertex()
+for id in "pqrs":
+    a.add_node(id)
+for s, t in [("p", "q"), ("q", "r"), ("r", "p"), ("r", "s")]:           # a cycle p-q-r, and r -> s
+    a.add_edge(s, t)
+pa = a.project()
+assert pa.strongly_connected_components() == [["p", "q", "r"], ["s"]]   # largest first
+assert pa.weakly_connected_components() == [["p", "q", "r", "s"]]
+assert pa.find_cycle() == ["p", "q", "r"]                                # topological_sort() raises ValueError
+assert pa.triangles()["p"] == 1 and pa.core_number()["s"] == 1
+pr = pa.pagerank()                                                      # {id: rank}, like networkx.pagerank
+assert pa.bfs_levels(["p"]) == {"p": 0, "q": 1, "r": 2, "s": 3}
+assert pa.betweenness_centrality(normalized=False)["r"] == 3.0           # also closeness_/harmonic_centrality
+communities = pa.leiden(seed=1)                                          # connected communities, largest first
+assert pa.k_shortest_paths("p", "s", 2)[0] == {"nodelist": ["p", "q", "r", "s"], "cost": 3}
+```
+
+`Projection` analytics methods:
+
+- `weakly_connected_components()` / `strongly_connected_components()`: lists of ids, largest first.
+- `topological_sort()`: raises ValueError on a cycle. `find_cycle()`: a list of ids or None.
+- `degree_centrality("out"|"in")`.
+- `pagerank(alpha=0.85, *, personalization={id: w}, max_iter=100, tol=1e-6)`: uses the projection's weights. `tol=0` runs exactly `max_iter` iterations.
+- `triangles()`, `clustering()`, `core_number()`: these treat edges as undirected and ignore self-loops and parallel edges.
+  - `clustering(directed=True)` uses the LDBC Graphalytics directed definition.
+- `label_propagation(max_iter=20)`: LDBC CDLP, deterministic; on directed projections in- and out-neighbours count separately.
+- `bfs_levels(sources, max_depth=None)`: parallel, direction-optimizing.
+- `betweenness_centrality(k=None, *, normalized=True, endpoints=False, weighted=None, seed=None)`: `k` samples sources (use it on large graphs).
+- `closeness_centrality(*, wf_improved=True, weighted=None)`, `harmonic_centrality(*, weighted=None)`: from distances *to* each node.
+  - `weighted=None` uses the projection's weights if it has them.
+  - Same results as networkx.
+- `similarity(pairs, metric="jaccard")`: one score per pair.
+  - Metrics: "jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation", "preferential_attachment".
+- `most_similar(ids=None, k=10, *, metric="jaccard", min_score=0.0)`: `{id: [(other, score), ...]}`, or a list for a single id.
+- `leiden(resolution=1.0, *, randomness=0.01, max_iter=3, seed=None)`: communities, each connected; weighted.
+- `modularity(communities, resolution=1.0)`.
+- `minimum_spanning_tree(*, maximum=False)`: `[(id, id, weight), ...]`, a spanning forest.
+- `k_shortest_paths(source, target, k, method=None)`: loopless paths (Yen), each `{"nodelist", "cost"}`.
+- `fastrp(dimension=128, *, iteration_weights=[0.0, 1.0, 1.0], self_influence=0.0, normalization_strength=0.0, seed=None)`: `{id: [floats]}` embeddings.
+- `node2vec_walks(walk_length=80, walks_per_node=10, *, p=1.0, q=1.0, sources=None, seed=None)`: lists of ids.
+- Randomised methods give the same result for the same seed.
+
+Directed algorithms follow the projection's `direction` ("in" reverses edges, "both" makes them undirected). Details: docs/analytics.md.
+
+## Pattern matching and variable-length paths
+
+```python
+m = Vertex()
+for id in ["ann", "bob"]:
+    m.add_node(id, {"age": 30}, labels=["Person"])
+m.add_node("acme", labels=["Company"])
+m.add_edge("ann", "bob", type="knows")
+m.add_edge("ann", "acme", type="works_at")
+m.add_edge("bob", "acme", type="works_at")
+rows = m.match("(a:Person)-[w:works_at]->(c:Company)<-[:works_at]-(b)")   # Cypher-like
+assert sorted((r["a"].id, r["b"].id) for r in rows) == [("ann", "bob"), ("bob", "ann")]
+rows = m.match("(a)-[p:knows|works_at*1..2]->(b {age: 30})", ids={"a": "ann"}, where={"b": label("Person")})
+assert [len(r["p"]) for r in rows] == [1]                                 # p: list of Edges
+paths = m["ann"].paths(1, 2, types=["knows", "works_at"])                 # Path objects
+assert [p.ids() for p in paths] == [["ann", "bob"], ["ann", "bob", "acme"], ["ann", "acme"]]
+```
+
+- `vertex.match(pattern, *, where={name: Expr}, ids={name: id or [ids]}, limit=None)`: one dict per match, `{name: Node | Edge | list[Edge]}` for the named variables.
+  - Nodes: `(name:Label1:Label2 {key: 'value', n: 1})`.
+  - Edges: `-[name:T1|T2*min..max]->`, `<-[...]-` or `-[...]-` (either direction), and `-->` / `<--` / `--`.
+  - Lengths: `*`, `*n`, `*n..m`, `*..m` or `*n..`.
+  - Comma-separated paths share variables.
+  - Each edge variable binds a different edge (Cypher); nodes may repeat.
+  - Anchor large graphs with a label, `ids` or a condition.
+- `node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None, uniqueness="trail", limit=None)`: `Path` objects with `.nodes`, `.edges`, `.ids()`, and `len()` = the number of edges.
+  - `uniqueness`: "trail" (no edge twice), "path" (no node twice) or "walk" (needs max_hops).
+- Details: docs/patterns.md.
 
 ## Random walks
 
@@ -122,6 +283,8 @@ g3 = Vertex.load_from_binary("graph.bin")
 assert sorted(g3.keys()) == sorted(g.keys())
 ```
 
+File saves are atomic (temp file + rename). Attribute values nest at most 100 levels; deeper values raise RuntimeError on save and load.
+
 ## Callbacks
 
 ```python
@@ -140,6 +303,7 @@ Also `on_edge_add_callbacks (vertex, edge)` and `on_edge_update_callbacks (verte
 
 ```python
 meta = g.get_metadata()                 # node_count, edge_count, average_degree, node_ids
+size = g.memory_usage(deep=True)        # bytes: structure (+ attribute dicts and values with deep)
 nxg = g.to_networkx()                   # networkx.DiGraph with node/edge attributes
 ```
 
@@ -162,14 +326,17 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 
 - `node.attr`, `node.meta`, `node.edges`, `node.inverse_edges`, `edge.attr`, `edge.meta` and `vertex.nodes` return copies. `node.attr["k"] = v` and `vertex.nodes[id] = node` are silently lost. Use `attr_set`, assign a whole dict, or the add/remove methods.
 - `vertex.meta` and the `on_*_callbacks` lists are live objects.
-- `bfs` / `traverse` results share the original nodes; `filter`, `expand` and `shortest_path*` return copies (a `filter` result shares the source's `meta` and callback lists).
-- Ordered output is in `result.meta["nodelist"]`; `keys()` is unordered.
+- `bfs`, `traverse`, `filter`, `expand` and `shortest_path*` return new graphs with copies of the nodes and edges (a `filter` result shares the source's `meta` and callback lists).
+- `Node` / `Edge` objects are handles into their `vertex`: compare them with `==`, not `is` (`g["a"] == g["a"]`, but not necessarily `g["a"] is g["a"]`). Edges only come from `add_edge`; `Edge(...)` raises `TypeError`. `remove_node` returns a detached copy; old handles to it raise `RuntimeError`.
+- Don't change the graph (add/remove nodes or edges, set attributes) from inside a traversal `filter` callable: the graph is in use and the change can raise `RuntimeError`.
+- Ordered output is in `result.meta["nodelist"]`; `keys()` is graph order (insertion order until nodes are removed), not visit order.
 - With several equally short paths, `shortest_path` returns one of them (unspecified which).
 - `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
+- Ctrl+C stops long computations (analytics, batch queries, `match`, `Node.paths`, searches, walks) with `KeyboardInterrupt`; the graph stays usable. Projections under 20,000 nodes + edges aren't checked (they finish quickly).
 
 ## More
 
 - [README.md](README.md): overview and examples
-- [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
+- [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/analytics.md](docs/analytics.md), [docs/patterns.md](docs/patterns.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
 - [python/ironweaver/__init__.pyi](python/ironweaver/__init__.pyi): full typed API with docstrings
 - [AGENTS.md](AGENTS.md): source layout for working on the library itself

@@ -23,6 +23,7 @@ import json
 import os
 import platform
 import random
+from itertools import islice
 import sys
 import time
 from dataclasses import dataclass, field
@@ -38,6 +39,14 @@ DEFAULT_OUTPUT = os.path.join(
     "networkx_comparison.md",
 )
 EDGE_TYPES = ("knows", "likes", "follows")
+
+# Name of the edge list in node-link JSON: `edges=` since networkx 3.4,
+# `link=` before (3.2 is the last release for Python 3.9)
+try:
+    nx.node_link_data(nx.Graph(), edges="edges")
+    NODE_LINK = {"edges": "edges"}
+except TypeError:
+    NODE_LINK = {"link": "edges"}
 
 
 @dataclass
@@ -220,17 +229,143 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
                "both use bidirectional BFS"))
 
     # Paths ----------------------------------------------------------------
-    t_iw, r_iw = best_of(lambda: iw.shortest_path_bfs(src, dst), repeats)
+    t_iw, r_iw = best_of(lambda: iw.shortest_path(src, dst, method="bfs"), repeats)
     t_nx, r_nx = best_of(lambda: nx.shortest_path(g, src, dst), repeats)
     assert len(r_iw.meta["nodelist"]) == len(r_nx)
     add(Result("Shortest path (unweighted)", "BFS shortest path", t_iw, t_nx,
                f"{len(r_nx) - 1} hops; both use bidirectional BFS"))
 
-    t_iw, r_iw = best_of(lambda: iw.shortest_path_dijkstra(src, dst, weight="weight"), repeats)
+    t_iw, r_iw = best_of(lambda: iw.shortest_path(src, dst, method="dijkstra", weight="weight"), repeats)
     t_nx, r_nx = best_of(lambda: nx.dijkstra_path(g, src, dst, weight="weight"), repeats)
     assert abs(r_iw.meta["cost"] - path_cost(g, r_nx)) < 1e-6
     add(Result("Shortest path (Dijkstra)", "weighted by `weight` attribute", t_iw, t_nx,
                f"cost {r_iw.meta['cost']:.2f}"))
+
+    # Batches: one call, queries run in parallel with the GIL released
+    prng = random.Random(seed + 1)
+    pairs = [(f"n{prng.randrange(n_nodes)}", f"n{prng.randrange(n_nodes)}") for _ in range(64)]
+    t_iw, r_iw = best_of(lambda: iw.shortest_paths(pairs, weight="weight"), repeats)
+    t_nx, r_nx = best_of(lambda: [nx.dijkstra_path_length(g, s, t, weight="weight")
+                                  if nx.has_path(g, s, t) else None for s, t in pairs], repeats)
+    assert all((a is None and b is None) or abs(a["cost"] - b) < 1e-6 for a, b in zip(r_iw, r_nx))
+    t_loop, _ = best_of(lambda: [iw.shortest_path(s, t, method="dijkstra", weight="weight") if r else None
+                                 for (s, t), r in zip(pairs, r_iw)], repeats)
+    add(Result("Batch shortest paths", f"{len(pairs)} Dijkstra pairs in one `shortest_paths` call", t_iw, t_nx,
+               f"one `shortest_path` call per pair: {fmt_time(t_loop)}"))
+
+    sources = [f"n{i}" for i in prng.sample(range(n_nodes), 16)]
+    t_iw, r_iw = best_of(lambda: iw.distances(sources, weight="weight"), repeats)
+    t_nx, r_nx = best_of(lambda: [nx.single_source_dijkstra_path_length(g, s, weight="weight") for s in sources], repeats)
+    assert all(len(r_iw[s]) == len(d) for s, d in zip(sources, r_nx))
+    add(Result("Distances from sources", f"Dijkstra from {len(sources)} sources to every reachable node", t_iw, t_nx,
+               f"{sum(len(d) for d in r_nx):,} distances"))
+
+    # Analytics on a projection ---------------------------------------------
+    # ironweaver times include building the projection each time.
+    t_iw, proj = best_of(lambda: iw.project(weight="weight"), repeats)
+    add(Result("Project graph", "`project(weight=...)`: compact read-only copy for analytics", t_iw, None,
+               f"{proj.memory_usage() / 1e6:.1f} MB"))
+
+    def simple(graph):
+        s = nx.Graph(graph.to_undirected(as_view=True))
+        s.remove_edges_from(list(nx.selfloop_edges(s)))
+        return s
+
+    t_iw, r_iw = best_of(lambda: iw.project().weakly_connected_components(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.weakly_connected_components(g)), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Weakly connected components", "`project().weakly_connected_components()`", t_iw, t_nx,
+               f"{len(r_iw):,} components"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().strongly_connected_components(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.strongly_connected_components(g)), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Strongly connected components", "`project().strongly_connected_components()`", t_iw, t_nx,
+               f"{len(r_iw):,} components"))
+
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").pagerank(), repeats)
+    try:
+        t_nx, r_nx = best_of(lambda: nx.pagerank(g, weight="weight"), repeats)
+        assert max(abs(r_iw[k] - r_nx[k]) for k in r_nx) < 1e-5
+        note = ""
+    except ImportError:  # networkx.pagerank needs scipy
+        t_nx, note = None, "networkx needs scipy (not installed)"
+    add(Result("PageRank", "weighted, `project(weight=...).pagerank()`", t_iw, t_nx, note))
+
+    t_iw, r_iw = best_of(lambda: iw.project().triangles(), repeats)
+    t_nx, r_nx = best_of(lambda: nx.triangles(simple(g)), repeats)
+    assert r_iw == r_nx
+    add(Result("Triangles", "per node, edges as undirected (networkx: incl. `nx.Graph` conversion)", t_iw, t_nx,
+               f"{sum(r_iw.values()) // 3:,} triangles"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().core_number(), repeats)
+    t_nx, r_nx = best_of(lambda: nx.core_number(simple(g)), repeats)
+    assert r_iw == r_nx
+    add(Result("Core number", "k-core decomposition (networkx: incl. `nx.Graph` conversion)", t_iw, t_nx,
+               f"max core {max(r_iw.values(), default=0)}"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().label_propagation(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.community.label_propagation_communities(simple(g))), repeats)
+    add(Result("Label propagation", "communities; networkx uses its semi-synchronous variant", t_iw, t_nx,
+               f"{len(r_iw):,} vs {len(r_nx):,} communities"))
+
+    t_iw, r_iw = best_of(lambda: iw.project().bfs_levels(["n0"]), repeats)
+    t_nx, r_nx = best_of(lambda: nx.single_source_shortest_path_length(g, "n0"), repeats)
+    assert r_iw == r_nx
+    add(Result("BFS levels", "hop distance from one node to all (parallel, direction-optimizing)", t_iw, t_nx,
+               f"{len(r_iw):,} reached"))
+
+    k = min(64, n_nodes)
+    t_iw, r_iw = best_of(lambda: iw.project().betweenness_centrality(k=k, seed=seed), repeats)
+    t_nx, r_nx = best_of(lambda: nx.betweenness_centrality(g, k=k, seed=seed), repeats)
+    add(Result("Betweenness (sampled)", f"estimated from {k} sources (different samples)", t_iw, t_nx,
+               f"max {max(r_iw.values(), default=0):.4f} vs {max(r_nx.values(), default=0):.4f}"))
+
+    spairs = [(f"n{prng.randrange(n_nodes)}", f"n{prng.randrange(n_nodes)}") for _ in range(10_000)]
+    spairs = [(a, b) for a, b in spairs if a != b]
+    t_iw, r_iw = best_of(lambda: iw.project().similarity(spairs, "adamic_adar"), repeats)
+    t_nx, r_nx = best_of(lambda: [x for _, _, x in nx.adamic_adar_index(simple(g), spairs)], repeats)
+    assert all(abs(a - b) < 1e-9 for a, b in zip(r_iw, r_nx))
+    add(Result("Similarity", f"Adamic-Adar for {len(spairs):,} pairs (networkx: incl. `nx.Graph` conversion)",
+               t_iw, t_nx, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project().most_similar(k=10), repeats)
+    add(Result("Most similar nodes", "top 10 by Jaccard for every node", t_iw, None, ""))
+
+    # The same undirected multigraph on both sides (parallel edges add up)
+    multi = nx.MultiGraph()
+    multi.add_nodes_from(g)
+    multi.add_edges_from(g.edges())
+    both = iw.project(direction="both")
+    t_iw, r_iw = best_of(lambda: iw.project(direction="both").leiden(seed=seed), repeats)
+    t_nx, r_nx = best_of(lambda: nx.community.louvain_communities(multi, seed=seed), repeats)
+    assert abs(both.modularity(r_nx) - nx.community.modularity(multi, r_nx)) < 1e-9
+    add(Result("Leiden vs Louvain", "communities (networkx has no Leiden without a backend)", t_iw, t_nx,
+               f"modularity {both.modularity(r_iw):.3f} vs {both.modularity(r_nx):.3f}"))
+
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").minimum_spanning_tree(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.minimum_spanning_edges(g.to_undirected(), weight="weight")), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Minimum spanning tree", "weighted, edges as undirected (a forest)", t_iw, t_nx,
+               f"{len(r_iw):,} edges"))
+
+    simple_di = nx.DiGraph()
+    for a, b, d in g.edges(data=True):
+        if a != b and (not simple_di.has_edge(a, b) or d["weight"] < simple_di[a][b]["weight"]):
+            simple_di.add_edge(a, b, weight=d["weight"])
+    s0, t0 = next((a, b) for a, b in pairs if nx.has_path(simple_di, a, b) and a != b)
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").k_shortest_paths(s0, t0, 10), repeats)
+    t_nx, r_nx = best_of(lambda: list(islice(nx.shortest_simple_paths(simple_di, s0, t0, weight="weight"), 10)),
+                         repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("k shortest paths", "10 loopless weighted paths (Yen)", t_iw, t_nx, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project(direction="both").fastrp(128, seed=seed), repeats)
+    add(Result("FastRP embeddings", "128 dimensions, 3 iterations", t_iw, None, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project().node2vec_walks(20, 2, p=0.5, q=2.0, seed=seed), repeats)
+    add(Result("node2vec walks", "2 walks of 20 nodes per node, p=0.5, q=2", t_iw, None,
+               f"{len(r_iw):,} walks"))
 
     # Weighted grid: A* vs Dijkstra ------------------------------------------
     side = max(2, int(n_nodes ** 0.5))
@@ -315,11 +450,11 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
 
     # Serialization --------------------------------------------------------
     t_iw, s_iw = best_of(lambda: iw.save_to_json(), repeats)
-    t_nx, s_nx = best_of(lambda: json.dumps(nx.node_link_data(g, edges="edges")), repeats)
+    t_nx, s_nx = best_of(lambda: json.dumps(nx.node_link_data(g, **NODE_LINK)), repeats)
     add(Result("Serialize to JSON string", "`save_to_json()` vs `node_link_data` + `json.dumps`", t_iw, t_nx))
 
     t_iw, r_iw = best_of(lambda: Vertex.load_from_json(s_iw), repeats)
-    t_nx, r_nx = best_of(lambda: nx.node_link_graph(json.loads(s_nx), edges="edges"), repeats)
+    t_nx, r_nx = best_of(lambda: nx.node_link_graph(json.loads(s_nx), **NODE_LINK), repeats)
     assert r_iw.node_count() == r_nx.number_of_nodes()
     add(Result("Load from JSON string", "`load_from_json()` vs `json.loads` + `node_link_graph`", t_iw, t_nx))
 

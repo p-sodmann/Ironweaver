@@ -153,6 +153,16 @@ def build_networkx(n_nodes: int, n_edges: int, seed: int, with_attrs: bool = Tru
 BUILDERS = {"ironweaver": build_ironweaver, "networkx": build_networkx}
 
 
+def node_link(nx) -> dict:
+    """Keyword naming the edge list in node-link JSON: `edges=` since
+    networkx 3.4, `link=` before (3.2 is the last release for Python 3.9)."""
+    try:
+        nx.node_link_data(nx.Graph(), edges="edges")
+        return {"edges": "edges"}
+    except TypeError:
+        return {"link": "edges"}
+
+
 def save_json(lib: str, g, path: str) -> None:
     if lib == "ironweaver":
         g.save_to_json(path)
@@ -160,7 +170,7 @@ def save_json(lib: str, g, path: str) -> None:
         import networkx as nx
 
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(nx.node_link_data(g, edges="edges"), fh)
+            json.dump(nx.node_link_data(g, **node_link(nx)), fh)
 
 
 def load_json(lib: str, path: str):
@@ -171,7 +181,7 @@ def load_json(lib: str, path: str):
     import networkx as nx
 
     with open(path, encoding="utf-8") as fh:
-        return nx.node_link_graph(json.load(fh), edges="edges")
+        return nx.node_link_graph(json.load(fh), **node_link(nx))
 
 
 def save_binary(lib: str, g, path: str) -> None:

@@ -30,7 +30,8 @@ copies; use ``node.attr_set(key, value)`` to change an attribute. See
 # Import the Rust extension module classes
 from typing import Callable, Iterable
 
-from ._ironweaver import Vertex, Node, Edge, Path, ObservedDictionary
+from ._ironweaver import Vertex, Node, Edge, Path, Projection, ObservedDictionary, Expr, Attr, attr, label, edge_type
+from ._ironweaver import __version__
 
 # Import the Python LGF parser
 from .lgf_parser import parse_lgf, parse_lgf_file
@@ -81,6 +82,14 @@ class NodeView:
     def type(self):
         """Shortcut for ``node.attr.get("type")``."""
         return self._node.attr.get("type")
+
+    @property
+    def labels(self) -> list:
+        """The node's labels."""
+        return self._node.labels
+
+    def has_label(self, label: str) -> bool:
+        return self._node.has_label(label)
 
     @property
     def edges(self):
@@ -193,8 +202,13 @@ class EdgeView:
 
     @property
     def type(self):
-        """Shortcut for ``edge.attr.get("type")``."""
-        return self._edge.attr.get("type")
+        """The edge's type (``edge.type``)."""
+        return self._edge.type
+
+    @property
+    def id(self) -> int:
+        """The edge's persistent id."""
+        return self._edge.id
 
     @property
     def from_node(self):
@@ -231,11 +245,11 @@ class EdgeView:
 
     def __eq__(self, other):
         if isinstance(other, EdgeView):
-            return self._edge is other._edge
+            return self._edge == other._edge
         return NotImplemented
 
     def __hash__(self):
-        return id(self._edge)
+        return hash(self._edge)
 
 
 class FilterResult:
@@ -263,9 +277,10 @@ def _filter(self, predicate=None, **kwargs):
 
     Parameters
     ----------
-    predicate : Callable[[NodeView], bool], optional
+    predicate : Callable[[NodeView], bool] or Expr, optional
         A callable (typically a lambda) that receives a :class:`NodeView` and
-        returns ``True`` for nodes that should be kept.  The ``NodeView``
+        returns ``True`` for nodes that should be kept, or an :class:`Expr`
+        (``(attr("score") < 0.8) & label("Person")``) evaluated in Rust.  The ``NodeView``
         exposes a clean API::
 
             n.id                    # node id (str)
@@ -317,6 +332,10 @@ def _filter(self, predicate=None, **kwargs):
             "Cannot mix filtering modes: provide either a predicate function "
             "or keyword arguments, not both"
         )
+
+    if isinstance(predicate, Expr):
+        # Evaluated in Rust: (attr("age") > 30) & label("Person")
+        return self._original_filter(where=predicate)
 
     if predicate is not None:
         # Predicate-based filtering — wrap each node in a NodeView
@@ -492,6 +511,31 @@ def _setup_traversal_methods():
 _setup_traversal_methods()
 
 
+# ---------------------------------------------------------------------------
+# Vertex.project: callable filters receive NodeView / EdgeView
+# ---------------------------------------------------------------------------
+
+def _vertex_project(self, weight=None, default_weight=None, *, direction=None,
+                    nodes=None, node_filter=None, edge_filter=None):
+    """Build a :class:`Projection`: a compact, read-only copy of (part of) the
+    graph for analytics. See ``Vertex.project`` in the stubs for the options.
+
+    ``node_filter`` / ``edge_filter`` take a dict (attribute equality) or a
+    callable, which receives a :class:`NodeView` / :class:`EdgeView`.
+    """
+    if callable(node_filter):
+        fn = node_filter
+        node_filter = lambda node: fn(NodeView(node))  # noqa: E731
+    if callable(edge_filter):
+        edge_filter = _wrap_edge_filter(edge_filter)
+    return self._original_project(weight, default_weight, direction=direction, nodes=nodes,
+                                  node_filter=node_filter, edge_filter=edge_filter)
+
+
+Vertex._original_project = Vertex.project
+Vertex.project = _vertex_project
+
+
 # Export all public components
 __all__ = [
     "Vertex",
@@ -500,7 +544,13 @@ __all__ = [
     "EdgeView",
     "Edge",
     "Path",
+    "Projection",
     "ObservedDictionary",
+    "Expr",
+    "Attr",
+    "attr",
+    "label",
+    "edge_type",
     "parse_lgf",
     "parse_lgf_file",
 ]

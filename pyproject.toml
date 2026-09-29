@@ -4,33 +4,65 @@ build-backend = "maturin"
 
 [project]
 name = "ironweaver"
-version = "0.1.0"
-description = "A Python graph library with Rust-powered performance"
+dynamic = ["version"]  # from Cargo.toml
+description = "A fast property graph library for Python, with graph algorithms, pattern matching and analytics in Rust"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Philipp Sodmann", email = "psodmann@gmail.com" }]
+keywords = ["graph", "network", "graph-algorithms", "pagerank", "community-detection", "pattern-matching", "rust"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
 dependencies = []
+
+[project.optional-dependencies]
+networkx = ["networkx>=3.0"]  # Vertex.to_networkx
+test = ["pytest>=7", "networkx>=3.0", "numpy", "scipy", "psutil"]
+
+[project.urls]
+Homepage = "https://github.com/p-sodmann/Ironweaver"
+Documentation = "https://p-sodmann.github.io/Ironweaver/"
+Repository = "https://github.com/p-sodmann/Ironweaver"
+Changelog = "https://github.com/p-sodmann/Ironweaver/blob/main/CHANGELOG.md"
+Issues = "https://github.com/p-sodmann/Ironweaver/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "ironweaver._ironweaver"
 python-source = "python"
+# The sdist has what's needed to build and test; not the repo tooling
+exclude = [
+    { path = ".vscode/**", format = "sdist" },
+    { path = ".github/**", format = "sdist" },
+    { path = "benchmarks/**", format = "sdist" },
+    { path = "performance_results/**", format = "sdist" },
+    { path = "assets/**", format = "sdist" },
+    { path = "**/__pycache__/**", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Old tests still exercise the deprecated shorthands on purpose
+filterwarnings = [
+    "ignore:shortest_path_bfs\\(\\) is deprecated:DeprecationWarning",
+    "ignore:shortest_path_dijkstra\\(\\) is deprecated:DeprecationWarning",
+]

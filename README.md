@@ -1,27 +1,37 @@
 # IronWeaver
 
-![Logo](assets/logo.png)
+![Logo](https://raw.githubusercontent.com/p-sodmann/Ironweaver/main/assets/logo.png)
 
-A high-performance, Rust-powered Python library for graph data structures and algorithms. Built with PyO3, `IronWeaver` provides fast, memory-efficient graph operations with seamless Python integration.
+A fast property graph library for Python, with its engine in Rust. Build and change graphs from Python; run traversals, shortest paths, graph analytics and pattern matching in Rust, most of them on all cores.
+
+**Documentation:** <https://p-sodmann.github.io/Ironweaver/> · **Changelog:** [CHANGELOG.md](https://github.com/p-sodmann/Ironweaver/blob/main/CHANGELOG.md)
 
 ## Features
 
-- **High Performance**: Rust-powered backend for fast graph operations
-- **Rich Graph API**: Intuitive Python interface for creating and manipulating graphs
-- **Advanced Algorithms**: BFS, shortest path, graph expansion, and filtering
-- **Lambda Filtering**: Filter nodes with expressive predicates (`n.type`, `n.attr("score")`, etc.)
-- **NetworkX Integration**: Seamless conversion to NetworkX for visualization
-- **Serialization**: JSON and binary save/load capabilities
-- **Event-Driven**: Callback system for node and edge modifications
-- **Memory Efficient**: Optimized Rust implementation for large graphs
-- **LGF Parsing**: Read Labeled Graph Format files directly from Python
+- **Property graph**: nodes with string ids, labels and attributes; typed edges with persistent ids; callbacks on changes; bulk loading.
+- **Traversal and paths**: BFS / DFS, expansion, filtering, BFS / Dijkstra / A* shortest paths, many shortest paths at once in parallel, k shortest paths, random walks.
+- **Analytics** on a read-only projection, released from the GIL and parallel:
+  - components, PageRank, betweenness, closeness and harmonic centrality;
+  - triangles, clustering, k-core numbers;
+  - label propagation, Leiden communities, modularity;
+  - node similarity, spanning trees, FastRP embeddings and node2vec walks.
+- **Pattern matching**: Cypher-like patterns (`(a:Person)-[:KNOWS*1..3]->(b)`) and variable-length paths.
+- **Filter expressions evaluated in Rust**: `(attr("age") > 30) & label("Person")`.
+- **Checked results**: validated against networkx and the LDBC Graphalytics reference outputs, and benchmarked against networkx, igraph, rustworkx and networkit ([report](https://github.com/p-sodmann/Ironweaver/blob/main/performance_results/library_comparison.md)).
+- **Files**: JSON and binary formats with checksums, atomic saves, and a [compatibility promise](https://github.com/p-sodmann/Ironweaver/blob/main/docs/format.md); the LGF text format; conversion to networkx.
+- **A Rust crate**: the engine is also available on its own as [`ironweaver-core`](https://crates.io/crates/ironweaver-core).
 
-> **Using an LLM or coding agent?** [`llms.txt`](llms.txt) is a compact,
+> **Using an LLM or coding agent?** [`llms.txt`](https://github.com/p-sodmann/Ironweaver/blob/main/llms.txt) is a compact,
 > fully runnable guide to the whole API (plus the gotchas) meant to be pasted
 > into a model's context.
 
 ## Installation
-Build the package from source to get the latest version:
+
+```bash
+pip install ironweaver
+```
+
+Wheels are available for Linux (x86_64, aarch64; glibc and musl), macOS (Intel and Apple Silicon) and Windows (x64), for Python 3.9–3.14. To build from source, you need a Rust toolchain (1.85 or newer):
 
 ```bash
 pip install maturin
@@ -80,7 +90,7 @@ plt.show()
 
 ### Filtering with Lambdas
 
-Filter nodes using expressive lambda predicates. The argument `n` is a [`NodeView`](docs/filtering.md) — a read-only proxy exposing `.id`, `.type`, `.attr(key)`, `.degree`, `.has_edge_to(id)`, and more:
+Filter nodes using expressive lambda predicates. The argument `n` is a [`NodeView`](https://github.com/p-sodmann/Ironweaver/blob/main/docs/filtering.md) — a read-only proxy exposing `.id`, `.type`, `.attr(key)`, `.degree`, `.has_edge_to(id)`, and more:
 
 ```python
 # Keep active nodes of certain types with high scores
@@ -103,14 +113,14 @@ sub = graph.filter(type="process", status="active")   # multiple kwargs are ANDe
 
 > **Note:** calling `graph.filter()` with no arguments raises `ValueError`. Exactly one filtering mode must be used. Mixing modes (e.g. a predicate *and* keyword args) also raises `ValueError`.
 
-See the [Filtering Documentation](docs/filtering.md) for the full `NodeView` API.
+See the [Filtering Documentation](https://github.com/p-sodmann/Ironweaver/blob/main/docs/filtering.md) for the full `NodeView` API.
 
 ### Shortest Path Finding
 
 ```python
 # Returns a Vertex subgraph containing only the path nodes.
 # Raises ValueError if either node is missing or the target is unreachable.
-result = graph.shortest_path_bfs('node1', 'node3')
+result = graph.shortest_path('node1', 'node3', method='bfs')
 print(f"Path order: {result.meta['nodelist']}")  # ordered node IDs
 print(f"Path nodes: {result.keys()}")
 
@@ -121,11 +131,11 @@ plt.title("Shortest Path from node1 to node3")
 plt.show()
 
 # Ignore edge direction, or walk edges backwards
-result = graph.shortest_path_bfs('node3', 'node1', direction='both')
+result = graph.shortest_path('node3', 'node1', method='bfs', direction='both')
 
 # Weighted shortest path (Dijkstra). Costs come from the "weight" edge
 # attribute; edges without it cost default_weight (1.0).
-result = graph.shortest_path_dijkstra('node1', 'node3', weight='weight')
+result = graph.shortest_path('node1', 'node3', method='dijkstra', weight='weight')
 print(result.meta['nodelist'], result.meta['cost'])
 
 # One entry point for every algorithm: method="bfs", "dijkstra" or "astar"
@@ -285,6 +295,8 @@ print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
 
+Saving to a file is atomic: the graph is written to a temporary file next to the target and renamed over it, so a failed or interrupted save never leaves a half-written file (the previous file stays as it was). Attribute values may nest lists and dicts at most 100 levels deep; saving deeper values (or a list that contains itself) and loading files with deeper values raise `RuntimeError`.
+
 ### LGF (Labeled Graph Format) Support
 
 IronWeaver supports reading graphs from the Labeled Graph Format (LGF), which provides a human-readable text format for representing graphs with nodes, edges, and attributes.
@@ -359,7 +371,7 @@ node_id NodeType
 import("other_file.lgf")
 ```
 
-See the [LGF Documentation](docs/LGF.md) for detailed syntax and examples.
+See the [LGF Documentation](https://github.com/p-sodmann/Ironweaver/blob/main/docs/LGF.md) for detailed syntax and examples.
 
 ## Gotchas
 
@@ -374,14 +386,23 @@ These behaviours surprise people (and LLMs) most often:
   `remove_edge`.
 - **`vertex.meta` and the `on_*_callbacks` lists are live** Python objects:
   `vertex.meta["k"] = v` and `vertex.on_node_add_callbacks.append(cb)` work.
-- **Result graphs.** `node.bfs()` and `node.traverse()` return a `Vertex`
-  holding the *original* node objects. `filter`, `expand`,
-  `shortest_path` (and its `shortest_path_bfs` / `shortest_path_dijkstra`
-  shorthands) return *copies* of the
-  nodes and edges, so changing them does not touch the source graph (a
-  `filter` result does share the source's `meta` dict and callback lists).
+- **Result graphs.** `node.bfs()`, `node.traverse()`, `filter`, `expand`
+  and `shortest_path` return new graphs with *copies* of the nodes and edges, so
+  changing them does not touch the source graph (a `filter` result does
+  share the source's `meta` dict and callback lists).
+- **Nodes and edges are handles.** The graph data lives in Rust; a `Node` or
+  `Edge` object refers to one node or edge of its `vertex`. Compare them with
+  `==` (`graph["a"] == graph["a"]`), not `is`. Edges are only created with
+  `add_edge` (`Edge(...)` raises `TypeError`); `Node(id, attr)` makes a node
+  in its own one-node `Vertex`. `remove_node` returns a detached copy, and
+  using an old handle to a removed node or edge raises `RuntimeError`.
+- **Don't change the graph from a traversal filter.** While `bfs` /
+  `traverse` / `bfs_search` run, a callable `filter` may read the graph, but
+  changing it (adding or removing nodes and edges, assigning attributes) can
+  raise `RuntimeError`.
 - **Ordered results live in `meta`.** Traversal order and paths are in
-  `result.meta["nodelist"]`; `result.keys()` has no meaningful order.
+  `result.meta["nodelist"]`; `result.keys()` is graph order (insertion order
+  until nodes are removed), not visit order.
 - **Shortest-path ties.** When several shortest paths exist,
   `shortest_path` returns one of them; which one is not specified.
 - **`Vertex.load_from_json(text)`** treats a string starting with `{` as JSON
@@ -409,7 +430,7 @@ count = graph.node_count() -> int
 edge = graph.add_edge(from_id: str, to_id: str, attr: dict = None) -> Edge
 
 # Removal (neighbours' edge lists are kept consistent)
-node = graph.remove_node(id: str) -> Node                           # also drops its edges
+node = graph.remove_node(id: str) -> Node                           # also drops its edges; returns a detached copy
 count = graph.remove_edge(from_id: str, to_id: str, attr: dict = None) -> int
 
 # Algorithms
@@ -422,17 +443,43 @@ result = graph.shortest_path(source: str, target: str, method: str = None,
 # or distances="<vertex.meta key>"). None: astar if an A* option is given,
 # dijkstra if weight is given, else bfs. meta: nodelist, cost, method, expanded.
 methods = Vertex.path_methods() -> dict   # {name: description}
-result = graph.shortest_path_bfs(start: str, end: str, max_depth: int = None,
-                                 direction: str = "out") -> Vertex
 # result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable
-result = graph.shortest_path_dijkstra(start: str, end: str, weight: str = "weight",
-                                      default_weight: float = 1.0, max_cost: float = None,
-                                      direction: str = "out") -> Vertex
-# result.meta["cost"] holds the total path cost
+# shortest_path_bfs / shortest_path_dijkstra are deprecated: use method="bfs" / "dijkstra"
+paths = graph.shortest_paths(pairs: list[tuple[str, str]], method=None, *, weight=None,
+                             default_weight=None, max_cost=None, direction="out")
+# -> [{"nodelist": [...], "cost": ...} or None, ...]; many queries in parallel, GIL released
+dist = graph.distances(sources: list[str], targets: list[str] = None, method=None, ...)
+# -> {source: {node: cost}}; "bfs" or "dijkstra" only
+proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes=None,
+                     node_filter=None, edge_filter=None) -> Projection
+# compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None),
+# proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
+# analytics (docs/analytics.md): proj.weakly_connected_components(), proj.strongly_connected_components(),
+# proj.topological_sort(), proj.find_cycle(), proj.degree_centrality("out"|"in"),
+# proj.pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6), proj.triangles(),
+# proj.clustering(), proj.core_number(), proj.label_propagation(max_iter=20),
+# proj.bfs_levels(sources, max_depth=None), proj.betweenness_centrality(k=None, ...),
+# proj.closeness_centrality(), proj.harmonic_centrality(), proj.similarity(pairs, metric="jaccard"),
+# proj.most_similar(ids=None, k=10), proj.leiden(resolution=1.0, *, seed=None), proj.modularity(communities),
+# proj.minimum_spanning_tree(), proj.k_shortest_paths(source, target, k), proj.fastrp(dimension=128),
+# proj.node2vec_walks(walk_length=80, walks_per_node=10, *, p=1.0, q=1.0)
+node = graph.add_node(id, attr=None, labels=None)       # node.labels, add_label, remove_label, has_label
+graph.add_nodes(ids_or_id_attr_pairs, *, labels=None, attrs=None) -> int     # bulk; attrs as columns
+graph.add_edges(pairs_or_triples, *, type=None, attrs={"weight": [...]}) -> int   # bulk; all-or-nothing
+edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.id (persistent int)
+graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]
+graph.create_index(name) -> bool; graph.drop_index(name); graph.indexes -> list[str]
+graph.find(name, value) -> list[Node]; graph.find_range(name, low=None, high=None, *, inclusive="both")
+# expressions evaluated in Rust: from ironweaver import attr, label, edge_type
+graph.filter((attr("age") > 30) & label("Person")); graph.project(edge_filter=edge_type("knows"))
+rows = graph.match("(a:Person)-[k:knows*1..2]->(b)", where=None, ids=None, limit=None)
+# -> [{"a": Node, "k": [Edge, ...], "b": Node}, ...]; Cypher-like patterns (docs/patterns.md)
+paths = node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None,
+                   uniqueness="trail", limit=None) -> list[Path]   # path.nodes, path.edges
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
-pruned_count = graph.prune() -> int            # remove dangling edges after filter/subset
+pruned_count = graph.prune() -> int            # always 0: edges never dangle (kept for compatibility)
 walks = graph.random_walks(start_node_id, max_length, num_attempts,
                             min_length=None, allow_revisit=False,
                             include_edge_types=False,
@@ -444,6 +491,7 @@ walks = graph.random_walks(start_node_id, max_length, num_attempts,
 # Conversion and analysis
 nx_graph = graph.to_networkx() -> networkx.DiGraph
 metadata = graph.get_metadata() -> dict
+graph.memory_usage(*, deep=False) -> int   # bytes (deep: plus attribute dicts and values)
 
 # Persistence
 graph.save_to_json("path.json")              # write to file
@@ -493,7 +541,36 @@ attrs = edge.attr           # Edge attributes dict (a copy; use edge.attr_set)
 
 #### `Path`
 
-> **Note:** No current public API method returns a `Path` object directly. `shortest_path_bfs` and the traversal methods return a `Vertex` subgraph — use `result.meta["nodelist"]` for the ordered list of node IDs. `Path` is reserved for future use.
+`Node.paths(...)` returns `Path` objects: `path.nodes`, `path.edges`, `path.ids()`, and `len(path)` (the number of edges). `shortest_path` and the traversals return a `Vertex` subgraph instead; its `meta["nodelist"]` holds the ordered node ids.
+
+## Using the Rust core directly
+
+The graph and all algorithms live in a pure-Rust crate,
+[`crates/ironweaver-core`](https://github.com/p-sodmann/Ironweaver/tree/main/crates/ironweaver-core), which has no Python
+dependency; the Python module is a thin PyO3 layer on top of it. Rust code can
+use the core on its own:
+
+```toml
+[dependencies]
+ironweaver-core = { path = "crates/ironweaver-core" }
+```
+
+```rust
+use ironweaver_core::pathfinding::{find_path, PathQuery};
+use ironweaver_core::{Graph, GraphError, Record, Value};
+
+let mut g: Graph<Record, Record> = Graph::new();
+let a = g.add_node("a", Record::default())?;
+let b = g.add_node("b", Record::default())?;
+g.add_edge(a, b, Record::with_attr([("weight", Value::from(2.0))]))?;
+let path = find_path::<_, _, GraphError>(&g, a, b, &mut PathQuery::dijkstra())?.unwrap();
+assert_eq!(path.cost, 2.0);
+```
+
+`Graph<N, E>` is generic over the node and edge payloads; algorithms read
+them through the `Attributes` trait (implemented by `Record`, a map of
+`Value`s). `ironweaver_core::format` reads and writes the same JSON / binary
+files as the Python `save_to_*` / `load_from_*` methods.
 
 ## Performance
 
@@ -501,7 +578,7 @@ attrs = edge.attr           # Edge attributes dict (a copy; use edge.attr_set)
 
 - **Rust Backend**: Core algorithms implemented in Rust for maximum speed
 - **Memory Efficient**: Optimized data structures for large graphs
-- **Minimal Overhead**: PyO3 bindings provide near-native performance
+- **Minimal Overhead**: nodes and edges are stored in Rust (no Python object per node or edge); PyO3 bindings provide near-native performance
 - **Scalable**: Tested with graphs containing thousands of nodes and edges
 
 ### Benchmarks
@@ -548,7 +625,8 @@ cd ironweaver
 maturin develop
 
 # Run tests
-pytest
+pytest                        # Python API (needs the built extension)
+cargo test -p ironweaver-core # pure-Rust core
 ```
 
 ## License

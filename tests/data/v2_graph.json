@@ -1,0 +1,129 @@
+{
+  "nodes": {
+    "a": {
+      "id": "a",
+      "labels": [
+        "Person"
+      ],
+      "attr": {
+        "name": {
+          "String": "alpha"
+        },
+        "score": {
+          "Float": 1.5
+        },
+        "flag": {
+          "Bool": true
+        },
+        "tags": {
+          "List": [
+            {
+              "String": "x"
+            },
+            {
+              "Int": 2
+            },
+            "None"
+          ]
+        },
+        "nested": {
+          "Dict": {
+            "k": {
+              "Int": 3
+            }
+          }
+        }
+      },
+      "meta": {
+        "note": {
+          "String": "m"
+        }
+      },
+      "edge_ids": [
+        "0",
+        "1"
+      ],
+      "inverse_edge_ids": [
+        "3"
+      ]
+    },
+    "b": {
+      "id": "b",
+      "labels": [],
+      "attr": {
+        "name": {
+          "String": "beta"
+        }
+      },
+      "meta": {},
+      "edge_ids": [],
+      "inverse_edge_ids": [
+        "0"
+      ]
+    },
+    "c": {
+      "id": "c",
+      "labels": [],
+      "attr": {},
+      "meta": {},
+      "edge_ids": [
+        "3"
+      ],
+      "inverse_edge_ids": [
+        "1"
+      ]
+    }
+  },
+  "edges": {
+    "0": {
+      "id": "0",
+      "from_id": "a",
+      "to_id": "b",
+      "type": "knows",
+      "attr": {
+        "weight": {
+          "Float": 0.25
+        }
+      },
+      "meta": {}
+    },
+    "1": {
+      "id": "1",
+      "from_id": "a",
+      "to_id": "c",
+      "type": "likes",
+      "attr": {},
+      "meta": {}
+    },
+    "3": {
+      "id": "3",
+      "from_id": "c",
+      "to_id": "a",
+      "type": "back",
+      "attr": {},
+      "meta": {}
+    }
+  },
+  "meta": {
+    "title": {
+      "String": "legacy"
+    }
+  },
+  "metadata": {
+    "version": {
+      "String": "2.0"
+    },
+    "node_count": {
+      "Int": 3
+    },
+    "edge_count": {
+      "Int": 3
+    },
+    "timestamp": {
+      "String": "2026-09-29T09:12:30.188108464+00:00"
+    },
+    "next_edge_id": {
+      "String": "4"
+    }
+  }
+}

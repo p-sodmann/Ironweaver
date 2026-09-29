@@ -1,12 +1,16 @@
 // vertex/mod.rs
 
-mod core;
-mod callbacks;
-mod manipulation;
-mod serialization;
+mod algorithms;
 mod analysis;
-pub(crate) mod algorithms;
-pub(crate) mod pathfinding;
+mod batch;
+mod bulk;
+pub(crate) mod callbacks;
+mod core;
+pub(crate) mod index;
+mod manipulation;
+mod pathfinding;
+pub(crate) mod query;
+mod serialization;
 pub(crate) mod subgraph;
 
 pub use core::Vertex;

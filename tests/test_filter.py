@@ -1,10 +1,3 @@
-import os
-import sys
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-PYTHON_DIR = os.path.join(ROOT, "python")
-sys.path.insert(0, PYTHON_DIR)
-
 try:  # pragma: no cover - optional build step
     from ironweaver import Vertex, NodeView
     from ironweaver.filter.predicates import (

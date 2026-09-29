@@ -8,3 +8,6 @@
 *.lock
 *.pyc
 *.in
+/benchmarks/data
+
+/site

@@ -1,6 +1,6 @@
 # ironweaver vs networkx: memory
 
-Generated 2026-09-26 10:18 by `benchmarks/compare_networkx_memory.py`.
+Generated 2026-09-28 19:18 by `benchmarks/compare_networkx_memory.py`.
 
 | | |
 |---|---|
@@ -24,10 +24,10 @@ ironweaver with networkx (networkx ÷ ironweaver).
 
 | Measurement | Description | ironweaver | networkx | ironweaver is | Notes |
 |---|---|---:|---:|---:|---|
-| Resident graph | nodes (`index`, `group`) and edges (`type`, `weight`) | 35.8 MiB | 41.0 MiB | **1.1× smaller** | ironweaver: 3.7 KiB, networkx: 4.2 KiB per node + 6 edges |
-| Resident graph, no attributes | structure only | 19.0 MiB | 31.6 MiB | **1.7× smaller** | ironweaver: 1.9 KiB, networkx: 3.2 KiB per node + 6 edges |
-| Peak while loading JSON | graph + parser buffers, from a file | 85.4 MiB | 58.4 MiB | 1.5× larger | `load_from_json` vs `json.load` + `node_link_graph` |
-| Extra peak while saving JSON | on top of the resident graph | 21.6 MiB | 13.7 MiB | 1.6× larger | `save_to_json` vs `node_link_data` + `json.dump` |
+| Resident graph | nodes (`index`, `group`) and edges (`type`, `weight`) | 21.8 MiB | 40.9 MiB | **1.9× smaller** | ironweaver: 2.2 KiB, networkx: 4.2 KiB per node + 6 edges |
+| Resident graph, no attributes | structure only | 7.0 MiB | 31.6 MiB | **4.5× smaller** | ironweaver: 736 B, networkx: 3.2 KiB per node + 6 edges |
+| Peak while loading JSON | graph + parser buffers, from a file | 75.1 MiB | 58.4 MiB | 1.3× larger | `load_from_json` vs `json.load` + `node_link_graph` |
+| Extra peak while saving JSON | on top of the resident graph | 18.1 MiB | 13.8 MiB | 1.3× larger | `save_to_json` vs `node_link_data` + `json.dump` |
 
 ### On disk
 
@@ -42,10 +42,10 @@ ironweaver with networkx (networkx ÷ ironweaver).
 
 | Measurement | Description | ironweaver | networkx | ironweaver is | Notes |
 |---|---|---:|---:|---:|---|
-| Resident graph | nodes (`index`, `group`) and edges (`type`, `weight`) | 357.7 MiB | 413.6 MiB | **1.2× smaller** | ironweaver: 3.7 KiB, networkx: 4.2 KiB per node + 6 edges |
-| Resident graph, no attributes | structure only | 190.0 MiB | 319.8 MiB | **1.7× smaller** | ironweaver: 1.9 KiB, networkx: 3.3 KiB per node + 6 edges |
-| Peak while loading JSON | graph + parser buffers, from a file | 858.6 MiB | 587.7 MiB | 1.5× larger | `load_from_json` vs `json.load` + `node_link_graph` |
-| Extra peak while saving JSON | on top of the resident graph | 228.9 MiB | 137.4 MiB | 1.7× larger | `save_to_json` vs `node_link_data` + `json.dump` |
+| Resident graph | nodes (`index`, `group`) and edges (`type`, `weight`) | 217.4 MiB | 413.6 MiB | **1.9× smaller** | ironweaver: 2.2 KiB, networkx: 4.2 KiB per node + 6 edges |
+| Resident graph, no attributes | structure only | 70.0 MiB | 319.8 MiB | **4.6× smaller** | ironweaver: 734 B, networkx: 3.3 KiB per node + 6 edges |
+| Peak while loading JSON | graph + parser buffers, from a file | 755.1 MiB | 587.7 MiB | 1.3× larger | `load_from_json` vs `json.load` + `node_link_graph` |
+| Extra peak while saving JSON | on top of the resident graph | 187.6 MiB | 137.3 MiB | 1.4× larger | `save_to_json` vs `node_link_data` + `json.dump` |
 
 ### On disk
 

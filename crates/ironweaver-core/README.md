@@ -1,0 +1,83 @@
+# ironweaver-core
+
+The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) Python package, in pure Rust (no Python dependency).
+
+- **A directed property multigraph**, `Graph<N, E>`.
+  - Nodes have unique string ids, sorted label sets (interned, with a label index) and a payload `N`.
+  - Edges have persistent ids (never reused), an optional type and a payload `E`.
+  - Handles (`NodeIx` / `EdgeIx`) never alias a removed node or edge.
+- **Changes as data.** `Op` values apply to a graph and return the ops that undo them, and `Graph::apply_all` applies a batch all-or-nothing. That's the base for a write-ahead log, replication or rollback.
+- **Filter expressions** (`Expr`): comparisons, membership and existence on attribute paths, labels and edge types, and `and` / `or` / `not`.
+- **Analytics on a `Projection`**, a compact read-only CSR snapshot of (part of) a graph that is `Send + Sync` and can be shared across threads. Many of the algorithms run in parallel:
+  - components, topological order and cycle detection;
+  - PageRank, betweenness, closeness, harmonic and degree centrality;
+  - triangles, clustering and k-core numbers;
+  - label propagation, Leiden communities and modularity;
+  - node similarity, spanning forests, k shortest paths, BFS levels and batch shortest paths;
+  - FastRP embeddings and node2vec walks.
+- **Queries:** Cypher-like pattern matching and variable-length path expansion.
+- **Pathfinding:** BFS, Dijkstra and A* with pluggable heuristics.
+- **A file format** (JSON, or binary with a header and a CRC32), with atomic saves.
+
+Payloads are read only through the `Attributes` trait, and user callbacks return `Result<_, X>` for your own error type `X`. `Record` (maps of `Value`s) is the ready-made payload.
+
+## Example
+
+```rust
+use ironweaver_core::algo::{leiden, pagerank, Leiden, PageRank};
+use ironweaver_core::pathfinding::{find_path, EdgeCost, PathQuery};
+use ironweaver_core::query::{find_matches, Pattern};
+use ironweaver_core::{Direction, Graph, GraphError, Op, Projection, Record, Value};
+
+fn main() -> Result<(), GraphError> {
+    let mut g: Graph<Record, Record> = Graph::new();
+    for id in ["ann", "bob", "cat", "dan"] {
+        let ix = g.add_node(id, Record::default())?;
+        g.add_label(ix, "Person")?;
+    }
+    let node = |g: &Graph<Record, Record>, id: &str| g.node_ix(id).unwrap();
+    for (a, b, w) in [("ann", "bob", 1.0), ("bob", "cat", 2.0), ("ann", "cat", 5.0), ("cat", "dan", 1.0)] {
+        let (a, b) = (node(&g, a), node(&g, b));
+        g.insert_edge(a, b, None, Some("knows"), Record::with_attr([("weight", Value::from(w))]))?;
+    }
+
+    // Cheapest path
+    let path = find_path::<_, _, GraphError>(&g, node(&g, "ann"), node(&g, "dan"), &mut PathQuery::dijkstra())?.unwrap();
+    assert_eq!(path.cost, 4.0);
+
+    // Analytics on a projection: dense node indices in, Vecs out
+    let p = Projection::build::<_, _, GraphError>(&g, Direction::Both, &EdgeCost::Unit)?;
+    let ranks = pagerank(&p, &PageRank::default())?;
+    assert!((ranks.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+    let communities = leiden(&p, &Leiden::default())?;
+    assert_eq!(communities.iter().map(Vec::len).sum::<usize>(), 4);
+
+    // Pattern matching
+    let pattern = Pattern::parse("(a:Person)-[:knows]->(b)-[:knows]->(c)")?;
+    let found = find_matches::<_, _, GraphError>(&g, &pattern, None)?;
+    assert_eq!(found.len(), 3); // ann-bob-cat, ann-cat-dan, bob-cat-dan
+
+    // Changes as data, with undo
+    let undo = g.apply(Op::RemoveNode { id: "dan".into() })?;
+    assert!(!g.contains_node("dan"));
+    g.apply_all(undo).map_err(|(_, e)| e)?;
+    assert!(g.contains_node("dan"));
+    Ok(())
+}
+```
+
+## Cancellation
+
+Long computations (the `algo` functions, batch queries, pattern matching,
+path expansion, searches, random walks) check a cancellation token. Run one
+under `cancel::run(&token, || ...)` and call `token.cancel()` from another
+thread: it stops soon after and `run` returns `Err(GraphError::Interrupted)`.
+Without a token the checks cost nothing measurable.
+
+## Minimum supported Rust version
+
+Rust 1.85. Raising it is a minor-version change.
+
+## License
+
+MIT

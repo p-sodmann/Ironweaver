@@ -1,0 +1,25 @@
+[package]
+name = "ironweaver-core"
+version = "0.2.0"
+edition = "2021"
+description = "Directed property graph with labels, edge types and an op log, graph analytics (PageRank, Leiden, betweenness, ...), pattern matching and a checksummed file format; the pure-Rust engine behind the ironweaver Python package"
+license = "MIT"
+rust-version = "1.85"
+repository = "https://github.com/p-sodmann/Ironweaver"
+homepage = "https://p-sodmann.github.io/Ironweaver/"
+documentation = "https://docs.rs/ironweaver-core"
+readme = "README.md"
+keywords = ["graph", "graph-algorithms", "network", "pagerank", "property-graph"]
+categories = ["data-structures", "algorithms", "science"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+sonic-rs = "0.5"
+bincode = "1.3"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+crc32fast = "1"
+chrono = { version = "0.4", features = ["serde"] }
+half = { version = "2.2", features = ["serde"] }
+rand = "0.8"
+rayon = "1.10"
+foldhash = "0.2"

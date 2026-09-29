@@ -19,10 +19,7 @@ pub struct GcPause<'py> {
 impl<'py> GcPause<'py> {
     pub fn new(py: Python<'py>) -> Self {
         if let Ok(gc) = py.import("gc") {
-            let enabled = gc
-                .call_method0("isenabled")
-                .and_then(|r| r.is_truthy())
-                .unwrap_or(false);
+            let enabled = gc.call_method0("isenabled").and_then(|r| r.is_truthy()).unwrap_or(false);
             if enabled && gc.call_method0("disable").is_ok() {
                 return GcPause { gc: Some(gc) };
             }

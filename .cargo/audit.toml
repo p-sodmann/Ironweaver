@@ -1,0 +1,6 @@
+# cargo audit configuration (run in CI).
+#
+# To ignore an advisory, list its id here with the reason it does not apply:
+#
+# [advisories]
+# ignore = ["RUSTSEC-YYYY-NNNN"]  # why
