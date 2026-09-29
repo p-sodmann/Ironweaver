@@ -160,6 +160,26 @@ Nodes without coordinates or without a table entry get estimate 0 (always safe, 
 
 Algorithms live in the pure-Rust core crate, `crates/ironweaver-core/src/pathfinding/`, one file each, registered in `METHODS` in `mod.rs`. A new one declares its name, description and options, and receives a validated `PathQuery` (direction, edge costs, `max_cost`, method options); the shared pieces — edge costs (`cost.rs`), heuristics (`heuristic.rs`) and best-first search (`best_first.rs`) — are reusable. The Python keyword options are parsed into the query in `src/vertex/pathfinding.rs`. See the comment at the top of the core `mod.rs`.
 
+### Batch queries (parallel) — `vertex.shortest_paths(pairs, ...)`, `vertex.distances(sources, ...)`
+
+For many queries at once. The graph's structure and edge costs are copied into a compact snapshot once, then every query runs in parallel on all cores with the GIL released (other Python threads keep running). The snapshot costs one pass over the graph, so for a single query `shortest_path` is cheaper.
+
+```python
+res = v.shortest_paths([("root", "target"), ("root", "z"), ("z", "root")], weight="weight")
+assert res[0]["nodelist"] == ["root", "a", "b", "target"]
+assert abs(res[0]["cost"] - (0.9 + 0.4 + 0.8)) < 1e-9
+assert res[2] is None                                  # unreachable: None, not an error
+
+hops = v.shortest_paths([("root", "target")])          # method="bfs": number of edges
+assert hops[0]["cost"] == 3
+
+d = v.distances(["root", "a"], weight="weight", max_cost=1.5)
+assert set(d["root"]) == {"root", "a", "b"}            # {source: {node: cost}}
+assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
+```
+
+Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `"astar"` is not available here. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+
 ### Random walks — `vertex.random_walks(...)`
 
 Generate multiple random walks from a starting node.

@@ -34,6 +34,7 @@ def test_benchmark_writes_markdown_table(tmp_path, capsys):
     assert "## 200 nodes, 999 edges" in text
     assert "| Operation | Description | ironweaver | networkx | Speedup | Notes |" in text
     for name in ("Build graph", "BFS (full)", "Shortest path (Dijkstra)", "Subgraph by ids",
+                 "Batch shortest paths", "Distances from sources",
                  "Remove nodes", "Random walks", "Load from JSON string",
                  "Grid: Dijkstra", "Grid: A* (coordinates)", "Grid: A* (precomputed)"):
         assert f"| {name} |" in text

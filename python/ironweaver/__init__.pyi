@@ -606,6 +606,41 @@ class Vertex:
     def path_methods() -> dict[str, str]:
         """The available ``shortest_path`` methods as ``{name: description}``."""
         ...
+    def shortest_paths(
+        self,
+        pairs: list[tuple[str, str]],
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> list[dict[str, Any] | None]:
+        """Shortest paths for many (source, target) pairs, in parallel.
+
+        The graph and its edge costs are copied into a compact snapshot once,
+        then all queries run on every core with the GIL released. Returns one
+        entry per pair: ``{"nodelist": [...], "cost": ...}`` (cost is the number
+        of edges for "bfs"), or None if the target is unreachable. Methods
+        "bfs" and "dijkstra" only. Edge weights of the whole graph are validated
+        when the snapshot is built. For a single query use ``shortest_path``.
+        """
+        ...
+    def distances(
+        self,
+        sources: list[str],
+        targets: list[str] | None = ...,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> dict[str, dict[str, float]]:
+        """``{source: {node: cost}}`` for every node each source reaches within
+        *max_cost* (only *targets*, if given), computed in parallel like
+        ``shortest_paths``."""
+        ...
     def shortest_path_bfs(
         self,
         root_node_id: str,

@@ -2,6 +2,7 @@
 
 mod algorithms;
 mod analysis;
+mod batch;
 pub(crate) mod callbacks;
 mod core;
 mod manipulation;

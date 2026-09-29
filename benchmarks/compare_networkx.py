@@ -232,6 +232,25 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     add(Result("Shortest path (Dijkstra)", "weighted by `weight` attribute", t_iw, t_nx,
                f"cost {r_iw.meta['cost']:.2f}"))
 
+    # Batches: one call, queries run in parallel with the GIL released
+    prng = random.Random(seed + 1)
+    pairs = [(f"n{prng.randrange(n_nodes)}", f"n{prng.randrange(n_nodes)}") for _ in range(64)]
+    t_iw, r_iw = best_of(lambda: iw.shortest_paths(pairs, weight="weight"), repeats)
+    t_nx, r_nx = best_of(lambda: [nx.dijkstra_path_length(g, s, t, weight="weight")
+                                  if nx.has_path(g, s, t) else None for s, t in pairs], repeats)
+    assert all((a is None and b is None) or abs(a["cost"] - b) < 1e-6 for a, b in zip(r_iw, r_nx))
+    t_loop, _ = best_of(lambda: [iw.shortest_path_dijkstra(s, t, weight="weight") if r else None
+                                 for (s, t), r in zip(pairs, r_iw)], repeats)
+    add(Result("Batch shortest paths", f"{len(pairs)} Dijkstra pairs in one `shortest_paths` call", t_iw, t_nx,
+               f"one `shortest_path` call per pair: {fmt_time(t_loop)}"))
+
+    sources = [f"n{i}" for i in prng.sample(range(n_nodes), 16)]
+    t_iw, r_iw = best_of(lambda: iw.distances(sources, weight="weight"), repeats)
+    t_nx, r_nx = best_of(lambda: [nx.single_source_dijkstra_path_length(g, s, weight="weight") for s in sources], repeats)
+    assert all(len(r_iw[s]) == len(d) for s, d in zip(sources, r_nx))
+    add(Result("Distances from sources", f"Dijkstra from {len(sources)} sources to every reachable node", t_iw, t_nx,
+               f"{sum(len(d) for d in r_nx):,} distances"))
+
     # Weighted grid: A* vs Dijkstra ------------------------------------------
     side = max(2, int(n_nodes ** 0.5))
     giw, gnx = build_grid(side, seed)

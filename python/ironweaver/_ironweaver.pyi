@@ -187,6 +187,27 @@ class Vertex:
         ...
     @staticmethod
     def path_methods() -> dict[str, str]: ...
+    def shortest_paths(
+        self,
+        pairs: list[tuple[str, str]],
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> list[dict[str, Any] | None]: ...
+    def distances(
+        self,
+        sources: list[str],
+        targets: list[str] | None = ...,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        max_cost: float | None = ...,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> dict[str, dict[str, float]]: ...
     def shortest_path_bfs(
         self,
         root_node_id: str,

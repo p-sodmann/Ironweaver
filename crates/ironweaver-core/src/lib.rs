@@ -33,6 +33,7 @@
 //! # Ok::<(), GraphError>(())
 //! ```
 
+pub mod batch;
 pub mod direction;
 pub mod error;
 pub mod format;

@@ -89,6 +89,18 @@ p = m.shortest_path("a", "c", distances="est")                # estimates from v
 
 `shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(root, target, max_depth, direction)` and `shortest_path_dijkstra(root, target, weight, default_weight, max_cost, direction)` are shorthands.
 
+Batches run in parallel on all cores (GIL released); unreachable pairs give `None`:
+
+```python
+res = g.shortest_paths([("alice", "acme"), ("acme", "alice")], weight="weight")
+assert res[0]["nodelist"] == ["alice", "bob", "acme"] and res[1] is None   # {"nodelist", "cost"} or None
+d = g.distances(["alice"], weight="weight")                                # {source: {node: cost}}
+assert d["alice"]["acme"] == res[0]["cost"]
+assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
+```
+
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a snapshot (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+
 ## Random walks
 
 ```python

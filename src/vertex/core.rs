@@ -11,6 +11,7 @@ use crate::{Edge, Node};
 // Import the helper modules as sibling modules
 use super::algorithms;
 use super::analysis;
+use super::batch;
 use super::callbacks::fire;
 use super::manipulation;
 use super::pathfinding;
@@ -482,6 +483,76 @@ impl Vertex {
     #[staticmethod]
     fn path_methods(py: Python<'_>) -> PyResult<Py<PyDict>> {
         pathfinding::path_methods(py)
+    }
+
+    /// Shortest paths for many (source, target) pairs, computed in parallel
+    ///
+    /// The graph and its edge costs are copied into a compact snapshot once,
+    /// then all queries run on every core with the GIL released. Use it for
+    /// batches; for a single query `shortest_path` is cheaper.
+    ///
+    /// Args:
+    ///     pairs (list[tuple[str, str]]): (source_id, target_id) pairs
+    ///     method (str, optional): "bfs" (fewest edges) or "dijkstra" (cheapest by
+    ///         weight). None picks "dijkstra" if weight is given, else "bfs".
+    ///     weight (str, optional): Edge attribute holding the cost. Defaults to "weight".
+    ///     default_weight (float, optional): Cost of edges without it. Defaults to 1.0.
+    ///     max_cost (float, optional): Ignore paths more expensive than this (for
+    ///         "bfs": with more edges).
+    ///     direction (str, optional): "out" (default), "in" or "both".
+    ///
+    /// Returns:
+    ///     list: One entry per pair, in order: {"nodelist": [...], "cost": ...}, or
+    ///         None if the target is not reachable
+    ///
+    /// Raises:
+    ///     ValueError: Unknown node or method ("astar" is not available here), or a
+    ///         negative edge weight anywhere in the graph
+    ///     TypeError: A non-numeric edge weight anywhere in the graph
+    #[pyo3(signature = (pairs, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn shortest_paths(
+        &self,
+        py: Python<'_>,
+        pairs: Vec<(String, String)>,
+        method: Option<&str>,
+        weight: Option<String>,
+        default_weight: Option<f64>,
+        max_cost: Option<f64>,
+        direction: Option<&str>,
+    ) -> PyResult<Py<PyList>> {
+        batch::shortest_paths(self, py, pairs, method, weight, default_weight, max_cost, direction)
+    }
+
+    /// Costs from each source to every node it reaches, computed in parallel
+    ///
+    /// Like `shortest_paths`, runs on a compact snapshot with the GIL released.
+    ///
+    /// Args:
+    ///     sources (list[str]): Start node ids
+    ///     targets (list[str], optional): Only report these nodes
+    ///     method, weight, default_weight, max_cost, direction: As in `shortest_paths`
+    ///
+    /// Returns:
+    ///     dict: {source_id: {node_id: cost}} for every node reached within max_cost
+    ///         (cost is the number of edges for "bfs"), including the source itself
+    ///
+    /// Raises:
+    ///     ValueError / TypeError: As in `shortest_paths`
+    #[pyo3(signature = (sources, targets=None, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn distances(
+        &self,
+        py: Python<'_>,
+        sources: Vec<String>,
+        targets: Option<Vec<String>>,
+        method: Option<&str>,
+        weight: Option<String>,
+        default_weight: Option<f64>,
+        max_cost: Option<f64>,
+        direction: Option<&str>,
+    ) -> PyResult<Py<PyDict>> {
+        batch::distances(self, py, sources, targets, method, weight, default_weight, max_cost, direction)
     }
 
     /// Expand the current vertex by adding neighbor nodes from a source vertex

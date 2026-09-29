@@ -103,6 +103,58 @@ fn astar_matches_dijkstra_on_a_grid() {
 }
 
 #[test]
+fn batch_queries_match_single_queries() {
+    use ironweaver_core::batch::{distances, shortest_paths, Snapshot};
+    use ironweaver_core::pathfinding::EdgeCost;
+
+    // Deterministic pseudo-random graph (LCG), 400 nodes, 2000 edges.
+    let mut state = 12345u64;
+    let mut next = move |m: u64| {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 33) % m
+    };
+    let mut g = G::new();
+    let ix: Vec<NodeIx> = (0..400).map(|i| g.add_node(format!("n{i}"), Record::default()).unwrap()).collect();
+    for _ in 0..2000 {
+        let (a, b, w) = (next(400) as usize, next(400) as usize, 1.0 + next(90) as f64 / 10.0);
+        g.add_edge(ix[a], ix[b], weighted(w)).unwrap();
+    }
+    let pairs: Vec<(NodeIx, NodeIx)> = (0..200).map(|_| (ix[next(400) as usize], ix[next(400) as usize])).collect();
+
+    for dir in [Direction::Out, Direction::In, Direction::Both] {
+        let snap = Snapshot::build::<_, _, GraphError>(&g, dir, &EdgeCost::weighted(None, None)).unwrap();
+        let batch = shortest_paths(&snap, &pairs, None).unwrap();
+        for (&(s, t), got) in pairs.iter().zip(&batch) {
+            let mut q = PathQuery::dijkstra();
+            q.direction = dir;
+            let single = find_path::<_, _, GraphError>(&g, s, t, &mut q).unwrap();
+            match (single, got) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert!((a.cost - b.cost).abs() < 1e-9);
+                    assert_eq!((b.nodes[0], *b.nodes.last().unwrap()), (s, t));
+                }
+                (a, b) => panic!("mismatch for {s:?}->{t:?}: {a:?} vs {b:?}"),
+            }
+        }
+        // Distances agree with the pair queries
+        let sources: Vec<NodeIx> = pairs.iter().map(|p| p.0).take(20).collect();
+        for (&s, reached) in sources.iter().zip(distances(&snap, &sources, None).unwrap()) {
+            let d: HashMap<NodeIx, f64> = reached.into_iter().collect();
+            for (&(ps, t), got) in pairs.iter().zip(&batch) {
+                if ps == s {
+                    match (d.get(&t), got) {
+                        (None, None) => {}
+                        (Some(a), Some(b)) => assert!((a - b.cost).abs() < 1e-9),
+                        (a, b) => panic!("distance mismatch: {a:?} vs {b:?}"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn registry_resolution_and_validation() {
     assert_eq!(pathfinding::resolve(None, false, &[]).unwrap().name, "bfs");
     assert_eq!(pathfinding::resolve(None, true, &[]).unwrap().name, "dijkstra");

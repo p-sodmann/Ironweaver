@@ -439,6 +439,11 @@ result = graph.shortest_path_dijkstra(start: str, end: str, weight: str = "weigh
                                       default_weight: float = 1.0, max_cost: float = None,
                                       direction: str = "out") -> Vertex
 # result.meta["cost"] holds the total path cost
+paths = graph.shortest_paths(pairs: list[tuple[str, str]], method=None, *, weight=None,
+                             default_weight=None, max_cost=None, direction="out")
+# -> [{"nodelist": [...], "cost": ...} or None, ...]; many queries in parallel, GIL released
+dist = graph.distances(sources: list[str], targets: list[str] = None, method=None, ...)
+# -> {source: {node: cost}}; "bfs" or "dijkstra" only
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters
