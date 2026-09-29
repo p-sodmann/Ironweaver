@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use super::Vertex;
 use crate::errors::graph_error;
+use crate::interrupt;
 use crate::projection::{self, distances_to_py, paths_to_py, Filter, Projection, Spec};
 
 /// `Vertex.project(...)`.
@@ -102,7 +103,9 @@ pub fn shortest_paths(
         .collect::<PyResult<_>>()?;
     let p = project_all(vertex, py, &spec)?;
     let pairs: Vec<(u32, u32)> = pairs.iter().map(|&(s, t)| (dense(&p, s), dense(&p, t))).collect();
-    let results = py.detach(|| batch::shortest_paths(&p, &pairs, weighted, max_cost)).map_err(graph_error)?;
+    let results =
+        interrupt::released(py, interrupt::size(&p), || batch::shortest_paths(&p, &pairs, weighted, max_cost))?
+            .map_err(graph_error)?;
     paths_to_py(py, &p, results, weighted)
 }
 
@@ -125,6 +128,7 @@ pub fn distances(
     let p = project_all(vertex, py, &spec)?;
     let sources: Vec<u32> = sources.iter().map(|&s| dense(&p, s)).collect();
     let targets: Option<HashSet<u32>> = targets.map(|ts| ts.iter().map(|&t| dense(&p, t)).collect());
-    let results = py.detach(|| batch::distances(&p, &sources, weighted, max_cost)).map_err(graph_error)?;
+    let results = interrupt::released(py, interrupt::size(&p), || batch::distances(&p, &sources, weighted, max_cost))?
+        .map_err(graph_error)?;
     distances_to_py(py, &p, &sources, results, targets.as_ref(), weighted)
 }

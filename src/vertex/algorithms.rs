@@ -16,6 +16,7 @@ use crate::data::AttrMap;
 use crate::errors::{graph_error, Error};
 use crate::expr::PyExpr;
 use crate::gc_pause::GcPause;
+use crate::interrupt;
 
 /// `Vertex.expand`: the source's nodes within `depth` edges of this
 /// vertex's nodes (one multi-source BFS over `source`).
@@ -28,7 +29,7 @@ pub fn expand(
 ) -> PyResult<Py<Vertex>> {
     let direction = Direction::parse(direction).map_err(graph_error)?;
     let seeds = vertex.graph.nodes().filter_map(|(_, n)| source.graph.node_ix(n.id()));
-    let found = traversal::expand(&source.graph, seeds, depth.unwrap_or(1), direction);
+    let found = interrupt::polling(py, || traversal::expand(&source.graph, seeds, depth.unwrap_or(1), direction))?;
     build_subgraph(py, source, found, PyDict::new(py).unbind(), false)
 }
 
@@ -116,8 +117,9 @@ pub fn random_walks(
     opts.seed = seed;
 
     let plan = plan::<_, _, Error>(&vertex.graph, start_node_id.as_deref(), opts)?;
-    // The walks run on a detached index, so the GIL is released meanwhile.
-    let walks = py.detach(|| plan.run());
+    // The walks run on a detached index, so the GIL is released meanwhile
+    // (always interruptible: the plan doesn't tell how long they take).
+    let walks = interrupt::released(py, usize::MAX, || plan.run())?;
 
     let _gc = GcPause::new(py);
     let result = PyList::empty(py);

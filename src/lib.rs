@@ -11,6 +11,7 @@ mod edge;
 mod errors;
 mod expr;
 mod gc_pause;
+mod interrupt;
 mod node;
 mod observed_dictionary;
 mod path;

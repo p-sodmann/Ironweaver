@@ -103,7 +103,7 @@ assert [p.ids() for p in knows] == [["ann", "bob", "cat"], ["ann", "bob", "dan"]
 simple = ann.paths(1, None, direction="both", uniqueness="path", limit=100)
 ```
 
-`Node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None, uniqueness="trail", limit=None)` returns `Path` objects in depth-first order:
+`Node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None, uniqueness="trail", limit=None)` returns `Path` objects in depth-first order (like `match`, a search that explodes can be stopped with Ctrl+C, which raises `KeyboardInterrupt`):
 - `direction` is `"out"`, `"in"` or `"both"`.
 - `types` gives the edge type(s) to follow; `where` is an `Expr` every edge must match.
 - `uniqueness` says what may repeat:

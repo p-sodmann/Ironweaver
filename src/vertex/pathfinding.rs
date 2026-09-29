@@ -19,6 +19,7 @@ use super::subgraph::build_subgraph;
 use super::Vertex;
 use crate::data::{EdgeData, NodeData};
 use crate::errors::{graph_error, Error};
+use crate::interrupt;
 
 /// Algorithm-specific keyword options (entries set to `None` are absent).
 struct Options<'py>(Option<Bound<'py, PyDict>>);
@@ -174,7 +175,7 @@ pub fn shortest_path<'py>(
         _ => Heuristic::Zero,
     };
     let mut query = PathQuery { method, direction, cost, max_cost, max_depth, heuristic };
-    let result = find_path::<NodeData, EdgeData, Error>(graph, source, target, &mut query)?;
+    let result = interrupt::polling(py, || find_path::<NodeData, EdgeData, Error>(graph, source, target, &mut query))??;
     let result = match result {
         Some(r) => r,
         None => return Err(graph_error(not_reachable(method, &source_id, &target_id, max_depth, max_cost))),

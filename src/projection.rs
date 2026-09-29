@@ -23,6 +23,7 @@ use crate::data::PyAttrs;
 use crate::errors::{graph_error, Error};
 use crate::expr::PyExpr;
 use crate::gc_pause::GcPause;
+use crate::interrupt;
 use crate::{Edge, Node, Vertex};
 
 /// A node or edge filter: attribute equality (a dict), an `Expr`
@@ -448,7 +449,9 @@ impl Projection {
             .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
             .collect::<PyResult<_>>()?;
         let p = &self.inner;
-        let results = py.detach(|| batch::shortest_paths(p, &dense, weighted, max_cost)).map_err(graph_error)?;
+        let results =
+            interrupt::released(py, interrupt::size(p), || batch::shortest_paths(p, &dense, weighted, max_cost))?
+                .map_err(graph_error)?;
         paths_to_py(py, p, results, weighted)
     }
 
@@ -468,7 +471,9 @@ impl Projection {
         let targets: Option<HashSet<u32>> =
             targets.map(|ts| ts.iter().map(|t| self.index(t, "Target node")).collect::<PyResult<_>>()).transpose()?;
         let p = &self.inner;
-        let results = py.detach(|| batch::distances(p, &sources, weighted, max_cost)).map_err(graph_error)?;
+        let results =
+            interrupt::released(py, interrupt::size(p), || batch::distances(p, &sources, weighted, max_cost))?
+                .map_err(graph_error)?;
         distances_to_py(py, p, &sources, results, targets.as_ref(), weighted)
     }
 
@@ -476,7 +481,7 @@ impl Projection {
     /// ids: largest first, members in projection order.
     fn weakly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let p = &self.inner;
-        let groups = py.detach(|| algo::weakly_connected_components(p));
+        let groups = interrupt::released(py, interrupt::size(p), || algo::weakly_connected_components(p))?;
         groups_to_py(py, p, &groups)
     }
 
@@ -484,7 +489,7 @@ impl Projection {
     /// lists of ids: largest first, members in projection order.
     fn strongly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let p = &self.inner;
-        let groups = py.detach(|| algo::strongly_connected_components(p));
+        let groups = interrupt::released(py, interrupt::size(p), || algo::strongly_connected_components(p))?;
         groups_to_py(py, p, &groups)
     }
 
@@ -492,15 +497,16 @@ impl Projection {
     /// node (ties in projection order). Raises ValueError on a cycle.
     fn topological_sort(&self, py: Python<'_>) -> PyResult<Vec<&str>> {
         let p = &self.inner;
-        let order = py.detach(|| algo::topological_sort(p)).map_err(graph_error)?;
+        let order = interrupt::released(py, interrupt::size(p), || algo::topological_sort(p))?.map_err(graph_error)?;
         Ok(order.iter().map(|&u| p.id(u)).collect())
     }
 
     /// One cycle as a list of ids (the last has an edge back to the first),
     /// or None if the projection has no cycle.
-    fn find_cycle(&self, py: Python<'_>) -> Option<Vec<&str>> {
+    fn find_cycle(&self, py: Python<'_>) -> PyResult<Option<Vec<&str>>> {
         let p = &self.inner;
-        py.detach(|| algo::find_cycle(p)).map(|c| c.iter().map(|&u| p.id(u)).collect())
+        Ok(interrupt::released(py, interrupt::size(p), || algo::find_cycle(p))?
+            .map(|c| c.iter().map(|&u| p.id(u)).collect()))
     }
 
     /// {id: degree / (n - 1)}, counting edges leaving ("out") or entering
@@ -509,7 +515,7 @@ impl Projection {
     fn degree_centrality(&self, py: Python<'_>, direction: Option<&str>) -> PyResult<Py<PyDict>> {
         let incoming = !parse_side(direction)?;
         let p = &self.inner;
-        let values = py.detach(|| algo::degree_centrality(p, incoming));
+        let values = interrupt::released(py, interrupt::size(p), || algo::degree_centrality(p, incoming))?;
         per_node(py, p, &values)
     }
 
@@ -538,14 +544,14 @@ impl Projection {
             }
         };
         let opts = algo::PageRank { alpha, personalization, max_iter, tol };
-        let ranks = py.detach(|| algo::pagerank(p, &opts)).map_err(graph_error)?;
+        let ranks = interrupt::released(py, interrupt::size(p), || algo::pagerank(p, &opts))?.map_err(graph_error)?;
         per_node(py, p, &ranks)
     }
 
     /// {id: number of triangles through the node} (edges as undirected).
     fn triangles(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
-        let values = py.detach(|| algo::triangles(p));
+        let values = interrupt::released(py, interrupt::size(p), || algo::triangles(p))?;
         per_node(py, p, &values)
     }
 
@@ -555,14 +561,20 @@ impl Projection {
     #[pyo3(signature = (*, directed=false))]
     fn clustering(&self, py: Python<'_>, directed: bool) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
-        let values = py.detach(|| if directed { algo::clustering_directed(p) } else { algo::clustering(p) });
+        let values = interrupt::released(py, interrupt::size(p), || {
+            if directed {
+                algo::clustering_directed(p)
+            } else {
+                algo::clustering(p)
+            }
+        })?;
         per_node(py, p, &values)
     }
 
     /// {id: core number} (k-core decomposition, edges as undirected).
     fn core_number(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
-        let values = py.detach(|| algo::core_number(p));
+        let values = interrupt::released(py, interrupt::size(p), || algo::core_number(p))?;
         per_node(py, p, &values)
     }
 
@@ -571,7 +583,7 @@ impl Projection {
     #[pyo3(signature = (max_iter=20))]
     fn label_propagation(&self, py: Python<'_>, max_iter: usize) -> PyResult<Py<PyList>> {
         let p = &self.inner;
-        let (groups, _) = py.detach(|| algo::label_propagation(p, max_iter));
+        let (groups, _) = interrupt::released(py, interrupt::size(p), || algo::label_propagation(p, max_iter))?;
         groups_to_py(py, p, &groups)
     }
 
@@ -581,7 +593,8 @@ impl Projection {
     fn bfs_levels(&self, py: Python<'_>, sources: Vec<String>, max_depth: Option<u32>) -> PyResult<Py<PyDict>> {
         let dense: Vec<u32> = sources.iter().map(|s| self.index(s, "Root node")).collect::<PyResult<_>>()?;
         let p = &self.inner;
-        let levels = py.detach(|| algo::bfs_levels(p, &dense, max_depth)).map_err(graph_error)?;
+        let levels = interrupt::released(py, interrupt::size(p), || algo::bfs_levels(p, &dense, max_depth))?
+            .map_err(graph_error)?;
         let _gc = GcPause::new(py);
         let out = PyDict::new(py);
         for (u, &l) in levels.iter().enumerate() {
@@ -612,7 +625,8 @@ impl Projection {
         }
         let sources = k.map(|k| algo::sample_sources(p, k, seed.unwrap_or_else(algo::random_seed)));
         let opts = algo::Betweenness { normalized, endpoints, weighted: self.weights(weighted), sources };
-        let values = py.detach(|| algo::betweenness_centrality(p, &opts)).map_err(graph_error)?;
+        let values = interrupt::released(py, interrupt::size(p), || algo::betweenness_centrality(p, &opts))?
+            .map_err(graph_error)?;
         per_node(py, p, &values)
     }
 
@@ -622,7 +636,9 @@ impl Projection {
     fn closeness_centrality(&self, py: Python<'_>, wf_improved: bool, weighted: Option<bool>) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
         let weighted = self.weights(weighted);
-        let values = py.detach(|| algo::closeness_centrality(p, weighted, wf_improved)).map_err(graph_error)?;
+        let values =
+            interrupt::released(py, interrupt::size(p), || algo::closeness_centrality(p, weighted, wf_improved))?
+                .map_err(graph_error)?;
         per_node(py, p, &values)
     }
 
@@ -632,7 +648,8 @@ impl Projection {
     fn harmonic_centrality(&self, py: Python<'_>, weighted: Option<bool>) -> PyResult<Py<PyDict>> {
         let p = &self.inner;
         let weighted = self.weights(weighted);
-        let values = py.detach(|| algo::harmonic_centrality(p, weighted)).map_err(graph_error)?;
+        let values = interrupt::released(py, interrupt::size(p), || algo::harmonic_centrality(p, weighted))?
+            .map_err(graph_error)?;
         per_node(py, p, &values)
     }
 
@@ -645,7 +662,7 @@ impl Projection {
         let dense: Vec<(u32, u32)> =
             pairs.iter().map(|(a, b)| Ok((self.index(a, "Node")?, self.index(b, "Node")?))).collect::<PyResult<_>>()?;
         let p = &self.inner;
-        py.detach(|| algo::similarity(p, &dense, metric)).map_err(graph_error)
+        interrupt::released(py, interrupt::size(p), || algo::similarity(p, &dense, metric))?.map_err(graph_error)
     }
 
     /// The `k` nodes most similar to each node (sharing at least one
@@ -671,8 +688,10 @@ impl Projection {
             },
         };
         let p = &self.inner;
-        let results =
-            py.detach(|| algo::most_similar(p, sources.as_deref(), k, metric, min_score)).map_err(graph_error)?;
+        let results = interrupt::released(py, interrupt::size(p), || {
+            algo::most_similar(p, sources.as_deref(), k, metric, min_score)
+        })?
+        .map_err(graph_error)?;
         let _gc = GcPause::new(py);
         let to_list = |row: &[(u32, f64)]| -> Vec<(&str, f64)> { row.iter().map(|&(v, s)| (p.id(v), s)).collect() };
         if single {
@@ -703,7 +722,7 @@ impl Projection {
         let p = &self.inner;
         let seed = seed.unwrap_or_else(algo::random_seed);
         let opts = algo::Leiden { resolution, randomness, max_iter, seed };
-        let groups = py.detach(|| algo::leiden(p, &opts)).map_err(graph_error)?;
+        let groups = interrupt::released(py, interrupt::size(p), || algo::leiden(p, &opts))?.map_err(graph_error)?;
         groups_to_py(py, p, &groups)
     }
 
@@ -726,17 +745,17 @@ impl Projection {
         if let Some(u) = labels.iter().position(|&l| l == algo::NONE) {
             return Err(PyValueError::new_err(format!("node '{}' is in no community", p.id(u as u32))));
         }
-        py.detach(|| algo::modularity(p, &labels, resolution)).map_err(graph_error)
+        interrupt::released(py, interrupt::size(p), || algo::modularity(p, &labels, resolution))?.map_err(graph_error)
     }
 
     /// Edges of a minimum spanning forest (edges as undirected, weighted
     /// by the projection's weights, 1 if unweighted), as (id, id, weight);
     /// `maximum=True` for the heaviest forest.
     #[pyo3(signature = (*, maximum=false))]
-    fn minimum_spanning_tree(&self, py: Python<'_>, maximum: bool) -> Vec<(&str, &str, f64)> {
+    fn minimum_spanning_tree(&self, py: Python<'_>, maximum: bool) -> PyResult<Vec<(&str, &str, f64)>> {
         let p = &self.inner;
-        let edges = py.detach(|| algo::spanning_forest(p, maximum));
-        edges.into_iter().map(|(a, b, w)| (p.id(a), p.id(b), w)).collect()
+        let edges = interrupt::released(py, interrupt::size(p), || algo::spanning_forest(p, maximum))?;
+        Ok(edges.into_iter().map(|(a, b, w)| (p.id(a), p.id(b), w)).collect())
     }
 
     /// {id: embedding} by FastRP (fast random projection): nodes with
@@ -767,7 +786,7 @@ impl Projection {
             normalization_strength,
             seed: seed.unwrap_or_else(algo::random_seed),
         };
-        let values = py.detach(|| algo::fastrp(p, &opts)).map_err(graph_error)?;
+        let values = interrupt::released(py, interrupt::size(p), || algo::fastrp(p, &opts))?.map_err(graph_error)?;
         rows_to_py(py, p, &values, dimension)
     }
 
@@ -790,7 +809,9 @@ impl Projection {
         let starts = sources.map(|s| self.indices(&s, "Root node")).transpose()?;
         let opts = algo::Node2Vec { walk_length, walks_per_node, p, q, seed: seed.unwrap_or_else(algo::random_seed) };
         let proj = &self.inner;
-        let walks = py.detach(|| algo::node2vec_walks(proj, starts.as_deref(), &opts)).map_err(graph_error)?;
+        let walks =
+            interrupt::released(py, interrupt::size(proj), || algo::node2vec_walks(proj, starts.as_deref(), &opts))?
+                .map_err(graph_error)?;
         groups_to_py(py, proj, &walks)
     }
 
@@ -809,7 +830,8 @@ impl Projection {
         let weighted = self.uses_weights(method)?;
         let (s, t) = (self.index(source, "Root node")?, self.index(target, "Target node")?);
         let p = &self.inner;
-        let paths = py.detach(|| algo::k_shortest_paths(p, s, t, k, weighted)).map_err(graph_error)?;
+        let paths = interrupt::released(py, interrupt::size(p), || algo::k_shortest_paths(p, s, t, k, weighted))?
+            .map_err(graph_error)?;
         paths_to_py(py, p, paths.into_iter().map(Some).collect(), weighted)
     }
 

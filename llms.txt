@@ -324,6 +324,7 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 - Ordered output is in `result.meta["nodelist"]`; `keys()` is graph order (insertion order until nodes are removed), not visit order.
 - With several equally short paths, `shortest_path` returns one of them (unspecified which).
 - `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
+- Ctrl+C stops long computations (analytics, batch queries, `match`, `Node.paths`, searches, walks) with `KeyboardInterrupt`; the graph stays usable. Projections under 20,000 nodes + edges aren't checked (they finish quickly).
 
 ## More
 

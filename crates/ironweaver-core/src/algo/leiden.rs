@@ -251,7 +251,11 @@ fn move_nodes(g: &WGraph, comm: &mut [u32], gamma: f64, rng: &mut StdRng) {
     let mut queue: VecDeque<u32> = order.into();
     let mut queued = vec![true; n];
     let mut tally = Tally::new(n);
+    let stop = crate::cancel::stop();
     while let Some(u) = queue.pop_front() {
+        if stop.requested() {
+            return;
+        }
         queued[u as usize] = false;
         let (cu, ku) = (comm[u as usize], g.k[u as usize]);
         for (v, w) in g.row(u) {
@@ -311,7 +315,11 @@ fn refine(g: &WGraph, comm: &[u32], gamma: f64, theta: f64, rng: &mut StdRng) ->
     order.shuffle(rng);
     let mut tally = Tally::new(n);
     let mut options: Vec<(u32, f64)> = Vec::new();
+    let stop = crate::cancel::stop();
     for u in order {
+        if stop.requested() {
+            break;
+        }
         let (c, ku) = (comm[u as usize], g.k[u as usize]);
         if rsize[refined[u as usize] as usize] != 1 || !well_connected(ext[u as usize], ku, c) {
             continue;
@@ -402,7 +410,11 @@ pub fn leiden(p: &Projection, opts: &Leiden) -> Result<Vec<Vec<u32>>, GraphError
     }
     let mut rng = StdRng::seed_from_u64(opts.seed);
     let mut labels: Vec<u32> = (0..n as u32).collect();
+    let stop = crate::cancel::stop();
     for _ in 0..opts.max_iter.max(1) {
+        if stop.requested() {
+            break;
+        }
         let next = run(&base, labels.clone(), opts, &mut rng);
         if next == labels {
             break;
@@ -419,9 +431,13 @@ fn run(base: &WGraph, mut comm: Vec<u32>, opts: &Leiden, rng: &mut StdRng) -> Ve
     // node[u]: the aggregate node original node u belongs to
     let mut node: Vec<u32> = (0..base.len() as u32).collect();
     let mut aggregated: Option<WGraph> = None;
+    let stop = crate::cancel::stop();
     loop {
         let g = aggregated.as_ref().unwrap_or(base);
         move_nodes(g, &mut comm, gamma, rng);
+        if stop.requested() {
+            break;
+        }
         if compact(&mut comm.clone()) == g.len() {
             break; // every node on its own: nothing left to merge
         }

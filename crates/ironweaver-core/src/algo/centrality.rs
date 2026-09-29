@@ -92,7 +92,11 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
 
     let mut x = vec![1.0 / n as f64; n];
     let mut share = vec![0f64; n];
+    let stop = crate::cancel::stop();
     for _ in 0..opts.max_iter {
+        if stop.requested() {
+            break;
+        }
         // What each node passes along each unit of outgoing weight
         share.par_iter_mut().enumerate().for_each(|(u, s)| {
             *s = if out_weight[u] > 0.0 { x[u] / out_weight[u] } else { 0.0 };

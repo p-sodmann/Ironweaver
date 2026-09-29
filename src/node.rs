@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::data::{node_value, AttrMap, EdgeData, NodeData, PyAttrs, PyGraph, PyObjects};
 use crate::errors::Error;
+use crate::interrupt;
 use crate::vertex::callbacks::fire;
 use crate::vertex::subgraph::build_subgraph;
 use crate::{Edge, Vertex};
@@ -83,9 +84,9 @@ impl Node {
         v.graph.node(self.ix).ok_or_else(stale)?;
         let ok = edge_predicate(py, &self.vertex, &filter, &edge_filter);
         let order = if breadth_first {
-            traversal::bfs(&v.graph, self.ix, depth, ok)?
+            interrupt::polling(py, || traversal::bfs(&v.graph, self.ix, depth, ok))??
         } else {
-            traversal::dfs(&v.graph, self.ix, depth, ok)?
+            interrupt::polling(py, || traversal::dfs(&v.graph, self.ix, depth, ok))??
         };
         let meta = PyDict::new(py);
         let ids: Vec<&str> = order.iter().map(|&n| v.graph.node(n).expect("visited nodes are live").id()).collect();
@@ -394,7 +395,9 @@ impl Node {
             None => return Ok(None),
         };
         let ok = edge_predicate(py, &self.vertex, &filter, &edge_filter);
-        let path = traversal::bidirectional_bfs(&v.graph, self.ix, target, depth, Direction::Out, ok)?;
+        let path = interrupt::polling(py, || {
+            traversal::bidirectional_bfs(&v.graph, self.ix, target, depth, Direction::Out, ok)
+        })??;
         path.map(|_| Node::handle(py, &self.vertex, target)).transpose()
     }
 

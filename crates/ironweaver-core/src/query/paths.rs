@@ -94,7 +94,11 @@ where
     }
     // One frame per path length: the candidate steps and the next one to try
     let mut stack: Vec<(Vec<(EdgeIx, NodeIx)>, usize)> = vec![(steps(g, start, direction).collect(), 0)];
+    let stop = crate::cancel::stop();
     while let Some((candidates, next)) = stack.last_mut() {
+        if stop.poll() {
+            return Ok(());
+        }
         let Some(&(e, n)) = candidates.get(*next) else {
             stack.pop();
             if !stack.is_empty() {

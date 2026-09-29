@@ -67,6 +67,12 @@ a query layer and database foundations.
 - **Rust core (`ironweaver-core`):** `Graph<N, E>`, an op log (`Op`,
   `Graph::apply` returning the undo ops, atomic `apply_all`), `Expr`,
   `Projection` and the algorithms above, file formats, query primitives.
+- **Ctrl+C stops long computations:** projection algorithms, batch
+  shortest paths / distances, random walks, `Vertex.match`, `Node.paths`,
+  `shortest_path` and traversals raise `KeyboardInterrupt` shortly after
+  Ctrl+C (a signal) instead of running to the end; the graph stays usable.
+  In the core, `cancel::Token` / `cancel::run` stop them from another
+  thread (`GraphError::Interrupted`).
 - `ironweaver.__version__`; `Path` objects now carry `edges`.
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and

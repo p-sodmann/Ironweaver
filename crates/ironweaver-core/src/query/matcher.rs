@@ -144,6 +144,7 @@ struct Matcher<'a, N, E, V> {
     /// Edges bound so far (a stack; matches are small).
     used: Vec<EdgeIx>,
     visit: V,
+    stop: crate::cancel::Stop,
 }
 
 impl<N, E, X, V> Matcher<'_, N, E, V>
@@ -199,6 +200,9 @@ where
 
     /// Run steps `i..`; false once the visitor asked to stop.
     fn go(&mut self, i: usize) -> Result<bool, X> {
+        if self.stop.poll() {
+            return Ok(false);
+        }
         let Some(&step) = self.steps.get(i) else {
             let m = Match {
                 nodes: self.nodes.iter().map(|n| n.expect("every node variable is bound")).collect(),
@@ -320,6 +324,7 @@ where
         edges: vec![None; pattern.edges.len()],
         used: Vec::new(),
         visit,
+        stop: crate::cancel::stop(),
     };
     m.go(0)?;
     Ok(())

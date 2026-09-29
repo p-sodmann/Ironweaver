@@ -24,6 +24,8 @@ pub enum GraphError {
     InvalidType(String),
     /// Encoding or decoding a graph document failed.
     Format(String),
+    /// The computation was cancelled (see [`cancel`](crate::cancel)).
+    Interrupted,
 }
 
 impl fmt::Display for GraphError {
@@ -34,6 +36,7 @@ impl fmt::Display for GraphError {
             GraphError::DuplicateEdge(id) => write!(f, "Edge with id {} already exists", id),
             GraphError::EdgeNotFound(id) => write!(f, "Edge with id {} not found", id),
             GraphError::Stale => f.write_str("node or edge was removed from its graph"),
+            GraphError::Interrupted => f.write_str("interrupted"),
             GraphError::InvalidArgument(msg) | GraphError::InvalidType(msg) | GraphError::Format(msg) => {
                 f.write_str(msg)
             }

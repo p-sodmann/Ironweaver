@@ -2,6 +2,8 @@
 
 Graph algorithms run on a [`Projection`](traversal.md#projections--vertexproject): a compact, read-only copy of (part of) the graph made by `vertex.project(...)`. Build it once and run as many algorithms on it as you like. They run in Rust with the GIL released, several of them on all cores. Results use node ids: dicts `{id: value}` for per-node scores, lists of lists of ids (largest first) for groups of nodes.
 
+Ctrl+C stops a long computation: it raises `KeyboardInterrupt` within a fraction of a second and throws the partial result away; the graph and the projection stay usable. (Projections under 20,000 nodes plus edges run without that check: they finish quickly.)
+
 The examples below use this graph:
 
 ```python

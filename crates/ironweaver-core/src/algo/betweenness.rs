@@ -140,7 +140,17 @@ pub fn betweenness_centrality(p: &Projection, opts: &Betweenness) -> Result<Vec<
             &all
         }
     };
-    let mut bc = ordered_sum(n, sources, || Brandes::new(n), |b, &s, acc| b.accumulate(p, s, opts, acc));
+    let stop = crate::cancel::stop();
+    let mut bc = ordered_sum(
+        n,
+        sources,
+        || Brandes::new(n),
+        |b, &s, acc| {
+            if !stop.requested() {
+                b.accumulate(p, s, opts, acc)
+            }
+        },
+    );
 
     // Scaling, as networkx's `_rescale`
     let sampled = opts.sources.as_ref().filter(|s| s.len() != n);

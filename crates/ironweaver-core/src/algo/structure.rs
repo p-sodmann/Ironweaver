@@ -28,6 +28,7 @@ fn triangles_and_degrees(u: &Undirected) -> Vec<(u64, usize)> {
     // node-sized arrays), then summed; `mark[x] == a + 1` flags x as in
     // forward(a), so nothing is cleared between nodes
     let piece = (n / (8 * rayon::current_num_threads())).max(64);
+    let stop = crate::cancel::stop();
     let counts = (0..n as u32)
         .into_par_iter()
         .with_min_len(piece)
@@ -35,7 +36,7 @@ fn triangles_and_degrees(u: &Undirected) -> Vec<(u64, usize)> {
             || (vec![0u64; n], vec![0u32; n]),
             |(mut count, mut mark), a| {
                 let fa = &forward[a as usize];
-                if fa.len() < 2 {
+                if fa.len() < 2 || stop.requested() {
                     return (count, mark);
                 }
                 for &b in fa {

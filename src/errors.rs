@@ -3,16 +3,18 @@
 // Mapping core `GraphError`s to Python exceptions.
 
 use ironweaver_core::GraphError;
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::PyErr;
 
 /// The Python exception for a core error: `TypeError` for wrong types,
-/// `RuntimeError` for format errors and stale handles, `ValueError` otherwise.
+/// `RuntimeError` for format errors and stale handles, `KeyboardInterrupt`
+/// for cancelled computations, `ValueError` otherwise.
 pub fn graph_error(e: GraphError) -> PyErr {
     match e {
         GraphError::InvalidType(msg) => PyTypeError::new_err(msg),
         GraphError::Format(msg) => PyRuntimeError::new_err(msg),
         GraphError::Stale => PyRuntimeError::new_err(e.to_string()),
+        GraphError::Interrupted => PyKeyboardInterrupt::new_err(e.to_string()),
         _ => PyValueError::new_err(e.to_string()),
     }
 }

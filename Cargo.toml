@@ -19,6 +19,7 @@ crate-type = ["cdylib"]
 [dependencies]
 ironweaver-core = { path = "crates/ironweaver-core", version = "0.2.0" }
 pyo3 = { version = "0.29", features = ["extension-module"] }
+rayon = "1.10"
 serde = "1.0"
 sonic-rs = "0.5"
 half = "2.2"

@@ -45,7 +45,11 @@ pub fn dfs<N, E, X>(
 
     let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new() };
     enter(g, &mut w, start, 0, depth);
+    let stop = crate::cancel::stop();
     while let Some(frame) = w.stack.last_mut() {
+        if stop.poll() {
+            break;
+        }
         if frame.1 >= frame.0.len() {
             w.stack.pop();
             continue;
@@ -75,7 +79,11 @@ pub fn bfs<N, E, X>(
     visited.insert(start);
     let mut queue = VecDeque::from([(start, 0usize)]);
 
+    let stop = crate::cancel::stop();
     while let Some((ix, d)) = queue.pop_front() {
+        if stop.poll() {
+            break;
+        }
         if depth.is_some_and(|max| d >= max) {
             continue;
         }
@@ -112,7 +120,11 @@ pub fn expand<N, E>(
             queue.push_back((seed, 0usize));
         }
     }
+    let stop = crate::cancel::stop();
     while let Some((ix, d)) = queue.pop_front() {
+        if stop.poll() {
+            break;
+        }
         if d >= depth {
             continue;
         }
@@ -162,7 +174,11 @@ pub fn bidirectional_bfs<N, E, X>(
     let mut bwd_frontier = vec![target];
     let (mut fwd_depth, mut bwd_depth) = (0usize, 0usize);
 
+    let stop = crate::cancel::stop();
     while !fwd_frontier.is_empty() && !bwd_frontier.is_empty() {
+        if stop.poll() {
+            return Ok(None);
+        }
         // The next meeting would give a path of fwd_depth + bwd_depth + 1 edges
         if max_depth.is_some_and(|d| fwd_depth + bwd_depth >= d) {
             return Ok(None);

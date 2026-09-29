@@ -139,7 +139,8 @@ pub fn k_shortest_paths(
     // Candidates by (cost, nodes): ordered and deduplicated
     let mut candidates: BTreeSet<(u64, Vec<u32>, usize)> = BTreeSet::new();
     let mut banned_edges = HashSet::new();
-    while found.len() < k {
+    let stop = crate::cancel::stop();
+    while found.len() < k && !stop.poll() {
         let last = found.last().expect("at least one path").nodes.clone();
         let mut root_cost = 0.0;
         for j in 0..last.len() - 1 {

@@ -157,10 +157,14 @@ pub fn node2vec_walks(p: &Projection, starts: Option<&[u32]>, opts: &Node2Vec) -
     };
     let picker = Picker::new(p);
     let total = starts.len() * opts.walks_per_node;
+    let stop = crate::cancel::stop();
     Ok((0..total)
         .into_par_iter()
         .with_min_len(64)
         .map(|i| {
+            if stop.requested() {
+                return Vec::new();
+            }
             let mut rng = StdRng::seed_from_u64(mix(opts.seed, i as u64));
             walk(p, &picker, starts[i % starts.len()], opts, &mut rng)
         })

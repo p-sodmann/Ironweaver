@@ -15,6 +15,7 @@
 
 pub mod algo;
 pub mod batch;
+pub mod cancel;
 pub mod direction;
 pub mod error;
 pub mod expr;

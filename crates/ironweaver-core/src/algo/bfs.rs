@@ -31,7 +31,8 @@ pub fn bfs_levels(p: &Projection, sources: &[u32], max_depth: Option<u32>) -> Re
     let mut unexplored: usize = (0..n as u32).map(|u| p.out_degree(u)).sum();
     let mut bottom_up = false;
     let mut depth = 0u32;
-    while !frontier.is_empty() && max_depth.is_none_or(|m| depth < m) {
+    let stop = crate::cancel::stop();
+    while !frontier.is_empty() && max_depth.is_none_or(|m| depth < m) && !stop.requested() {
         let frontier_edges: usize = frontier.par_iter().map(|&u| p.out_degree(u)).sum();
         if !bottom_up && frontier_edges > unexplored / ALPHA {
             bottom_up = true;

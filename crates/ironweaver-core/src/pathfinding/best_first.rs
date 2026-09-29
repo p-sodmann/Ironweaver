@@ -76,7 +76,11 @@ where
         heap.push(State { f: h0, g: 0.0, node: source });
     }
 
+    let stop = crate::cancel::stop();
     while let Some(State { g, node: current, .. }) = heap.pop() {
+        if stop.poll() {
+            return Ok(None);
+        }
         if g > info[&current].g {
             continue; // stale entry: a cheaper route was found later
         }

@@ -32,7 +32,8 @@ pub fn label_propagation(p: &Projection, max_iter: usize) -> (Vec<Vec<u32>>, usi
     let directed = p.direction() != Direction::Both;
     let mut labels: Vec<u32> = (0..n as u32).collect();
     let mut rounds = 0;
-    while rounds < max_iter {
+    let stop = crate::cancel::stop();
+    while rounds < max_iter && !stop.requested() {
         rounds += 1;
         let next: Vec<u32> = (0..n as u32)
             .into_par_iter()

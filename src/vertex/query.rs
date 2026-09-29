@@ -16,6 +16,7 @@ use super::Vertex;
 use crate::errors::{graph_error, Error};
 use crate::expr::PyExpr;
 use crate::gc_pause::GcPause;
+use crate::interrupt;
 use crate::{Edge, Node, Path};
 
 fn to_expr(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Expr> {
@@ -61,7 +62,7 @@ pub fn match_pattern(
     }
     let matches = {
         let v = slf.try_borrow()?;
-        find_matches::<_, _, Error>(&v.graph, &p, limit)?
+        interrupt::polling(py, || find_matches::<_, _, Error>(&v.graph, &p, limit))??
     };
 
     let _gc = GcPause::new(py);
@@ -126,28 +127,30 @@ pub fn node_paths(py: Python<'_>, vertex: &Py<Vertex>, start: NodeIx, opts: Path
         let v = vertex.try_borrow(py)?;
         let g = &v.graph;
         let wanted: Option<Vec<_>> = types.as_ref().map(|t| t.iter().filter_map(|name| g.symbol(name)).collect());
-        expand_paths::<_, _, Error>(
-            g,
-            start,
-            direction,
-            hops,
-            uniqueness,
-            |e, edge| {
-                if let Some(w) = &wanted {
-                    if !edge.edge_type().is_some_and(|t| w.contains(&t)) {
-                        return Ok(false);
+        interrupt::polling(py, || {
+            expand_paths::<_, _, Error>(
+                g,
+                start,
+                direction,
+                hops,
+                uniqueness,
+                |e, edge| {
+                    if let Some(w) = &wanted {
+                        if !edge.edge_type().is_some_and(|t| w.contains(&t)) {
+                            return Ok(false);
+                        }
                     }
-                }
-                match &filter {
-                    Some(f) => Ok(f.matches_edge(g, e)?),
-                    None => Ok(true),
-                }
-            },
-            |edges, nodes| {
-                found.push((edges.to_vec(), nodes.to_vec()));
-                Ok(opts.limit.is_none_or(|l| found.len() < l))
-            },
-        )?;
+                    match &filter {
+                        Some(f) => Ok(f.matches_edge(g, e)?),
+                        None => Ok(true),
+                    }
+                },
+                |edges, nodes| {
+                    found.push((edges.to_vec(), nodes.to_vec()));
+                    Ok(opts.limit.is_none_or(|l| found.len() < l))
+                },
+            )
+        })??;
     }
     let _gc = GcPause::new(py);
     let out = PyList::empty(py);

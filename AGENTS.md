@@ -98,6 +98,11 @@ Below is a quick guide to notable functions and where to find them.
   `matches_edge`, read through `Attributes::with_value`. Missing values make
   comparisons false.
 - **error.rs** – `GraphError` (its `Display` text is the user-facing message).
+- **cancel.rs** – cancellation: `Token`, `run` (runs a closure under a
+  token; `Err(Interrupted)` if cancelled), `run_polling` (with a hook the
+  sequential loops call now and then), `stop()` -> `Stop`: parallel loops
+  check `requested()`, sequential searches `poll()`. A new long-running
+  loop must check one and bail out early (the partial result is dropped).
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
   graphs), the `Attributes` trait and `Lookup`.
@@ -222,6 +227,11 @@ Below is a quick guide to notable functions and where to find them.
   core `RawProjection`), result conversion shared with `vertex/batch.rs`.
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
   `NodeView` / `EdgeView`.
+- **interrupt.rs** – Ctrl+C: `released(py, size, f)` runs GIL-free work on
+  rayon's pool under a token while the caller checks signals every 20 ms
+  (inline below 20,000 nodes + edges); `polling(py, f)` runs GIL-held
+  searches with a hook that checks signals. Every long computation goes
+  through one of them.
 - **gc_pause.rs** – `GcPause` guard that pauses Python's cyclic GC during bulk
   object creation.
 - **vertex/core.rs** – the `Vertex` class: constructors (`new`, `from_nodes`,

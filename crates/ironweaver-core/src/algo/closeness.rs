@@ -17,12 +17,16 @@ fn per_node(p: &Projection, weighted: bool, f: impl Fn(&Search) -> f64 + Sync + 
         ));
     }
     let n = p.node_count();
+    let stop = crate::cancel::stop();
     Ok((0..n as u32)
         .into_par_iter()
         .with_min_len(16)
         .map_init(
             || Search::new(n),
             |s, u| {
+                if stop.requested() {
+                    return 0.0;
+                }
                 // Distances to u: search against the edges
                 s.run(p, u, weighted, true);
                 f(s)

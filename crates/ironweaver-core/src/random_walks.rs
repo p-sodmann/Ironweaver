@@ -403,6 +403,7 @@ impl WalkPlan {
         let fixed_start = self.start;
         let base_seed: u64 = opts.seed.unwrap_or_else(rand::random);
         let (max_length, allow_revisit, include_edges) = (opts.max_length, opts.allow_revisit, opts.include_edge_types);
+        let stop = crate::cancel::stop();
 
         let walks: Vec<Walk> = if opts.stratified {
             // Visit counts persist across all attempts so that later walks are
@@ -413,6 +414,9 @@ impl WalkPlan {
             let mut scratch = Scratch::new(index.ids.len());
             let mut walks = Vec::with_capacity(opts.num_attempts);
             for _ in 0..opts.num_attempts {
+                if stop.requested() {
+                    break;
+                }
                 let start = fixed_start.unwrap_or_else(|| strat.sample_start(&mut rng));
                 let walk = perform_walk(
                     index,
@@ -436,6 +440,9 @@ impl WalkPlan {
             let per_chunk: Vec<Vec<Walk>> = (0..n_chunks)
                 .into_par_iter()
                 .map(|chunk| {
+                    if stop.requested() {
+                        return Vec::new();
+                    }
                     let mut rng = StdRng::seed_from_u64(chunk_seed(base_seed, chunk));
                     let mut scratch = Scratch::new(index.ids.len());
                     let attempts = CHUNK.min(num_attempts - chunk * CHUNK);

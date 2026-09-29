@@ -66,6 +66,14 @@ fn main() -> Result<(), GraphError> {
 }
 ```
 
+## Cancellation
+
+Long computations (the `algo` functions, batch queries, pattern matching,
+path expansion, searches, random walks) check a cancellation token. Run one
+under `cancel::run(&token, || ...)` and call `token.cancel()` from another
+thread: it stops soon after and `run` returns `Err(GraphError::Interrupted)`.
+Without a token the checks cost nothing measurable.
+
 ## Minimum supported Rust version
 
 Rust 1.85. Raising it is a minor-version change.

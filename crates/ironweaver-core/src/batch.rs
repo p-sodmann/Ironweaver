@@ -174,11 +174,15 @@ pub fn shortest_paths(
     max_cost: Option<f64>,
 ) -> Result<Vec<Option<DensePath>>, GraphError> {
     check(p, pairs.iter().flat_map(|&(a, b)| [a, b]), weighted, max_cost)?;
+    let stop = crate::cancel::stop();
     Ok(pairs
         .par_iter()
         .map_init(
             || Workspace::new(p.node_count()),
             |ws, &(source, target)| {
+                if stop.requested() {
+                    return None;
+                }
                 let settled = ws.run(p, weighted, source, Some(target), max_cost);
                 let result = ws.dist[target as usize].is_finite().then(|| DensePath {
                     nodes: ws.path_to(target),
@@ -202,11 +206,15 @@ pub fn distances(
     max_cost: Option<f64>,
 ) -> Result<Vec<Vec<(u32, f64)>>, GraphError> {
     check(p, sources.iter().copied(), weighted, max_cost)?;
+    let stop = crate::cancel::stop();
     Ok(sources
         .par_iter()
         .map_init(
             || Workspace::new(p.node_count()),
             |ws, &source| {
+                if stop.requested() {
+                    return Vec::new();
+                }
                 ws.run(p, weighted, source, None, max_cost);
                 let out = ws.touched.iter().map(|&u| (u, ws.dist[u as usize])).collect();
                 ws.reset();

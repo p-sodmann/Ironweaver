@@ -143,6 +143,7 @@ pub fn most_similar(
     }
     let u = Undirected::of(p);
     let n = u.len();
+    let stop = crate::cancel::stop();
     let all: Vec<u32>;
     let sources = match sources {
         Some(s) => s,
@@ -157,6 +158,9 @@ pub fn most_similar(
         .map_init(
             || (vec![0f64; n], vec![false; n], Vec::<u32>::new()),
             |(sum, seen, touched), &a| {
+                if stop.requested() {
+                    return Vec::new();
+                }
                 // Common-neighbour weights with every node two hops away
                 for &w in u.neighbors(a) {
                     let add = metric.weight(u.degree(w));
