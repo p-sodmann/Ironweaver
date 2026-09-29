@@ -134,6 +134,8 @@ g3 = Vertex.load_from_binary("graph.bin")
 assert sorted(g3.keys()) == sorted(g.keys())
 ```
 
+File saves are atomic (temp file + rename). Attribute values nest at most 100 levels; deeper values raise RuntimeError on save and load.
+
 ## Callbacks
 
 ```python

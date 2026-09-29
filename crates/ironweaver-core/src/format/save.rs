@@ -63,6 +63,19 @@ pub mod tagged {
     pub fn dict<S: Serializer, T: Serialize + ?Sized>(s: S, entries: &T) -> Result<S::Ok, S::Error> {
         s.serialize_newtype_variant(ENUM, DICT, "Dict", entries)
     }
+
+    /// Fails when `depth` (1 for an attribute's own value) exceeds
+    /// [`MAX_DEPTH`](crate::format::MAX_DEPTH), as the loaders would reject
+    /// the value. Also stops values that contain themselves.
+    pub fn check_depth<E: serde::ser::Error>(depth: usize) -> Result<(), E> {
+        let max = crate::format::MAX_DEPTH;
+        if depth > max {
+            return Err(E::custom(format_args!(
+                "attribute values nested more than {max} levels deep (or containing themselves) cannot be saved"
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Encodes the payloads of a `Graph<N, E>` while it is written. Every method
@@ -80,11 +93,13 @@ pub trait Codec<N, E> {
 struct Tagged<'a> {
     value: &'a Value,
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for Tagged<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let half = self.half;
+        let (half, depth) = (self.half, self.depth);
+        tagged::check_depth(depth)?;
         match self.value {
             Value::String(v) => tagged::string(s, v),
             Value::Int(v) => tagged::int(s, *v),
@@ -92,37 +107,41 @@ impl Serialize for Tagged<'_> {
             Value::Half(v) => tagged::half(s, *v),
             Value::Bool(v) => tagged::bool(s, *v),
             Value::None => tagged::none(s),
-            Value::List(items) => tagged::list(s, &TaggedList { items, half }),
-            Value::Dict(map) => tagged::dict(s, &TaggedMap { map, half }),
+            Value::List(items) => tagged::list(s, &TaggedList { items, half, depth }),
+            Value::Dict(map) => tagged::dict(s, &TaggedMap { map, half, depth }),
         }
     }
 }
 
+/// Items of a list value at `depth`.
 struct TaggedList<'a> {
     items: &'a [Value],
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for TaggedList<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut seq = s.serialize_seq(Some(self.items.len()))?;
         for value in self.items {
-            seq.serialize_element(&Tagged { value, half: self.half })?;
+            seq.serialize_element(&Tagged { value, half: self.half, depth: self.depth + 1 })?;
         }
         seq.end()
     }
 }
 
+/// Entries of a dict value at `depth` (0 for an attribute map).
 struct TaggedMap<'a> {
     map: &'a Attrs,
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for TaggedMap<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(self.map.len()))?;
         for (k, value) in self.map {
-            map.serialize_entry(k, &Tagged { value, half: self.half })?;
+            map.serialize_entry(k, &Tagged { value, half: self.half, depth: self.depth + 1 })?;
         }
         map.end()
     }
@@ -138,7 +157,7 @@ pub struct RecordCodec<'a> {
 
 impl RecordCodec<'_> {
     fn attrs<S: Serializer>(&self, map: &Attrs, s: S) -> Result<S::Ok, S::Error> {
-        TaggedMap { map, half: self.half }.serialize(s)
+        TaggedMap { map, half: self.half, depth: 0 }.serialize(s)
     }
 }
 
@@ -247,7 +266,7 @@ impl Serialize for Metadata {
         ];
         let mut map = s.serialize_map(Some(entries.len()))?;
         for (k, value) in &entries {
-            map.serialize_entry(k, &Tagged { value, half: false })?;
+            map.serialize_entry(k, &Tagged { value, half: false, depth: 1 })?;
         }
         map.end()
     }

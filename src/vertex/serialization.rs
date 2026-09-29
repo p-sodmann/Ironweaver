@@ -1,11 +1,10 @@
 // vertex/serialization.rs
 
-use ironweaver_core::format::{GraphWriter, LoadGraph};
+use ironweaver_core::format::{self, GraphWriter, LoadGraph};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyString};
 use std::cell::RefCell;
-use std::fs::File;
-use std::io::BufWriter;
+use std::io::Write;
 
 use super::Vertex;
 use crate::convert::{dict_to_json, to_attrs, PyCodec, Strings};
@@ -30,7 +29,7 @@ pub fn save_to_json(vertex: &Vertex, py: Python<'_>, file_path: Option<String>, 
     match file_path {
         Some(path) => {
             let json = writer.to_json(pretty).map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
-            py.allow_threads(|| std::fs::write(&path, json))
+            py.allow_threads(|| format::write_atomic(&path, |out| out.write_all(&json)))
                 .map_err(|e| runtime_error("Failed to save graph to JSON", e))?;
             Ok(py.None())
         }
@@ -46,10 +45,9 @@ pub fn save_to_json(vertex: &Vertex, py: Python<'_>, file_path: Option<String>, 
 fn save_binary(vertex: &Vertex, py: Python<'_>, file_path: &str, half: bool) -> PyResult<()> {
     let codec = codec(vertex, py, half);
     let writer = GraphWriter::new(&vertex.graph, &codec);
-    let file = File::create(file_path).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
-    let mut out = BufWriter::new(file);
-    writer.write_binary(&mut out).map_err(|e| runtime_error("Failed to save graph to binary", e))?;
-    std::io::Write::flush(&mut out).map_err(|e| runtime_error("Failed to save graph to binary", e))
+    // The codec reads Python values, so this runs with the GIL held
+    format::write_atomic(file_path, |out| writer.write_binary(out).map_err(std::io::Error::other))
+        .map_err(|e| runtime_error("Failed to save graph to binary", e))
 }
 
 pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {

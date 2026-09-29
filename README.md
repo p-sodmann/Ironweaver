@@ -285,6 +285,8 @@ print(f"Loaded graph: {loaded_graph}")
 print(f"Metadata: {loaded_graph.get_metadata()}")
 ```
 
+Saving to a file is atomic: the graph is written to a temporary file next to the target and renamed over it, so a failed or interrupted save never leaves a half-written file (the previous file stays as it was). Attribute values may nest lists and dicts at most 100 levels deep; saving deeper values (or a list that contains itself) and loading files with deeper values raise `RuntimeError`.
+
 ### LGF (Labeled Graph Format) Support
 
 IronWeaver supports reading graphs from the Labeled Graph Format (LGF), which provides a human-readable text format for representing graphs with nodes, edges, and attributes.

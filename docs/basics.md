@@ -48,6 +48,8 @@ v2 = Vertex.load_from_binary("graph.bin")
 v.save_to_binary_f16("graph_f16.bin")
 ```
 
+Saving to a file is atomic: the graph is written to a temporary file next to the target and renamed over it, so a failed or interrupted save never leaves a half-written file (the previous file stays as it was). Attribute values may nest lists and dicts at most 100 levels deep; saving deeper values (or a list that contains itself) and loading files with deeper values raise `RuntimeError`.
+
 ### Metadata & analysis
 
 ```python

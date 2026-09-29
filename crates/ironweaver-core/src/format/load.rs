@@ -2,9 +2,10 @@
 
 use bincode::Options;
 use half::f16;
-use serde::de::{Deserializer, MapAccess, Visitor};
+use serde::de::{Deserializer, Error as _, MapAccess, Visitor};
 use serde::Deserialize;
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -89,8 +90,33 @@ enum RawValue<'a> {
 /// A value from the input document; strings borrow from the input buffer.
 pub struct LoadValue<'a>(RawValue<'a>);
 
+/// Deepest nesting of list / dict attribute values a document may contain
+/// (a scalar is depth 1). Deeper input is rejected instead of overflowing the
+/// stack; savers enforce the same limit, so every saved graph loads again.
+pub const MAX_DEPTH: usize = 100;
+
+thread_local! {
+    // Nesting depth of the `LoadValue` being parsed on this thread
+    static DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
 impl<'de: 'a, 'a> Deserialize<'de> for LoadValue<'a> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Level;
+        impl Drop for Level {
+            fn drop(&mut self) {
+                DEPTH.with(|c| c.set(c.get() - 1));
+            }
+        }
+
+        let depth = DEPTH.with(|c| {
+            c.set(c.get() + 1);
+            c.get()
+        });
+        let _level = Level;
+        if depth > MAX_DEPTH {
+            return Err(D::Error::custom(format_args!("attribute values nested more than {MAX_DEPTH} levels deep")));
+        }
         RawValue::deserialize(d).map(LoadValue)
     }
 }

@@ -89,7 +89,11 @@ Below is a quick guide to notable functions and where to find them.
   - `load.rs`: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
     borrowed structs, `LoadGraph::build` makes the `Graph`.
   - `mod.rs`: `to_json` / `to_binary` / `from_json` / `from_binary` for
-    `Graph<Record, Record>`.
+    `Graph<Record, Record>`; `write_atomic` (temp file + fsync + rename,
+    used by every file save).
+  - Values nest at most `MAX_DEPTH` (100) levels: `LoadValue` rejects deeper
+    input (so crafted files cannot overflow the stack) and savers check with
+    `tagged::check_depth`. Any new recursive (de)serializer must do the same.
 
 ### Bindings (`src/`)
 

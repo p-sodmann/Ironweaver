@@ -32,11 +32,19 @@ fn py_err<E: serde::ser::Error>(e: PyErr) -> E {
 /// A plain Python value (dict/list/str/number/bool/None) written as ordinary
 /// JSON. Used to turn a graph *dict* into JSON bytes, which then go through
 /// the same fast loader as JSON text.
-struct PlainPy<'a, 'py>(&'a Bound<'py, PyAny>);
+struct PlainPy<'a, 'py>(&'a Bound<'py, PyAny>, usize);
+
+/// Deepest nesting `PlainPy` writes. A graph dict needs a few levels for the
+/// document and two per value level ({"List": [...]}); anything deeper is
+/// beyond what the JSON loader accepts anyway.
+const PLAIN_MAX_DEPTH: usize = 2 * ironweaver_core::format::MAX_DEPTH + 16;
 
 impl Serialize for PlainPy<'_, '_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let v = self.0;
+        let (v, depth) = (self.0, self.1);
+        if depth > PLAIN_MAX_DEPTH {
+            return Err(S::Error::custom("graph dict nested too deeply (or containing itself)"));
+        }
         if v.is_none() {
             s.serialize_unit()
         } else if let Ok(b) = v.downcast::<PyBool>() {
@@ -53,19 +61,19 @@ impl Serialize for PlainPy<'_, '_> {
         } else if let Ok(dict) = v.downcast::<PyDict>() {
             let mut map = s.serialize_map(Some(dict.len()))?;
             for (k, val) in dict.iter() {
-                map.serialize_entry(&dict_key(&k).map_err(py_err)?, &PlainPy(&val))?;
+                map.serialize_entry(&dict_key(&k).map_err(py_err)?, &PlainPy(&val, depth + 1))?;
             }
             map.end()
         } else if let Ok(list) = v.downcast::<PyList>() {
             let mut seq = s.serialize_seq(Some(list.len()))?;
             for item in list.iter() {
-                seq.serialize_element(&PlainPy(&item))?;
+                seq.serialize_element(&PlainPy(&item, depth + 1))?;
             }
             seq.end()
         } else if let Ok(tuple) = v.downcast::<PyTuple>() {
             let mut seq = s.serialize_seq(Some(tuple.len()))?;
             for item in tuple.iter() {
-                seq.serialize_element(&PlainPy(&item))?;
+                seq.serialize_element(&PlainPy(&item, depth + 1))?;
             }
             seq.end()
         } else {
@@ -77,7 +85,7 @@ impl Serialize for PlainPy<'_, '_> {
 
 /// Encode a graph dict (as produced by `json.loads(save_to_json())`) as JSON.
 pub fn dict_to_json(obj: &Bound<'_, PyAny>) -> Result<Vec<u8>, String> {
-    sonic_rs::to_vec(&PlainPy(obj)).map_err(|e| e.to_string())
+    sonic_rs::to_vec(&PlainPy(obj, 0)).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -87,16 +95,18 @@ pub fn dict_to_json(obj: &Bound<'_, PyAny>) -> Result<Vec<u8>, String> {
 /// A Python value serialized as a tagged value. Type dispatch matches the
 /// loader's expectations: `bool` is checked before `int` (it is an `int`
 /// subclass), numpy arrays and scalars go through one bulk `tolist()`,
-/// anything else falls back to `str()`.
+/// anything else falls back to `str()`. `depth` is 1 for an attribute's
+/// value (see `tagged::check_depth`).
 struct PyValue<'a, 'py> {
     value: &'a Bound<'py, PyAny>,
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for PyValue<'_, '_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let v = self.value;
-        let half = self.half;
+        let (v, half, depth) = (self.value, self.half, self.depth);
+        tagged::check_depth(depth)?;
 
         if v.is_none() {
             tagged::none(s)
@@ -114,29 +124,29 @@ impl Serialize for PyValue<'_, '_> {
             tagged::string(s, st.to_str().map_err(py_err)?)
         } else if let Ok(list) = v.downcast::<PyList>() {
             let items: Vec<Bound<'_, PyAny>> = list.iter().collect();
-            tagged::list(s, &PyItems { items: &items, half })
+            tagged::list(s, &PyItems { items: &items, half, depth })
         } else if let Ok(tuple) = v.downcast::<PyTuple>() {
             let items: Vec<Bound<'_, PyAny>> = tuple.iter().collect();
-            tagged::list(s, &PyItems { items: &items, half })
+            tagged::list(s, &PyItems { items: &items, half, depth })
         } else if let Ok(dict) = v.downcast::<PyDict>() {
             let entries: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)> = dict.iter().collect();
-            tagged::dict(s, &PyEntries { entries: &entries, half })
+            tagged::dict(s, &PyEntries { entries: &entries, half, depth })
         } else if v.hasattr("tolist").map_err(py_err)? {
             // numpy arrays and numpy scalars (e.g. embeddings)
             let native = v.call_method0("tolist").map_err(py_err)?;
-            PyValue { value: &native, half }.serialize(s)
+            PyValue { value: &native, half, depth }.serialize(s)
         } else if let Ok(mapping) = v.downcast::<PyMapping>() {
             let mut entries = Vec::new();
             for item in mapping.items().map_err(py_err)?.iter() {
                 entries.push(item.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>().map_err(py_err)?);
             }
-            tagged::dict(s, &PyEntries { entries: &entries, half })
+            tagged::dict(s, &PyEntries { entries: &entries, half, depth })
         } else if let Ok(seq) = v.downcast::<PySequence>() {
             let mut items = Vec::new();
             for item in seq.try_iter().map_err(py_err)? {
                 items.push(item.map_err(py_err)?);
             }
-            tagged::list(s, &PyItems { items: &items, half })
+            tagged::list(s, &PyItems { items: &items, half, depth })
         } else {
             // Fallback: string representation
             let text = v.str().map_err(py_err)?;
@@ -145,31 +155,35 @@ impl Serialize for PyValue<'_, '_> {
     }
 }
 
+/// Items of a list value at `depth`.
 struct PyItems<'a, 'py> {
     items: &'a [Bound<'py, PyAny>],
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for PyItems<'_, '_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut seq = s.serialize_seq(Some(self.items.len()))?;
         for item in self.items {
-            seq.serialize_element(&PyValue { value: item, half: self.half })?;
+            seq.serialize_element(&PyValue { value: item, half: self.half, depth: self.depth + 1 })?;
         }
         seq.end()
     }
 }
 
+/// Entries of a dict value at `depth` (0 for an attribute map).
 struct PyEntries<'a, 'py> {
     entries: &'a [(Bound<'py, PyAny>, Bound<'py, PyAny>)],
     half: bool,
+    depth: usize,
 }
 
 impl Serialize for PyEntries<'_, '_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(self.entries.len()))?;
         for (k, v) in self.entries {
-            let value = PyValue { value: v, half: self.half };
+            let value = PyValue { value: v, half: self.half, depth: self.depth + 1 };
             match k.downcast::<PyString>() {
                 Ok(key) => map.serialize_entry(key.to_str().map_err(py_err)?, &value)?,
                 Err(_) => map.serialize_entry(&dict_key(k).map_err(py_err)?, &value)?,
@@ -194,7 +208,7 @@ impl PyCodec<'_> {
             Some(d) => d.iter().collect(),
             None => Vec::new(),
         };
-        PyEntries { entries: &entries, half: self.half }.serialize(s)
+        PyEntries { entries: &entries, half: self.half, depth: 0 }.serialize(s)
     }
 }
 
@@ -213,7 +227,7 @@ impl Codec<NodeData, EdgeData> for PyCodec<'_> {
     }
     fn graph_meta<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let entries: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)> = self.meta.iter().collect();
-        PyEntries { entries: &entries, half: self.half }.serialize(s)
+        PyEntries { entries: &entries, half: self.half, depth: 0 }.serialize(s)
     }
 }
 
