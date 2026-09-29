@@ -1,0 +1,261 @@
+name: Release
+
+# A `v*` tag (e.g. v0.2.0) builds wheels for every platform, tests them, and
+# publishes them to PyPI, the core crate to crates.io, and a GitHub release.
+# Run it by hand (workflow_dispatch), or change the packaging on a PR, to
+# build and test everything without publishing. See RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "pyproject.toml"
+      - "Cargo.toml"
+      - "crates/ironweaver-core/Cargo.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Python versions to build wheels for (one wheel per version and platform)
+  PYTHONS: "3.9 3.10 3.11 3.12 3.13 3.14"
+
+jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        name: Versions in Cargo.toml, the core crate and the tag agree
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          core=$(grep -m1 '^version' crates/ironweaver-core/Cargo.toml | cut -d'"' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$version" != "$core" ]; then
+            echo "Cargo.toml has $version, crates/ironweaver-core has $core" >&2; exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version" >&2; exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            heading=$(grep -m1 "^## $version" CHANGELOG.md || true)
+            if [ -z "$heading" ]; then
+              echo "CHANGELOG.md has no section for $version" >&2; exit 1
+            fi
+            if echo "$heading" | grep -qi unreleased; then
+              echo "CHANGELOG.md still calls $version unreleased: put the date in its heading" >&2; exit 1
+            fi
+          fi
+
+  linux:
+    name: Wheels (Linux ${{ matrix.target }}, ${{ matrix.libc }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64, libc: manylinux, manylinux: "2_28", runner: ubuntu-latest }
+          - { target: aarch64, libc: manylinux, manylinux: "2_28", runner: ubuntu-24.04-arm }
+          - { target: x86_64, libc: musllinux, manylinux: musllinux_1_2, runner: ubuntu-latest }
+          - { target: aarch64, libc: musllinux, manylinux: musllinux_1_2, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.libc }}-${{ matrix.target }}
+          path: dist
+
+  macos:
+    name: Wheels (macOS ${{ matrix.target }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64, runner: macos-15-intel }
+          - { target: aarch64, runner: macos-15 }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.9
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}
+          path: dist
+
+  windows:
+    name: Wheels (Windows x64)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.9
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64
+          path: dist
+
+  sdist:
+    name: Source distribution
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  test:
+    name: Test wheel (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: [linux, macos, windows]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
+        python: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Install the wheel (not the source tree)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary ironweaver --no-index --find-links dist ironweaver
+          python -m pip install pytest networkx numpy scipy psutil
+      - name: Run the tests against the installed wheel
+        shell: bash
+        run: |
+          # Without the source package on the path, only the wheel can be imported
+          rm -rf python
+          python -c "import ironweaver, sys; print(ironweaver.__version__, ironweaver.__file__); assert 'site-packages' in ironweaver.__file__"
+          python -m pytest -q
+
+  test-sdist:
+    name: Build and test the sdist
+    needs: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v5
+        with:
+          name: sdist
+          path: dist
+      - run: |
+          python -m pip install dist/*.tar.gz pytest networkx numpy scipy psutil
+          rm -rf python
+          python -m pytest -q
+
+  pypi:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, test, test-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ironweaver/${{ needs.version.outputs.version }}/
+    permissions:
+      id-token: write  # trusted publishing: no API token needed
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: "{wheels-*,sdist}"
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  crates-io:
+    name: Publish ironweaver-core to crates.io
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish -p ironweaver-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  github-release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: "{wheels-*,sdist}"
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="## ${{ needs.version.outputs.version }}" '
+            index($0, v) == 1 { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: dist/*

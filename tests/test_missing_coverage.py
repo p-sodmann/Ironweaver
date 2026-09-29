@@ -1,12 +1,7 @@
 import json
-import os
-import sys
 
 import pytest
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-PYTHON_DIR = os.path.join(ROOT, "python")
-sys.path.insert(0, PYTHON_DIR)
 
 try:
     from ironweaver import Vertex
