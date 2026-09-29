@@ -518,11 +518,52 @@ impl Vertex {
         pathfinding::path_methods(py)
     }
 
+    /// A compact, read-only copy of (part of) the graph for analytics
+    ///
+    /// Copies the structure (sorted neighbour lists in both directions), at
+    /// most one weight per edge and the node ids, but no attributes. Build it
+    /// once and run many queries on it (`shortest_paths`, `distances`, ...):
+    /// they run on every core with the GIL released. The projection is a
+    /// snapshot; later changes to the graph don't affect it.
+    ///
+    /// Args:
+    ///     weight (str, optional): Edge attribute holding the weight. Without
+    ///         weight and default_weight the projection is unweighted.
+    ///     default_weight (float, optional): Weight of edges without the
+    ///         attribute. Defaults to 1.0 (implies weight="weight").
+    ///     direction (str, optional): "out" (default) keeps edges as they are,
+    ///         "in" reverses them, "both" makes them undirected.
+    ///     nodes (list[str], optional): Only these nodes (and edges between them).
+    ///     node_filter (dict | callable, optional): Keep nodes whose attributes
+    ///         equal the dict's values / for which the callable is true.
+    ///     edge_filter (dict | callable, optional): The same for edges between kept nodes.
+    ///
+    /// Returns:
+    ///     Projection
+    ///
+    /// Raises:
+    ///     ValueError: Unknown node id or direction, or a negative edge weight
+    ///     TypeError: A non-numeric edge weight, or a filter of the wrong type
+    #[pyo3(signature = (weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn project(
+        slf: &Bound<'_, Self>,
+        weight: Option<String>,
+        default_weight: Option<f64>,
+        direction: Option<&str>,
+        nodes: Option<Vec<String>>,
+        node_filter: Option<Bound<'_, PyAny>>,
+        edge_filter: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<crate::projection::Projection> {
+        batch::project(slf, weight, default_weight, direction, nodes, node_filter.as_ref(), edge_filter.as_ref())
+    }
+
     /// Shortest paths for many (source, target) pairs, computed in parallel
     ///
-    /// The graph and its edge costs are copied into a compact snapshot once,
-    /// then all queries run on every core with the GIL released. Use it for
-    /// batches; for a single query `shortest_path` is cheaper.
+    /// The graph and its edge costs are copied into a projection once, then
+    /// all queries run on every core with the GIL released. Use it for
+    /// batches; for a single query `shortest_path` is cheaper, and to run
+    /// several batches, build the projection once with `project`.
     ///
     /// Args:
     ///     pairs (list[tuple[str, str]]): (source_id, target_id) pairs

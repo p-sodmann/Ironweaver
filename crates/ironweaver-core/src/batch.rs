@@ -1,97 +1,49 @@
 // batch.rs
 //
-// Many shortest-path queries at once, in parallel.
-//
-// `Snapshot::build` copies the graph structure (for one direction) and the
-// edge costs into flat arrays (CSR layout). The snapshot owns plain data and
-// no payloads, so the queries can run on all cores without touching the
-// graph; the Python bindings build it while holding the GIL and release the
-// GIL for the queries. Each worker thread reuses one set of per-node arrays
-// across its queries and resets only the entries a query touched.
+// Many shortest-path queries at once, in parallel, on a [`Projection`]. The
+// projection owns plain data and no payloads, so the queries run on all
+// cores without touching the graph (the Python bindings release the GIL).
+// Each worker thread reuses one set of per-node arrays across its queries
+// and resets only the entries a query touched. Nodes are the projection's
+// dense indices.
 
 use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
-use crate::pathfinding::{EdgeCost, PathResult};
-use crate::{Attributes, Direction, Graph, GraphError, NodeIx};
-
-/// Flat, read-only copy of a graph's adjacency (one direction) and edge
-/// costs.
-#[derive(Clone, Debug)]
-pub struct Snapshot {
-    /// Neighbours of dense node `i` are `to[start[i]..start[i + 1]]`.
-    start: Vec<u32>,
-    to: Vec<u32>,
-    /// Cost of each entry of `to`; `None` means every edge costs 1 (BFS).
-    weight: Option<Vec<f64>>,
-    /// Dense index -> node.
-    nodes: Vec<NodeIx>,
-    /// Node slot -> dense index (`u32::MAX` for empty slots).
-    dense: Vec<u32>,
-}
+use crate::{GraphError, Projection};
 
 const NONE: u32 = u32::MAX;
 
-impl Snapshot {
-    /// Snapshot of `g` following edges in `direction`, with costs from
-    /// `cost` (`EdgeCost::Unit` for hop counts). Every edge's cost is read
-    /// and validated here, so a negative or non-numeric weight anywhere is
-    /// an error.
-    pub fn build<N, E, X>(g: &Graph<N, E>, direction: Direction, cost: &EdgeCost) -> Result<Self, X>
-    where
-        E: Attributes,
-        X: From<GraphError> + From<E::Error>,
-    {
-        let mut dense = vec![NONE; g.node_bound()];
-        let nodes: Vec<NodeIx> = g.node_indices().collect();
-        for (i, ix) in nodes.iter().enumerate() {
-            dense[ix.slot()] = i as u32;
-        }
-        let edges_hint = if direction == Direction::Both { 2 * g.edge_count() } else { g.edge_count() };
-        let mut start = Vec::with_capacity(nodes.len() + 1);
-        let mut to = Vec::with_capacity(edges_hint);
-        let mut weight = match cost {
-            EdgeCost::Unit => None,
-            EdgeCost::Weighted { .. } => Some(Vec::with_capacity(edges_hint)),
-        };
-        start.push(0);
-        for &ix in &nodes {
-            for (e, neighbor) in g.neighbors(ix, direction) {
-                to.push(dense[neighbor.slot()]);
-                if let Some(w) = &mut weight {
-                    w.push(cost.cost::<E, X>(&g.edge_ref(e).data)?);
-                }
-            }
-            start.push(u32::try_from(to.len()).expect("too many edges for a snapshot"));
-        }
-        Ok(Snapshot { start, to, weight, nodes, dense })
-    }
+/// A path found by [`shortest_paths`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct DensePath {
+    /// Dense node indices, from source to target.
+    pub nodes: Vec<u32>,
+    /// Sum of the edge weights (edge count for hop queries).
+    pub cost: f64,
+    /// Nodes settled by the search (Dijkstra), or reached (BFS).
+    pub settled: usize,
+}
 
-    /// Number of nodes.
-    pub fn len(&self) -> usize {
-        self.nodes.len()
+/// Check the shared options: weights must exist for weighted queries, node
+/// indices must be in range, `max_cost` must be non-negative.
+fn check(
+    p: &Projection,
+    nodes: impl IntoIterator<Item = u32>,
+    weighted: bool,
+    max_cost: Option<f64>,
+) -> Result<(), GraphError> {
+    crate::pathfinding::check_max_cost(max_cost)?;
+    if weighted && !p.is_weighted() {
+        return Err(GraphError::InvalidArgument(
+            "weighted queries need a projection with edge weights (project with weight=...)".into(),
+        ));
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+    if let Some(u) = nodes.into_iter().find(|&u| u as usize >= p.node_count()) {
+        return Err(GraphError::InvalidArgument(format!("node index {} out of range", u)));
     }
-
-    /// Whether edges carry weights (Dijkstra) or all cost 1 (BFS).
-    pub fn is_weighted(&self) -> bool {
-        self.weight.is_some()
-    }
-
-    fn index_of(&self, ix: NodeIx) -> Result<u32, GraphError> {
-        match self.dense.get(ix.slot()) {
-            Some(&i) if i != NONE && self.nodes[i as usize] == ix => Ok(i),
-            _ => Err(GraphError::Stale),
-        }
-    }
-
-    fn neighbors(&self, u: u32) -> std::ops::Range<usize> {
-        self.start[u as usize] as usize..self.start[u as usize + 1] as usize
-    }
+    Ok(())
 }
 
 /// Per-thread scratch space, sized to the snapshot and reset after each
@@ -134,17 +86,25 @@ impl Workspace {
     }
 
     /// Search from `source` until `target` is settled (or everything within
-    /// `max_cost` is, without a target). Returns the number of nodes settled.
-    /// Afterwards `touched` lists the nodes reached, in order.
-    fn run(&mut self, s: &Snapshot, source: u32, target: Option<u32>, max_cost: Option<f64>) -> usize {
+    /// `max_cost` is, without a target): Dijkstra if `weighted`, BFS
+    /// otherwise. Returns the number of nodes settled. Afterwards `touched`
+    /// lists the nodes reached, in order.
+    fn run(
+        &mut self,
+        p: &Projection,
+        weighted: bool,
+        source: u32,
+        target: Option<u32>,
+        max_cost: Option<f64>,
+    ) -> usize {
         self.reach(source, 0.0, NONE);
         if target == Some(source) {
             return 1;
         }
-        match &s.weight {
+        match weighted {
             // Dijkstra. Costs are non-negative, so their bit patterns order
             // like the values themselves.
-            Some(weight) => {
+            true => {
                 let mut settled = 0;
                 self.heap.push((Reverse(0f64.to_bits()), source));
                 while let Some((Reverse(bits), u)) = self.heap.pop() {
@@ -156,9 +116,9 @@ impl Workspace {
                     if Some(u) == target {
                         break;
                     }
-                    for i in s.neighbors(u) {
-                        let v = s.to[i];
-                        let nd = du + weight[i];
+                    let weights = p.out_weights(u).expect("checked: the projection is weighted");
+                    for (&v, &w) in p.out_neighbors(u).iter().zip(weights) {
+                        let nd = du + w;
                         if nd < self.dist[v as usize] && max_cost.is_none_or(|limit| nd <= limit) {
                             self.reach(v, nd, u);
                             self.heap.push((Reverse(nd.to_bits()), v));
@@ -168,7 +128,7 @@ impl Workspace {
                 settled
             }
             // BFS; max_cost limits the number of edges.
-            None => {
+            false => {
                 let limit = max_cost.map(|c| c.floor());
                 self.queue.push_back(source);
                 while let Some(u) = self.queue.pop_front() {
@@ -176,8 +136,7 @@ impl Workspace {
                     if limit.is_some_and(|l| next > l) {
                         continue;
                     }
-                    for i in s.neighbors(u) {
-                        let v = s.to[i];
+                    for &v in p.out_neighbors(u) {
                         if self.dist[v as usize].is_infinite() {
                             self.reach(v, next, u);
                             if Some(v) == target {
@@ -192,11 +151,11 @@ impl Workspace {
         }
     }
 
-    fn path_to(&self, s: &Snapshot, target: u32) -> Vec<NodeIx> {
+    fn path_to(&self, target: u32) -> Vec<u32> {
         let mut path = Vec::new();
         let mut u = target;
         while u != NONE {
-            path.push(s.nodes[u as usize]);
+            path.push(u);
             u = self.parent[u as usize];
         }
         path.reverse();
@@ -205,27 +164,26 @@ impl Workspace {
 }
 
 /// Shortest path for every `(source, target)` pair, computed in parallel:
-/// Dijkstra if the snapshot is weighted, BFS otherwise. `None` for pairs
-/// whose target is not reachable within `max_cost` (for BFS: edges).
-/// Results are in the order of `pairs`; `expanded` is set for Dijkstra.
+/// Dijkstra over the projection's weights if `weighted`, BFS (edge count)
+/// otherwise. `None` for pairs whose target is not reachable within
+/// `max_cost` (for BFS: edges). Results are in the order of `pairs`.
 pub fn shortest_paths(
-    s: &Snapshot,
-    pairs: &[(NodeIx, NodeIx)],
+    p: &Projection,
+    pairs: &[(u32, u32)],
+    weighted: bool,
     max_cost: Option<f64>,
-) -> Result<Vec<Option<PathResult>>, GraphError> {
-    crate::pathfinding::check_max_cost(max_cost)?;
-    let dense: Vec<(u32, u32)> =
-        pairs.iter().map(|&(a, b)| Ok((s.index_of(a)?, s.index_of(b)?))).collect::<Result<_, GraphError>>()?;
-    Ok(dense
+) -> Result<Vec<Option<DensePath>>, GraphError> {
+    check(p, pairs.iter().flat_map(|&(a, b)| [a, b]), weighted, max_cost)?;
+    Ok(pairs
         .par_iter()
         .map_init(
-            || Workspace::new(s.len()),
+            || Workspace::new(p.node_count()),
             |ws, &(source, target)| {
-                let settled = ws.run(s, source, Some(target), max_cost);
-                let result = ws.dist[target as usize].is_finite().then(|| PathResult {
-                    nodes: ws.path_to(s, target),
+                let settled = ws.run(p, weighted, source, Some(target), max_cost);
+                let result = ws.dist[target as usize].is_finite().then(|| DensePath {
+                    nodes: ws.path_to(target),
                     cost: ws.dist[target as usize],
-                    expanded: s.is_weighted().then_some(settled),
+                    settled,
                 });
                 ws.reset();
                 result
@@ -235,22 +193,22 @@ pub fn shortest_paths(
 }
 
 /// Every node reachable from each source within `max_cost`, with its cost
-/// (edge count for BFS), computed in parallel. One list per source, in
-/// discovery order, starting with the source itself.
+/// (edge count unless `weighted`), computed in parallel. One list per
+/// source, in discovery order, starting with the source itself.
 pub fn distances(
-    s: &Snapshot,
-    sources: &[NodeIx],
+    p: &Projection,
+    sources: &[u32],
+    weighted: bool,
     max_cost: Option<f64>,
-) -> Result<Vec<Vec<(NodeIx, f64)>>, GraphError> {
-    crate::pathfinding::check_max_cost(max_cost)?;
-    let dense: Vec<u32> = sources.iter().map(|&a| s.index_of(a)).collect::<Result<_, _>>()?;
-    Ok(dense
+) -> Result<Vec<Vec<(u32, f64)>>, GraphError> {
+    check(p, sources.iter().copied(), weighted, max_cost)?;
+    Ok(sources
         .par_iter()
         .map_init(
-            || Workspace::new(s.len()),
+            || Workspace::new(p.node_count()),
             |ws, &source| {
-                ws.run(s, source, None, max_cost);
-                let out = ws.touched.iter().map(|&u| (s.nodes[u as usize], ws.dist[u as usize])).collect();
+                ws.run(p, weighted, source, None, max_cost);
+                let out = ws.touched.iter().map(|&u| (u, ws.dist[u as usize])).collect();
                 ws.reset();
                 out
             },
@@ -261,8 +219,8 @@ pub fn distances(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pathfinding::{find_path, PathQuery};
-    use crate::{Record, Value};
+    use crate::pathfinding::{find_path, EdgeCost, PathQuery};
+    use crate::{Direction, Graph, NodeIx, Record, Value};
 
     fn weighted(w: f64) -> Record {
         Record::with_attr([("weight", Value::from(w))])
@@ -279,55 +237,52 @@ mod tests {
         (g, ix)
     }
 
-    fn snap(g: &Graph<Record, Record>, dir: Direction, weighted: bool) -> Snapshot {
+    fn project(g: &Graph<Record, Record>, dir: Direction, weighted: bool) -> Projection {
         let cost = if weighted { EdgeCost::weighted(None, None) } else { EdgeCost::Unit };
-        Snapshot::build::<_, _, GraphError>(g, dir, &cost).unwrap()
+        Projection::build::<_, _, GraphError>(g, dir, &cost).unwrap()
     }
 
     #[test]
     fn paths_match_find_path() {
         let (g, ix) = diamond();
-        let s = snap(&g, Direction::Out, true);
-        let r = shortest_paths(&s, &[(ix[0], ix[4]), (ix[4], ix[0]), (ix[2], ix[2])], None).unwrap();
+        let p = project(&g, Direction::Out, true);
+        // Dense indices follow slot order: a=0 .. f=5
+        let r = shortest_paths(&p, &[(0, 4), (4, 0), (2, 2)], true, None).unwrap();
         let single = find_path::<_, _, GraphError>(&g, ix[0], ix[4], &mut PathQuery::dijkstra()).unwrap().unwrap();
-        let p = r[0].as_ref().unwrap();
-        assert_eq!((p.nodes.clone(), p.cost), (single.nodes, single.cost));
+        let path = r[0].as_ref().unwrap();
+        let nodes: Vec<NodeIx> = path.nodes.iter().map(|&u| p.node(u)).collect();
+        assert_eq!((nodes, path.cost), (single.nodes, single.cost));
         assert!(r[1].is_none());
-        assert_eq!(r[2].as_ref().unwrap().nodes, [ix[2]]);
+        assert_eq!(r[2].as_ref().unwrap().nodes, [2]);
 
-        let bfs = snap(&g, Direction::Out, false);
-        let p = shortest_paths(&bfs, &[(ix[0], ix[4])], None).unwrap()[0].clone().unwrap();
-        assert_eq!((p.nodes.len(), p.cost, p.expanded), (4, 3.0, None));
-        assert!(shortest_paths(&bfs, &[(ix[0], ix[4])], Some(2.5)).unwrap()[0].is_none());
+        // Hop counts on the same (weighted) projection
+        let hops = shortest_paths(&p, &[(0, 4)], false, None).unwrap()[0].clone().unwrap();
+        assert_eq!((hops.nodes.len(), hops.cost), (4, 3.0));
+        assert!(shortest_paths(&p, &[(0, 4)], false, Some(2.5)).unwrap()[0].is_none());
 
-        let back = snap(&g, Direction::In, true);
-        let p = shortest_paths(&back, &[(ix[4], ix[0])], None).unwrap()[0].clone().unwrap();
-        assert_eq!(p.cost, 4.0);
+        let back = project(&g, Direction::In, true);
+        assert_eq!(shortest_paths(&back, &[(4, 0)], true, None).unwrap()[0].as_ref().unwrap().cost, 4.0);
     }
 
     #[test]
     fn distances_and_limits() {
-        let (g, ix) = diamond();
-        let s = snap(&g, Direction::Out, true);
-        let d = distances(&s, &[ix[0], ix[5]], Some(3.0)).unwrap();
-        let mut got: Vec<(NodeIx, f64)> = d[0].clone();
+        let (g, _) = diamond();
+        let p = project(&g, Direction::Out, true);
+        let d = distances(&p, &[0, 5], true, Some(3.0)).unwrap();
+        let mut got = d[0].clone();
         got.sort_by_key(|&(n, _)| n);
-        assert_eq!(got, [(ix[0], 0.0), (ix[1], 1.0), (ix[2], 2.0), (ix[3], 3.0)]);
-        assert_eq!(d[1], [(ix[5], 0.0)]);
-        let both = snap(&g, Direction::Both, false);
-        assert_eq!(distances(&both, &[ix[4]], None).unwrap()[0].len(), 5);
-        assert!(distances(&s, &[ix[0]], Some(-1.0)).is_err());
+        assert_eq!(got, [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)]);
+        assert_eq!(d[1], [(5, 0.0)]);
+        let both = project(&g, Direction::Both, false);
+        assert_eq!(distances(&both, &[4], false, None).unwrap()[0].len(), 5);
+        assert!(distances(&p, &[0], true, Some(-1.0)).is_err());
     }
 
     #[test]
-    fn stale_and_bad_weights() {
-        let (mut g, ix) = diamond();
-        let s = snap(&g, Direction::Out, true);
-        g.remove_node(ix[5]);
-        let f2 = g.add_node("f2", Record::default()).unwrap();
-        assert_eq!(shortest_paths(&s, &[(ix[0], f2)], None).unwrap_err(), GraphError::Stale);
-        g.add_edge(ix[0], ix[1], weighted(-1.0)).unwrap();
-        let err = Snapshot::build::<_, _, GraphError>(&g, Direction::Out, &EdgeCost::weighted(None, None));
-        assert!(err.is_err());
+    fn option_errors() {
+        let (g, _) = diamond();
+        let unweighted = project(&g, Direction::Out, false);
+        assert!(shortest_paths(&unweighted, &[(0, 1)], true, None).is_err());
+        assert!(distances(&unweighted, &[6], false, None).is_err());
     }
 }

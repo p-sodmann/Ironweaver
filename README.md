@@ -446,6 +446,10 @@ paths = graph.shortest_paths(pairs: list[tuple[str, str]], method=None, *, weigh
 # -> [{"nodelist": [...], "cost": ...} or None, ...]; many queries in parallel, GIL released
 dist = graph.distances(sources: list[str], targets: list[str] = None, method=None, ...)
 # -> {source: {node: cost}}; "bfs" or "dijkstra" only
+proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes=None,
+                     node_filter=None, edge_filter=None) -> Projection
+# compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None),
+# proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters

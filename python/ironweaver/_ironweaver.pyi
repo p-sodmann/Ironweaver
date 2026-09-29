@@ -1,11 +1,11 @@
 """
 Type stubs for the ironweaver Rust extension module (_ironweaver.so).
 
-These stubs mirror the exact PyO3-generated signatures. All five classes are
+These stubs mirror the exact PyO3-generated signatures. All six classes are
 @final (PyO3 extension types cannot be subclassed). Constructors use __new__
 because that is the slot PyO3 populates; at runtime __init__ takes no args.
 
-Note: Vertex.filter, Node.traverse, Node.bfs, and Node.bfs_search reflect the
+Note: Vertex.filter, Vertex.project, Node.traverse, Node.bfs, and Node.bfs_search reflect the
 Python-level wrappers applied in ironweaver/__init__.py at import time.
 """
 
@@ -125,6 +125,39 @@ class Path:
     def toJSON(self) -> list[str]: ...
 
 @final
+class Projection:
+    """Compact read-only copy of a graph for analytics (see Vertex.project)."""
+
+    @property
+    def direction(self) -> Literal["out", "in", "both"]: ...
+    @property
+    def weighted(self) -> bool: ...
+    def node_count(self) -> int: ...
+    def edge_count(self) -> int: ...
+    def __len__(self) -> int: ...
+    def __contains__(self, id: str, /) -> bool: ...
+    def __repr__(self) -> str: ...
+    def ids(self) -> list[str]: ...
+    def neighbors(self, id: str, direction: Literal["out", "in"] | None = ...) -> list[str]: ...
+    def degree(self, id: str, direction: Literal["out", "in"] | None = ...) -> int: ...
+    def memory_usage(self) -> int: ...
+    def shortest_paths(
+        self,
+        pairs: list[tuple[str, str]],
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+    ) -> list[dict[str, Any] | None]: ...
+    def distances(
+        self,
+        sources: list[str],
+        targets: list[str] | None = ...,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+    ) -> dict[str, dict[str, float]]: ...
+
+@final
 class Vertex:
     """A directed property graph backed by ironweaver_core::Graph (pure Rust)."""
 
@@ -187,6 +220,18 @@ class Vertex:
         ...
     @staticmethod
     def path_methods() -> dict[str, str]: ...
+    def project(
+        self,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+        nodes: list[str] | None = ...,
+        node_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
+        edge_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
+    ) -> Projection:
+        """Patched in ironweaver/__init__.py: callables receive NodeView / EdgeView."""
+        ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
@@ -258,4 +303,4 @@ class Vertex:
         seed: int | None = ...,
     ) -> list[list[str]]: ...
 
-__all__ = ["ObservedDictionary", "Edge", "Node", "Path", "Vertex"]
+__all__ = ["ObservedDictionary", "Edge", "Node", "Path", "Projection", "Vertex"]

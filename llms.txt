@@ -99,7 +99,30 @@ assert d["alice"]["acme"] == res[0]["cost"]
 assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
 ```
 
-`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a snapshot (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+
+Copy the graph once with `project` to run many batches (or other analytics) on it:
+
+```python
+p = g.project(weight="weight")                 # compact read-only snapshot: structure, weights, ids
+assert p.shortest_paths([("alice", "acme")]) == res[:1]
+assert p.neighbors("bob", "in") == ["alice"] and p.degree("alice") == 2
+knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; undirected
+```
+
+`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter)`:
+
+- Unweighted unless `weight` or `default_weight` is given.
+- `direction` `"out"`/`"in"` (reversed)/`"both"` (undirected).
+- Filters take a dict (attribute equality) or a callable (NodeView / EdgeView).
+
+`Projection` methods:
+
+- `shortest_paths(pairs, method=None, *, max_cost)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means dijkstra if the projection is weighted, else bfs.
+- `neighbors(id, direction="out"|"in")`, `degree(id, direction)`.
+- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `memory_usage()`.
+
+Later graph changes don't affect it.
 
 ## Random walks
 

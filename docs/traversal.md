@@ -162,7 +162,7 @@ Algorithms live in the pure-Rust core crate, `crates/ironweaver-core/src/pathfin
 
 ### Batch queries (parallel) — `vertex.shortest_paths(pairs, ...)`, `vertex.distances(sources, ...)`
 
-For many queries at once. The graph's structure and edge costs are copied into a compact snapshot once, then every query runs in parallel on all cores with the GIL released (other Python threads keep running). The snapshot costs one pass over the graph, so for a single query `shortest_path` is cheaper.
+For many queries at once. The graph's structure and edge costs are copied into a compact projection once (see below), then every query runs in parallel on all cores with the GIL released (other Python threads keep running). The snapshot costs one pass over the graph, so for a single query `shortest_path` is cheaper.
 
 ```python
 res = v.shortest_paths([("root", "target"), ("root", "z"), ("z", "root")], weight="weight")
@@ -179,6 +179,39 @@ assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
 ```
 
 Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `"astar"` is not available here. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+
+### Projections — `vertex.project(...)`
+
+Each `shortest_paths` / `distances` call copies the graph first. To run several batches (and, later, other analytics) on the same graph, copy it once into a `Projection`: a compact, read-only copy of the structure (sorted neighbour lists in both directions), at most one weight per edge and the node ids, but no attributes. Queries on it run in parallel with the GIL released, from any number of Python threads.
+
+```python
+p = v.project(weight="weight")                      # all nodes and edges, weighted
+assert (p.node_count(), p.edge_count(), p.weighted) == (5, 4, True)
+assert p.neighbors("a") == ["b", "z"] and p.neighbors("a", "in") == ["root"]
+assert p.shortest_paths([("root", "target")])[0]["cost"] == res[0]["cost"]
+assert p.distances(["root"], targets=["z"], method="bfs") == {"root": {"z": 2}}
+
+knows = v.project(edge_filter={"type": "knows"}, direction="both")   # undirected, one edge type
+assert sorted(knows.neighbors("a")) == ["root", "z"]
+sub = v.project(nodes=["root", "a", "b"], node_filter=lambda n: n.id != "b")
+assert sub.ids() == ["root", "a"]
+```
+
+`project(weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None)`:
+
+- Without `weight` and `default_weight` the projection is unweighted (only `"bfs"` queries).
+- `direction`: `"out"` keeps edges as they are, `"in"` reverses them, `"both"` makes them undirected.
+- `nodes` limits the projection to those ids.
+- `node_filter` / `edge_filter` take a dict (attribute equality) or a callable receiving a `NodeView` / `EdgeView`. The edge filter is asked once per edge between kept nodes.
+- Weights are read and validated for the kept edges only.
+
+A projection is a snapshot: later changes to the graph don't affect it. Don't change the graph from inside a filter.
+
+Projection methods:
+
+- `shortest_paths(pairs, method=None, *, max_cost=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
+- `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
+- `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `memory_usage()` (bytes).
 
 ### Random walks — `vertex.random_walks(...)`
 

@@ -104,8 +104,9 @@ fn astar_matches_dijkstra_on_a_grid() {
 
 #[test]
 fn batch_queries_match_single_queries() {
-    use ironweaver_core::batch::{distances, shortest_paths, Snapshot};
+    use ironweaver_core::batch::{distances, shortest_paths};
     use ironweaver_core::pathfinding::EdgeCost;
+    use ironweaver_core::Projection;
 
     // Deterministic pseudo-random graph (LCG), 400 nodes, 2000 edges.
     let mut state = 12345u64;
@@ -122,9 +123,12 @@ fn batch_queries_match_single_queries() {
     let pairs: Vec<(NodeIx, NodeIx)> = (0..200).map(|_| (ix[next(400) as usize], ix[next(400) as usize])).collect();
 
     for dir in [Direction::Out, Direction::In, Direction::Both] {
-        let snap = Snapshot::build::<_, _, GraphError>(&g, dir, &EdgeCost::weighted(None, None)).unwrap();
-        let batch = shortest_paths(&snap, &pairs, None).unwrap();
-        for (&(s, t), got) in pairs.iter().zip(&batch) {
+        let p = Projection::build::<_, _, GraphError>(&g, dir, &EdgeCost::weighted(None, None)).unwrap();
+        let dense: Vec<(u32, u32)> =
+            pairs.iter().map(|&(s, t)| (p.index_of(s).unwrap(), p.index_of(t).unwrap())).collect();
+        let batch = shortest_paths(&p, &dense, true, None).unwrap();
+        let hops = shortest_paths(&p, &dense, false, None).unwrap();
+        for ((&(s, t), got), got_hops) in pairs.iter().zip(&batch).zip(&hops) {
             let mut q = PathQuery::dijkstra();
             q.direction = dir;
             let single = find_path::<_, _, GraphError>(&g, s, t, &mut q).unwrap();
@@ -132,16 +136,24 @@ fn batch_queries_match_single_queries() {
                 (None, None) => {}
                 (Some(a), Some(b)) => {
                     assert!((a.cost - b.cost).abs() < 1e-9);
-                    assert_eq!((b.nodes[0], *b.nodes.last().unwrap()), (s, t));
+                    assert_eq!((p.node(b.nodes[0]), p.node(*b.nodes.last().unwrap())), (s, t));
+                    // Consecutive nodes are adjacent in the projection
+                    for w in b.nodes.windows(2) {
+                        assert!(p.out_neighbors(w[0]).binary_search(&w[1]).is_ok());
+                    }
                 }
                 (a, b) => panic!("mismatch for {s:?}->{t:?}: {a:?} vs {b:?}"),
             }
+            let mut q = PathQuery::bfs();
+            q.direction = dir;
+            let single = find_path::<_, _, GraphError>(&g, s, t, &mut q).unwrap();
+            assert_eq!(single.map(|a| a.cost), got_hops.as_ref().map(|b| b.cost));
         }
         // Distances agree with the pair queries
-        let sources: Vec<NodeIx> = pairs.iter().map(|p| p.0).take(20).collect();
-        for (&s, reached) in sources.iter().zip(distances(&snap, &sources, None).unwrap()) {
-            let d: HashMap<NodeIx, f64> = reached.into_iter().collect();
-            for (&(ps, t), got) in pairs.iter().zip(&batch) {
+        let sources: Vec<u32> = dense.iter().map(|d| d.0).take(20).collect();
+        for (&s, reached) in sources.iter().zip(distances(&p, &sources, true, None).unwrap()) {
+            let d: HashMap<u32, f64> = reached.into_iter().collect();
+            for (&(ps, t), got) in dense.iter().zip(&batch) {
                 if ps == s {
                     match (d.get(&t), got) {
                         (None, None) => {}

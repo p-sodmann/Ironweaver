@@ -30,7 +30,7 @@ copies; use ``node.attr_set(key, value)`` to change an attribute. See
 # Import the Rust extension module classes
 from typing import Callable, Iterable
 
-from ._ironweaver import Vertex, Node, Edge, Path, ObservedDictionary
+from ._ironweaver import Vertex, Node, Edge, Path, Projection, ObservedDictionary
 
 # Import the Python LGF parser
 from .lgf_parser import parse_lgf, parse_lgf_file
@@ -492,6 +492,31 @@ def _setup_traversal_methods():
 _setup_traversal_methods()
 
 
+# ---------------------------------------------------------------------------
+# Vertex.project: callable filters receive NodeView / EdgeView
+# ---------------------------------------------------------------------------
+
+def _vertex_project(self, weight=None, default_weight=None, *, direction=None,
+                    nodes=None, node_filter=None, edge_filter=None):
+    """Build a :class:`Projection`: a compact, read-only copy of (part of) the
+    graph for analytics. See ``Vertex.project`` in the stubs for the options.
+
+    ``node_filter`` / ``edge_filter`` take a dict (attribute equality) or a
+    callable, which receives a :class:`NodeView` / :class:`EdgeView`.
+    """
+    if callable(node_filter):
+        fn = node_filter
+        node_filter = lambda node: fn(NodeView(node))  # noqa: E731
+    if callable(edge_filter):
+        edge_filter = _wrap_edge_filter(edge_filter)
+    return self._original_project(weight, default_weight, direction=direction, nodes=nodes,
+                                  node_filter=node_filter, edge_filter=edge_filter)
+
+
+Vertex._original_project = Vertex.project
+Vertex.project = _vertex_project
+
+
 # Export all public components
 __all__ = [
     "Vertex",
@@ -500,6 +525,7 @@ __all__ = [
     "EdgeView",
     "Edge",
     "Path",
+    "Projection",
     "ObservedDictionary",
     "parse_lgf",
     "parse_lgf_file",

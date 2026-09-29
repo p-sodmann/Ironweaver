@@ -1,12 +1,13 @@
 // vertex/batch.rs
 //
-// `Vertex.shortest_paths` / `Vertex.distances`: many queries in one call.
-// The graph structure and edge costs are copied into a core `Snapshot`
-// (reading weights needs the GIL), then the queries run on all cores with
-// the GIL released. The Vertex stays borrowed meanwhile, so it can't change.
+// `Vertex.project`, and `Vertex.shortest_paths` / `Vertex.distances`: many
+// queries in one call on a one-off projection. The projection is collected
+// with the GIL held (reading weights needs it); sorting and the queries run
+// on all cores with the GIL released. The Vertex stays borrowed meanwhile,
+// so it can't change.
 
-use ironweaver_core::batch::{self, Snapshot};
-use ironweaver_core::pathfinding::{check_max_cost, edge_cost, resolve, MethodKind, PathMethod};
+use ironweaver_core::batch;
+use ironweaver_core::pathfinding::{check_max_cost, edge_cost, resolve, MethodKind};
 use ironweaver_core::{Direction, NodeIx};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -14,17 +15,46 @@ use pyo3::types::{PyDict, PyList};
 use std::collections::HashSet;
 
 use super::Vertex;
-use crate::errors::{graph_error, Error};
-use crate::gc_pause::GcPause;
+use crate::errors::graph_error;
+use crate::projection::{self, distances_to_py, paths_to_py, Filter, Projection, Spec};
 
-/// Validate the shared options (same rules and messages as `shortest_path`).
-fn setup(
+/// `Vertex.project(...)`.
+#[allow(clippy::too_many_arguments)]
+pub fn project(
+    slf: &Bound<'_, Vertex>,
+    weight: Option<String>,
+    default_weight: Option<f64>,
+    direction: Option<&str>,
+    nodes: Option<Vec<String>>,
+    node_filter: Option<&Bound<'_, PyAny>>,
+    edge_filter: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Projection> {
+    let py = slf.py();
+    let spec = Spec {
+        direction: Direction::parse(direction).map_err(graph_error)?,
+        cost: projection::edge_cost(weight, default_weight),
+        nodes,
+        node_filter: Filter::parse(py, node_filter, "node_filter")?,
+        edge_filter: Filter::parse(py, edge_filter, "edge_filter")?,
+    };
+    let handle = slf.clone().unbind();
+    let raw = {
+        let vertex = slf.try_borrow()?;
+        projection::collect(py, &vertex, Some(&handle), &spec)?
+    };
+    Ok(Projection { inner: py.detach(|| raw.finish()) })
+}
+
+/// Validate the shared options (same rules and messages as
+/// `shortest_path`): the projection spec and whether the method uses weights.
+fn options<'py>(
+    py: Python<'py>,
     method: Option<&str>,
     weight: Option<String>,
     default_weight: Option<f64>,
     max_cost: Option<f64>,
     direction: Option<&str>,
-) -> PyResult<(&'static PathMethod, ironweaver_core::pathfinding::EdgeCost, Direction)> {
+) -> PyResult<(Spec<'py>, bool)> {
     let method = resolve(method, weight.is_some(), &[]).map_err(graph_error)?;
     if method.kind == MethodKind::AStar {
         return Err(PyValueError::new_err(
@@ -34,24 +64,24 @@ fn setup(
     let cost = edge_cost(method, weight, default_weight).map_err(graph_error)?;
     check_max_cost(max_cost).map_err(graph_error)?;
     let direction = Direction::parse(direction).map_err(graph_error)?;
-    Ok((method, cost, direction))
+    let no_filter = || Filter::parse(py, None, "");
+    let spec = Spec { direction, cost, nodes: None, node_filter: no_filter()?, edge_filter: no_filter()? };
+    Ok((spec, method.weighted))
+}
+
+/// Project the whole vertex (sorting with the GIL released).
+fn project_all(vertex: &Vertex, py: Python<'_>, spec: &Spec<'_>) -> PyResult<ironweaver_core::Projection> {
+    let raw = projection::collect(py, vertex, None, spec)?;
+    Ok(py.detach(|| raw.finish()))
 }
 
 fn lookup(vertex: &Vertex, id: &str, role: &str) -> PyResult<NodeIx> {
     vertex.graph.node_ix(id).ok_or_else(|| PyValueError::new_err(format!("{} node with id '{}' not found", role, id)))
 }
 
-fn id(vertex: &Vertex, ix: NodeIx) -> &str {
-    vertex.graph.node(ix).expect("snapshot nodes are live while the vertex is borrowed").id()
-}
-
-/// A cost as Python sees it: an int for BFS (edge count), a float otherwise.
-fn cost_object(py: Python<'_>, method: &PathMethod, cost: f64) -> PyResult<Py<PyAny>> {
-    Ok(if method.weighted {
-        cost.into_pyobject(py)?.into_any().unbind()
-    } else {
-        (cost as usize).into_pyobject(py)?.into_any().unbind()
-    })
+/// Dense index of a node of the (whole-graph) projection.
+fn dense(p: &ironweaver_core::Projection, ix: NodeIx) -> u32 {
+    p.index_of(ix).expect("every node of the vertex is projected")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,29 +95,15 @@ pub fn shortest_paths(
     max_cost: Option<f64>,
     direction: Option<&str>,
 ) -> PyResult<Py<PyList>> {
-    let (method, cost, direction) = setup(method, weight, default_weight, max_cost, direction)?;
+    let (spec, weighted) = options(py, method, weight, default_weight, max_cost, direction)?;
     let pairs: Vec<(NodeIx, NodeIx)> = pairs
         .iter()
         .map(|(s, t)| Ok((lookup(vertex, s, "Root")?, lookup(vertex, t, "Target")?)))
         .collect::<PyResult<_>>()?;
-    let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py.detach(|| batch::shortest_paths(&snapshot, &pairs, max_cost)).map_err(graph_error)?;
-
-    let _gc = GcPause::new(py);
-    let out = PyList::empty(py);
-    for result in results {
-        match result {
-            None => out.append(py.None())?,
-            Some(path) => {
-                let entry = PyDict::new(py);
-                let ids: Vec<&str> = path.nodes.iter().map(|&n| id(vertex, n)).collect();
-                entry.set_item("nodelist", ids)?;
-                entry.set_item("cost", cost_object(py, method, path.cost)?)?;
-                out.append(entry)?;
-            }
-        }
-    }
-    Ok(out.unbind())
+    let p = project_all(vertex, py, &spec)?;
+    let pairs: Vec<(u32, u32)> = pairs.iter().map(|&(s, t)| (dense(&p, s), dense(&p, t))).collect();
+    let results = py.detach(|| batch::shortest_paths(&p, &pairs, weighted, max_cost)).map_err(graph_error)?;
+    paths_to_py(py, &p, results, weighted)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -102,23 +118,13 @@ pub fn distances(
     max_cost: Option<f64>,
     direction: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
-    let (method, cost, direction) = setup(method, weight, default_weight, max_cost, direction)?;
+    let (spec, weighted) = options(py, method, weight, default_weight, max_cost, direction)?;
     let sources: Vec<NodeIx> = sources.iter().map(|s| lookup(vertex, s, "Root")).collect::<PyResult<_>>()?;
-    let targets: Option<HashSet<NodeIx>> =
+    let targets: Option<Vec<NodeIx>> =
         targets.map(|ts| ts.iter().map(|t| lookup(vertex, t, "Target")).collect::<PyResult<_>>()).transpose()?;
-    let snapshot = Snapshot::build::<_, _, Error>(&vertex.graph, direction, &cost)?;
-    let results = py.detach(|| batch::distances(&snapshot, &sources, max_cost)).map_err(graph_error)?;
-
-    let _gc = GcPause::new(py);
-    let out = PyDict::new(py);
-    for (&source, reached) in sources.iter().zip(results) {
-        let per_source = PyDict::new(py);
-        for (node, c) in reached {
-            if targets.as_ref().is_none_or(|t| t.contains(&node)) {
-                per_source.set_item(id(vertex, node), cost_object(py, method, c)?)?;
-            }
-        }
-        out.set_item(id(vertex, source), per_source)?;
-    }
-    Ok(out.unbind())
+    let p = project_all(vertex, py, &spec)?;
+    let sources: Vec<u32> = sources.iter().map(|&s| dense(&p, s)).collect();
+    let targets: Option<HashSet<u32>> = targets.map(|ts| ts.iter().map(|&t| dense(&p, t)).collect());
+    let results = py.detach(|| batch::distances(&p, &sources, weighted, max_cost)).map_err(graph_error)?;
+    distances_to_py(py, &p, &sources, results, targets.as_ref(), weighted)
 }

@@ -360,6 +360,65 @@ class Path:
         ...
 
 # ---------------------------------------------------------------------------
+# Projection — compact read-only copy for analytics  (PyO3 extension class)
+# ---------------------------------------------------------------------------
+
+@final
+class Projection:
+    """A compact, read-only copy of (part of) a graph for analytics, made by
+    :meth:`Vertex.project`.
+
+    Holds the structure (sorted neighbour lists in both directions), at most
+    one weight per edge and the node ids, but no attributes. Queries run on
+    all cores with the GIL released. A snapshot: later changes to the graph
+    don't affect it.
+    """
+
+    @property
+    def direction(self) -> Literal["out", "in", "both"]:
+        """How edges were followed: "in" reversed them, "both" made them undirected."""
+        ...
+    @property
+    def weighted(self) -> bool: ...
+    def node_count(self) -> int: ...
+    def edge_count(self) -> int:
+        """Number of graph edges in the projection."""
+        ...
+    def __len__(self) -> int: ...
+    def __contains__(self, id: str, /) -> bool: ...
+    def __repr__(self) -> str: ...
+    def ids(self) -> list[str]:
+        """Node ids, in the projection's order."""
+        ...
+    def neighbors(self, id: str, direction: Literal["out", "in"] | None = ...) -> list[str]:
+        """Ids one edge away, sorted by projection order; parallel edges repeat."""
+        ...
+    def degree(self, id: str, direction: Literal["out", "in"] | None = ...) -> int: ...
+    def memory_usage(self) -> int:
+        """Approximate memory used, in bytes."""
+        ...
+    def shortest_paths(
+        self,
+        pairs: list[tuple[str, str]],
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+    ) -> list[dict[str, Any] | None]:
+        """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "dijkstra"
+        on a weighted projection, "bfs" otherwise."""
+        ...
+    def distances(
+        self,
+        sources: list[str],
+        targets: list[str] | None = ...,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+    ) -> dict[str, dict[str, float]]:
+        """Like :meth:`Vertex.distances`, on this projection."""
+        ...
+
+# ---------------------------------------------------------------------------
 # Vertex — main graph class  (PyO3 extension class — cannot be subclassed)
 # ---------------------------------------------------------------------------
 
@@ -606,6 +665,25 @@ class Vertex:
     def path_methods() -> dict[str, str]:
         """The available ``shortest_path`` methods as ``{name: description}``."""
         ...
+    def project(
+        self,
+        weight: str | None = ...,
+        default_weight: float | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+        nodes: list[str] | None = ...,
+        node_filter: dict[str, Any] | Callable[[NodeView], bool] | None = ...,
+        edge_filter: dict[str, Any] | Callable[[EdgeView], bool] | None = ...,
+    ) -> Projection:
+        """A compact, read-only copy of (part of) the graph for analytics.
+
+        Unweighted unless *weight* or *default_weight* is given. *direction*
+        "in" reverses edges, "both" makes them undirected. *nodes* limits the
+        projection to those ids; *node_filter* / *edge_filter* take a dict
+        (attribute equality) or a callable receiving a NodeView / EdgeView.
+        Build once, then run many queries on it.
+        """
+        ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
@@ -618,12 +696,13 @@ class Vertex:
     ) -> list[dict[str, Any] | None]:
         """Shortest paths for many (source, target) pairs, in parallel.
 
-        The graph and its edge costs are copied into a compact snapshot once,
-        then all queries run on every core with the GIL released. Returns one
+        The graph and its edge costs are copied into a projection once, then
+        all queries run on every core with the GIL released (use
+        :meth:`project` to reuse one for several batches). Returns one
         entry per pair: ``{"nodelist": [...], "cost": ...}`` (cost is the number
         of edges for "bfs"), or None if the target is unreachable. Methods
         "bfs" and "dijkstra" only. Edge weights of the whole graph are validated
-        when the snapshot is built. For a single query use ``shortest_path``.
+        when the projection is built. For a single query use ``shortest_path``.
         """
         ...
     def distances(
@@ -882,6 +961,7 @@ __all__ = [
     "EdgeView",
     "Edge",
     "Path",
+    "Projection",
     "ObservedDictionary",
     "parse_lgf",
     "parse_lgf_file",

@@ -82,9 +82,17 @@ Below is a quick guide to notable functions and where to find them.
   - `cost.rs`: `EdgeCost` (weight attribute, default, validation).
   - `heuristic.rs`: `Heuristic` (zero, node coordinates, custom closure),
     `Metric`, `Coords`.
-- **batch.rs** – `Snapshot` (flat CSR copy of the adjacency + edge costs,
-  no payloads), `shortest_paths` / `distances`: many queries in parallel
-  (rayon, per-thread workspaces); behind `Vertex.shortest_paths` / `distances`.
+- **projection.rs** – `Projection`: compact read-only copy of (part of) a
+  graph for analytics: CSR adjacency with sorted neighbour lists, optional
+  weights, owned node ids, no payloads (`Send + Sync`, a snapshot). Built in
+  two steps: `Projection::collect` (reads the graph: node / edge filters,
+  weights) then `RawProjection::finish` (sorts; no graph access, so the
+  bindings release the GIL); `Projection::build` does both. The transposed
+  adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
+  lazily. New analytics algorithms take `&Projection` and dense `u32` node
+  indices.
+- **batch.rs** – `shortest_paths` / `distances` on a `Projection`: many
+  queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS.
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `WalkPlan::items`,
   `random_walks` convenience.
@@ -115,6 +123,11 @@ Below is a quick guide to notable functions and where to find them.
   `attr_list_append`; `edge_predicate` (dict / callable edge filters).
 - **edge.rs** – `Edge` handle: getters/setters, `attr_get`, `attr_set`, `toJSON`.
 - **path.rs** – `Path`. **observed_dictionary.rs** – `ObservedDictionary`.
+- **projection.rs** – the `Projection` class (queries release the GIL),
+  `Filter` (dict / callable node and edge filters), `collect` (Vertex →
+  core `RawProjection`), result conversion shared with `vertex/batch.rs`.
+  `Vertex.project` is wrapped in `__init__.py` so callable filters receive
+  `NodeView` / `EdgeView`.
 - **gc_pause.rs** – `GcPause` guard that pauses Python's cyclic GC during bulk
   object creation.
 - **vertex/core.rs** – the `Vertex` class: constructors (`new`, `from_nodes`,
@@ -125,8 +138,8 @@ Below is a quick guide to notable functions and where to find them.
 - **vertex/algorithms.rs** – `expand`, `filter`, `random_walks`.
 - **vertex/pathfinding.rs** – `shortest_path` (Python options → core
   `PathQuery`, `distances=` table heuristic), `path_methods`.
-- **vertex/batch.rs** – `shortest_paths`, `distances` (snapshot under the GIL,
-  queries with the GIL released).
+- **vertex/batch.rs** – `project`, and `shortest_paths` / `distances` (a
+  one-off projection of the whole graph, queries with the GIL released).
 - **vertex/subgraph.rs** – `build_subgraph` (new Vertex from part of another).
 - **vertex/serialization.rs** – `save_to_json`, `save_to_binary`,
   `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
