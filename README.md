@@ -454,7 +454,11 @@ proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes
 # proj.topological_sort(), proj.find_cycle(), proj.degree_centrality("out"|"in"),
 # proj.pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6), proj.triangles(),
 # proj.clustering(), proj.core_number(), proj.label_propagation(max_iter=20),
-# proj.bfs_levels(sources, max_depth=None)
+# proj.bfs_levels(sources, max_depth=None), proj.betweenness_centrality(k=None, ...),
+# proj.closeness_centrality(), proj.harmonic_centrality(), proj.similarity(pairs, metric="jaccard"),
+# proj.most_similar(ids=None, k=10), proj.leiden(resolution=1.0, *, seed=None), proj.modularity(communities),
+# proj.minimum_spanning_tree(), proj.k_shortest_paths(source, target, k), proj.fastrp(dimension=128),
+# proj.node2vec_walks(walk_length=80, walks_per_node=10, *, p=1.0, q=1.0)
 node = graph.add_node(id, attr=None, labels=None)       # node.labels, add_label, remove_label, has_label
 edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.id (persistent int)
 graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]

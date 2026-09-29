@@ -7,29 +7,55 @@
 // (rayon).
 //
 // Directed algorithms (strongly connected components, topological order,
-// cycles, PageRank, BFS) follow the projection's edges (`out_neighbors`).
-// Undirected ones (triangles, clustering, k-core, label propagation) use
+// cycles, PageRank, BFS, betweenness, closeness, k shortest paths, FastRP,
+// node2vec) follow the projection's edges (`out_neighbors`); shortest-path
+// based ones see the simple graph (parallel edges collapse to the lightest,
+// self-loops are ignored; `sssp::SimpleRow`), like networkx. Undirected ones
+// (triangles, clustering, k-core, label propagation, similarity) use
 // `Undirected`: the simple graph with an edge between two distinct nodes
 // joined by at least one projected edge, in either direction (like
-// networkx's `nx.Graph(G)` without self-loops).
+// networkx's `nx.Graph(G)` without self-loops). Leiden, modularity and
+// spanning forests take edges as undirected but keep weights (parallel
+// edges add up in Leiden and modularity).
+//
+// Randomised algorithms take a `seed` and give the same result for it
+// whatever the number of threads (per-item seeds from `mix`); parallel sums
+// over sources use `ordered_sum` for the same reason.
 //
 // Adding an algorithm: a function here taking `&Projection` (plus options),
 // validating options into a `GraphError`, tests against a brute-force
 // reference in the same file, then a method on the Python `Projection`
 // (src/projection.rs), stubs, docs and a networkx comparison test.
 
+pub mod betweenness;
 pub mod bfs;
 pub mod centrality;
+pub mod closeness;
 pub mod community;
 pub mod components;
 pub mod dag;
+pub mod embedding;
+pub mod ksp;
+pub mod leiden;
+pub mod node2vec;
+pub mod similarity;
+pub mod spanning;
+pub(crate) mod sssp;
 pub mod structure;
 
+pub use betweenness::{betweenness_centrality, sample_sources, Betweenness};
 pub use bfs::bfs_levels;
 pub use centrality::{degree_centrality, pagerank, PageRank};
+pub use closeness::{closeness_centrality, harmonic_centrality};
 pub use community::label_propagation;
 pub use components::{strongly_connected_components, weakly_connected_components};
 pub use dag::{find_cycle, topological_sort};
+pub use embedding::{fastrp, FastRP};
+pub use ksp::k_shortest_paths;
+pub use leiden::{leiden, modularity, Leiden};
+pub use node2vec::{node2vec_walks, Node2Vec};
+pub use similarity::{most_similar, similarity, Similarity};
+pub use spanning::spanning_forest;
 pub use structure::{clustering, core_number, triangles};
 
 use rayon::prelude::*;
@@ -136,6 +162,52 @@ pub fn groups(labels: &[u32]) -> Vec<Vec<u32>> {
     out
 }
 
+/// Sum of per-node contributions, computed in parallel over `items`: each
+/// chunk of items adds into its own `Vec` of `n` values (with a per-thread
+/// workspace from `init`), and the chunk results are added in chunk order,
+/// so the result does not depend on the number of threads.
+fn ordered_sum<T: Sync, W>(
+    n: usize,
+    items: &[T],
+    init: impl Fn() -> W + Sync + Send,
+    add: impl Fn(&mut W, &T, &mut [f64]) + Sync + Send,
+) -> Vec<f64> {
+    const CHUNK: usize = 16;
+    let mut total = vec![0f64; n];
+    // A bounded number of chunk results in memory at a time
+    let batch = CHUNK * 4 * rayon::current_num_threads();
+    for part in items.chunks(batch) {
+        let sums: Vec<Vec<f64>> = part
+            .par_chunks(CHUNK)
+            .map_init(&init, |ws, chunk| {
+                let mut acc = vec![0f64; n];
+                for item in chunk {
+                    add(ws, item, &mut acc);
+                }
+                acc
+            })
+            .collect();
+        for acc in sums {
+            total.iter_mut().zip(acc).for_each(|(t, a)| *t += a);
+        }
+    }
+    total
+}
+
+/// A seeded 64-bit mix (splitmix64), for per-node / per-walk seeds that do
+/// not depend on the thread a node is processed on.
+pub(crate) fn mix(seed: u64, i: u64) -> u64 {
+    let mut z = seed ^ i.wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// A fresh random seed, for callers that don't pass one.
+pub fn random_seed() -> u64 {
+    rand::random()
+}
+
 /// Fail for node indices outside the projection.
 fn check_nodes(p: &Projection, nodes: &[u32]) -> Result<(), GraphError> {
     match nodes.iter().find(|&&u| u as usize >= p.node_count()) {
@@ -164,14 +236,15 @@ pub(crate) mod testing {
     }
 
     /// A random multigraph (self-loops and parallel edges included) with
-    /// weights in 0.5..5.
+    /// weights in 0.5..6, multiples of 1/16 (exact sums, so equal-length
+    /// paths tie exactly).
     pub fn random(seed: u64, n: usize, m: usize, direction: Direction, weighted: bool) -> Projection {
         let mut rng = Lcg::new(seed);
         let mut g: Graph<Record, Record> = Graph::new();
         let ix: Vec<_> = (0..n).map(|i| g.add_node(format!("n{i}"), Record::default()).unwrap()).collect();
         for _ in 0..m {
             let (a, b) = (rng.below(n as u64) as usize, rng.below(n as u64) as usize);
-            let w = 0.5 + rng.below(90) as f64 / 20.0;
+            let w = 0.5 + rng.below(90) as f64 / 16.0;
             g.add_edge(ix[a], ix[b], Record::with_attr([("weight", Value::from(w))])).unwrap();
         }
         let cost = if weighted { EdgeCost::weighted(None, None) } else { EdgeCost::Unit };

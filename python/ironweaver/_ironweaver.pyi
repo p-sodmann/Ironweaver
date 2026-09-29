@@ -11,7 +11,7 @@ Python-level wrappers applied in ironweaver/__init__.py at import time.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator, Literal, final
+from typing import Any, Callable, Iterable, Iterator, Literal, final, overload
 
 @final
 class ObservedDictionary:
@@ -180,6 +180,78 @@ class Projection:
     def core_number(self) -> dict[str, int]: ...
     def label_propagation(self, max_iter: int = ...) -> list[list[str]]: ...
     def bfs_levels(self, sources: list[str], max_depth: int | None = ...) -> dict[str, int]: ...
+    def betweenness_centrality(
+        self,
+        k: int | None = ...,
+        *,
+        normalized: bool = ...,
+        endpoints: bool = ...,
+        weighted: bool | None = ...,
+        seed: int | None = ...,
+    ) -> dict[str, float]: ...
+    def closeness_centrality(self, *, wf_improved: bool = ..., weighted: bool | None = ...) -> dict[str, float]: ...
+    def harmonic_centrality(self, *, weighted: bool | None = ...) -> dict[str, float]: ...
+    def similarity(
+        self,
+        pairs: list[tuple[str, str]],
+        metric: Literal[
+            "jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation", "preferential_attachment"
+        ] = ...,
+    ) -> list[float]: ...
+    @overload
+    def most_similar(
+        self,
+        ids: str,
+        k: int = ...,
+        *,
+        metric: Literal["jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation"] = ...,
+        min_score: float = ...,
+    ) -> list[tuple[str, float]]: ...
+    @overload
+    def most_similar(
+        self,
+        ids: list[str] | None = ...,
+        k: int = ...,
+        *,
+        metric: Literal["jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation"] = ...,
+        min_score: float = ...,
+    ) -> dict[str, list[tuple[str, float]]]: ...
+    def leiden(
+        self,
+        resolution: float = ...,
+        *,
+        randomness: float = ...,
+        max_iter: int = ...,
+        seed: int | None = ...,
+    ) -> list[list[str]]: ...
+    def modularity(self, communities: Iterable[Iterable[str]], resolution: float = ...) -> float: ...
+    def minimum_spanning_tree(self, *, maximum: bool = ...) -> list[tuple[str, str, float]]: ...
+    def fastrp(
+        self,
+        dimension: int = ...,
+        *,
+        iteration_weights: list[float] = ...,
+        self_influence: float = ...,
+        normalization_strength: float = ...,
+        seed: int | None = ...,
+    ) -> dict[str, list[float]]: ...
+    def node2vec_walks(
+        self,
+        walk_length: int = ...,
+        walks_per_node: int = ...,
+        *,
+        p: float = ...,
+        q: float = ...,
+        sources: list[str] | None = ...,
+        seed: int | None = ...,
+    ) -> list[list[str]]: ...
+    def k_shortest_paths(
+        self,
+        source: str,
+        target: str,
+        k: int,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+    ) -> list[dict[str, Any]]: ...
 
 @final
 class Vertex:

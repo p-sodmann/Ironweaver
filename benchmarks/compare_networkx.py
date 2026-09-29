@@ -23,6 +23,7 @@ import json
 import os
 import platform
 import random
+from itertools import islice
 import sys
 import time
 from dataclasses import dataclass, field
@@ -313,6 +314,58 @@ def run_size(n_nodes: int, n_edges: int, repeats: int, seed: int) -> SizeReport:
     assert r_iw == r_nx
     add(Result("BFS levels", "hop distance from one node to all (parallel, direction-optimizing)", t_iw, t_nx,
                f"{len(r_iw):,} reached"))
+
+    k = min(64, n_nodes)
+    t_iw, r_iw = best_of(lambda: iw.project().betweenness_centrality(k=k, seed=seed), repeats)
+    t_nx, r_nx = best_of(lambda: nx.betweenness_centrality(g, k=k, seed=seed), repeats)
+    add(Result("Betweenness (sampled)", f"estimated from {k} sources (different samples)", t_iw, t_nx,
+               f"max {max(r_iw.values(), default=0):.4f} vs {max(r_nx.values(), default=0):.4f}"))
+
+    spairs = [(f"n{prng.randrange(n_nodes)}", f"n{prng.randrange(n_nodes)}") for _ in range(10_000)]
+    spairs = [(a, b) for a, b in spairs if a != b]
+    t_iw, r_iw = best_of(lambda: iw.project().similarity(spairs, "adamic_adar"), repeats)
+    t_nx, r_nx = best_of(lambda: [x for _, _, x in nx.adamic_adar_index(simple(g), spairs)], repeats)
+    assert all(abs(a - b) < 1e-9 for a, b in zip(r_iw, r_nx))
+    add(Result("Similarity", f"Adamic-Adar for {len(spairs):,} pairs (networkx: incl. `nx.Graph` conversion)",
+               t_iw, t_nx, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project().most_similar(k=10), repeats)
+    add(Result("Most similar nodes", "top 10 by Jaccard for every node", t_iw, None, ""))
+
+    # The same undirected multigraph on both sides (parallel edges add up)
+    multi = nx.MultiGraph()
+    multi.add_nodes_from(g)
+    multi.add_edges_from(g.edges())
+    both = iw.project(direction="both")
+    t_iw, r_iw = best_of(lambda: iw.project(direction="both").leiden(seed=seed), repeats)
+    t_nx, r_nx = best_of(lambda: nx.community.louvain_communities(multi, seed=seed), repeats)
+    assert abs(both.modularity(r_nx) - nx.community.modularity(multi, r_nx)) < 1e-9
+    add(Result("Leiden vs Louvain", "communities (networkx has no Leiden without a backend)", t_iw, t_nx,
+               f"modularity {both.modularity(r_iw):.3f} vs {both.modularity(r_nx):.3f}"))
+
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").minimum_spanning_tree(), repeats)
+    t_nx, r_nx = best_of(lambda: list(nx.minimum_spanning_edges(g.to_undirected(), weight="weight")), repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("Minimum spanning tree", "weighted, edges as undirected (a forest)", t_iw, t_nx,
+               f"{len(r_iw):,} edges"))
+
+    simple_di = nx.DiGraph()
+    for a, b, d in g.edges(data=True):
+        if a != b and (not simple_di.has_edge(a, b) or d["weight"] < simple_di[a][b]["weight"]):
+            simple_di.add_edge(a, b, weight=d["weight"])
+    s0, t0 = next((a, b) for a, b in pairs if nx.has_path(simple_di, a, b) and a != b)
+    t_iw, r_iw = best_of(lambda: iw.project(weight="weight").k_shortest_paths(s0, t0, 10), repeats)
+    t_nx, r_nx = best_of(lambda: list(islice(nx.shortest_simple_paths(simple_di, s0, t0, weight="weight"), 10)),
+                         repeats)
+    assert len(r_iw) == len(r_nx)
+    add(Result("k shortest paths", "10 loopless weighted paths (Yen)", t_iw, t_nx, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project(direction="both").fastrp(128, seed=seed), repeats)
+    add(Result("FastRP embeddings", "128 dimensions, 3 iterations", t_iw, None, ""))
+
+    t_iw, r_iw = best_of(lambda: iw.project().node2vec_walks(20, 2, p=0.5, q=2.0, seed=seed), repeats)
+    add(Result("node2vec walks", "2 walks of 20 nodes per node, p=0.5, q=2", t_iw, None,
+               f"{len(r_iw):,} walks"))
 
     # Weighted grid: A* vs Dijkstra ------------------------------------------
     side = max(2, int(n_nodes ** 0.5))

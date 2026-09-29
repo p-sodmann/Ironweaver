@@ -17,7 +17,12 @@ for src, dst in [("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e
 p = g.project()
 ```
 
-Directed algorithms follow the projection's edges, so use `direction="in"` to reverse them and `direction="both"` to treat them as undirected. Triangles, clustering, core numbers and label propagation always treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`).
+Directed algorithms follow the projection's edges, so use `direction="in"` to reverse them and `direction="both"` to treat them as undirected.
+- Triangles, clustering, core numbers, label propagation and similarity always treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`).
+- Shortest-path based algorithms (betweenness, closeness, harmonic centrality, k shortest paths) ignore self-loops and take the lightest of parallel edges.
+- Leiden, modularity and spanning trees treat edges as undirected but keep their weights.
+
+Randomised algorithms (sampled betweenness, Leiden, FastRP, node2vec) take a `seed`: the same seed gives the same result, whatever the number of cores.
 
 ## Components
 
@@ -65,6 +70,27 @@ assert ppr["x"] == 0.0 and ppr["b"] > ppr["f"]
   - It raises `ValueError` for invalid options or if it doesn't converge within `max_iter`.
 - `degree_centrality("out" | "in")` counts one per edge. On a `direction="both"` projection it matches networkx's `degree_centrality` (in + out).
 
+### Betweenness, closeness and harmonic centrality
+
+```python
+bc = p.betweenness_centrality(normalized=False)   # shortest paths through each node
+assert bc["c"] == 5.0 and bc["f"] == 0.0
+approx = p.betweenness_centrality(k=4, seed=1)    # estimated from 4 random sources
+
+close = p.closeness_centrality()                  # from the distances *to* each node
+assert close["d"] == max(close.values()) and close["x"] == 0.0
+harmonic = p.harmonic_centrality()                # sum of 1 / distance from every other node
+assert harmonic["a"] == 1 / 2 + 1 / 1             # from c (1 hop) and b (2 hops)
+```
+
+All three give the same results as networkx (`betweenness_centrality`, `closeness_centrality`, `harmonic_centrality`), and run in parallel.
+- `betweenness_centrality(k=None, *, normalized=True, endpoints=False, weighted=None, seed=None)`:
+  - It runs one search per source, so it costs O(n·m). With `k`, it samples `k` sources and scales the result up; that is the way to go on large graphs.
+  - A `direction="both"` projection counts as undirected, which matters for `normalized=False`.
+- `closeness_centrality(*, wf_improved=True, weighted=None)`: `(r - 1) / (sum of distances)` over the `r - 1` nodes that reach the node, scaled by `(r - 1) / (n - 1)` when `wf_improved` (for graphs that aren't connected).
+- `harmonic_centrality(*, weighted=None)`: handles unreachable nodes without a correction.
+- `weighted=None` uses the projection's weights if it has them; `weighted=False` counts hops.
+
 ## Local structure
 
 ```python
@@ -99,6 +125,87 @@ This is synchronous label propagation, the LDBC Graphalytics "CDLP" rule, with e
 - In each round, every node takes the label most common among its neighbours; ties go to the smallest label.
 - It stops when no label changes, or after `max_iter` rounds (synchronous updates can oscillate).
 - The result is deterministic.
+
+### Leiden
+
+```python
+found = teams.project().leiden(seed=1)
+assert sorted(map(sorted, found)) == groups
+q = teams.project().modularity(found)             # like networkx.community.modularity
+assert 0.3 < q < 0.5
+```
+
+`leiden(resolution=1.0, *, randomness=0.01, max_iter=10, seed=None)` finds communities by the Leiden algorithm, maximising modularity. It improves on Louvain: every community is guaranteed to be connected, and it usually finds a better partition.
+- Edges count as undirected, weighted by the projection's weights; parallel edges add up.
+- A higher `resolution` gives more, smaller communities.
+- `randomness` controls how randomly the refinement step merges nodes.
+- It runs again from its own result until that changes nothing, at most `max_iter` times.
+
+`modularity(communities, resolution=1.0)` scores a partition: every node must be in exactly one community (lists or sets of ids).
+
+## Similarity
+
+```python
+u = g.project(direction="both")
+assert u.similarity([("a", "d"), ("d", "f")]) == [1 / 3, 1 / 2]   # Jaccard
+assert u.similarity([("a", "d")], "common_neighbors") == [1]      # both link to c
+assert u.most_similar("d", 2) == [("f", 0.5), ("a", 1 / 3)]
+top = u.most_similar(k=3)                         # {id: [(other, score), ...]} for every node
+```
+
+Scores compare the neighbours of two nodes (edges as undirected). They give the same results as networkx's link prediction functions:
+- `"jaccard"`: shared / all neighbours of either.
+- `"overlap"`: shared / neighbours of the node with fewer.
+- `"common_neighbors"`: the number shared.
+- `"adamic_adar"`: sum of `1 / log(degree)` over the shared neighbours.
+- `"resource_allocation"`: sum of `1 / degree` over the shared neighbours.
+- `"preferential_attachment"`: the product of the degrees (only for `similarity`).
+
+`most_similar(ids=None, k=10, *, metric="jaccard", min_score=0.0)`:
+- It gives the `k` best matches of each node among the nodes that share a neighbour with it, best first (ties in projection order).
+- `ids` limits the nodes asked about; a single id returns just its list.
+- It runs in parallel, without scoring every pair.
+
+## Spanning trees
+
+```python
+assert g.project().minimum_spanning_tree() == [("a", "b", 1.0), ("a", "c", 1.0), ("c", "d", 1.0), ("d", "e", 1.0), ("e", "f", 1.0)]
+```
+
+`minimum_spanning_tree(*, maximum=False)` returns the edges `(id, id, weight)` of a minimum spanning forest: one tree per connected part, edges as undirected, weighted by the projection's weights (1 if unweighted). `maximum=True` gives the heaviest forest.
+
+## k shortest paths
+
+```python
+routes = g.project(direction="both").k_shortest_paths("a", "e", 3)
+assert [r["nodelist"] for r in routes] == [["a", "c", "d", "e"], ["a", "b", "c", "d", "e"]]
+assert [r["cost"] for r in routes] == [3, 4]
+```
+
+`k_shortest_paths(source, target, k, method=None)` gives up to `k` paths without repeated nodes, cheapest first, by Yen's algorithm. Each result is `{"nodelist": [...], "cost": c}`, as for `shortest_paths`. `method` is `"dijkstra"` (weights) or `"bfs"` (edge count); by default, dijkstra on a weighted projection.
+
+## Embeddings
+
+```python
+u = teams.project(direction="both")
+vectors = u.fastrp(64, seed=1)                    # {id: [64 floats]}
+assert len(vectors["ann"]) == 64
+
+walks = u.node2vec_walks(walk_length=10, walks_per_node=2, p=1.0, q=0.5, seed=1)
+assert len(walks) == 16 and walks[0][0] == "ann"
+```
+
+- `fastrp(dimension=128, *, iteration_weights=[0.0, 1.0, 1.0], self_influence=0.0, normalization_strength=0.0, seed=None)` computes FastRP embeddings, the fast random projection that Neo4j GDS uses by default. Nodes with similar neighbourhoods get similar vectors. There is no training:
+  - every node starts from a sparse random vector;
+  - each iteration replaces it by the normalised sum of its neighbours' vectors (weighted, if the projection is);
+  - the result is the sum of the iterations, weighted by `iteration_weights`, plus `self_influence` times the node's own random vector.
+  - `normalization_strength` β scales each random vector by `degree^β`; negative values damp hubs.
+  - It follows the projection's edges, so use `direction="both"` for undirected graphs.
+- `node2vec_walks(walk_length=80, walks_per_node=10, *, p=1.0, q=1.0, sources=None, seed=None)` makes node2vec random walks, to train a word2vec-style model on.
+  - Having come from `t`, the walk goes back to `t` with weight `1/p`, to a neighbour of `t` with weight 1, and further away with weight `1/q`, times the edge weight.
+  - `q < 1` explores outwards (like DFS), `q > 1` stays local (like BFS); `p = q = 1` is a plain random walk.
+  - The result lists the first walk from every source, then the second, and so on.
+  - Walks stop early at nodes without outgoing edges.
 
 ## Breadth-first levels
 

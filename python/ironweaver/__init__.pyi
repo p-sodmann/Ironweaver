@@ -10,7 +10,7 @@ This file describes every symbol available after::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator, Literal, final
+from typing import Any, Callable, Iterable, Iterator, Literal, final, overload
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -488,6 +488,100 @@ class Projection:
         ...
     def bfs_levels(self, sources: list[str], max_depth: int | None = ...) -> dict[str, int]:
         """``{id: hops from the nearest source}`` for every node reached."""
+        ...
+    def betweenness_centrality(
+        self,
+        k: int | None = ...,
+        *,
+        normalized: bool = ...,
+        endpoints: bool = ...,
+        weighted: bool | None = ...,
+        seed: int | None = ...,
+    ) -> dict[str, float]:
+        """Betweenness centrality (Brandes; `k` samples sources), like networkx."""
+        ...
+    def closeness_centrality(self, *, wf_improved: bool = ..., weighted: bool | None = ...) -> dict[str, float]:
+        """Closeness centrality from the distances *to* each node, like networkx."""
+        ...
+    def harmonic_centrality(self, *, weighted: bool | None = ...) -> dict[str, float]:
+        """Sum of ``1 / distance`` from every node that reaches each node."""
+        ...
+    def similarity(
+        self,
+        pairs: list[tuple[str, str]],
+        metric: Literal[
+            "jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation", "preferential_attachment"
+        ] = ...,
+    ) -> list[float]:
+        """Neighbourhood similarity of each pair (edges as undirected)."""
+        ...
+    @overload
+    def most_similar(
+        self,
+        ids: str,
+        k: int = ...,
+        *,
+        metric: Literal["jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation"] = ...,
+        min_score: float = ...,
+    ) -> list[tuple[str, float]]: ...
+    @overload
+    def most_similar(
+        self,
+        ids: list[str] | None = ...,
+        k: int = ...,
+        *,
+        metric: Literal["jaccard", "overlap", "common_neighbors", "adamic_adar", "resource_allocation"] = ...,
+        min_score: float = ...,
+    ) -> dict[str, list[tuple[str, float]]]:
+        """The ``k`` most similar nodes of each node, best first."""
+        ...
+    def leiden(
+        self,
+        resolution: float = ...,
+        *,
+        randomness: float = ...,
+        max_iter: int = ...,
+        seed: int | None = ...,
+    ) -> list[list[str]]:
+        """Communities by the Leiden algorithm (connected, maximising modularity), largest first."""
+        ...
+    def modularity(self, communities: Iterable[Iterable[str]], resolution: float = ...) -> float:
+        """Modularity of a partition of the nodes, like networkx.community.modularity."""
+        ...
+    def minimum_spanning_tree(self, *, maximum: bool = ...) -> list[tuple[str, str, float]]:
+        """Edges ``(id, id, weight)`` of a minimum (or maximum) spanning forest."""
+        ...
+    def fastrp(
+        self,
+        dimension: int = ...,
+        *,
+        iteration_weights: list[float] = ...,
+        self_influence: float = ...,
+        normalization_strength: float = ...,
+        seed: int | None = ...,
+    ) -> dict[str, list[float]]:
+        """``{id: embedding}`` by FastRP (fast random projection)."""
+        ...
+    def node2vec_walks(
+        self,
+        walk_length: int = ...,
+        walks_per_node: int = ...,
+        *,
+        p: float = ...,
+        q: float = ...,
+        sources: list[str] | None = ...,
+        seed: int | None = ...,
+    ) -> list[list[str]]:
+        """node2vec (second-order biased) random walks."""
+        ...
+    def k_shortest_paths(
+        self,
+        source: str,
+        target: str,
+        k: int,
+        method: Literal["bfs", "dijkstra"] | None = ...,
+    ) -> list[dict[str, Any]]:
+        """Up to ``k`` shortest loopless paths, cheapest first (Yen)."""
         ...
 
 # ---------------------------------------------------------------------------

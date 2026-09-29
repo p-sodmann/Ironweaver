@@ -210,6 +210,16 @@ pub struct Projection {
 }
 
 impl Projection {
+    /// Whether a distance-based algorithm uses weights: `weighted`, or the
+    /// projection's weights if it has them when `None`.
+    fn weights(&self, weighted: Option<bool>) -> bool {
+        weighted.unwrap_or(self.inner.is_weighted())
+    }
+
+    fn indices(&self, ids: &[String], what: &str) -> PyResult<Vec<u32>> {
+        ids.iter().map(|id| self.index(id, what)).collect()
+    }
+
     /// Dense index of `id`; `what` names the node in the error ("Root node").
     fn index(&self, id: &str, what: &str) -> PyResult<u32> {
         self.inner
@@ -305,12 +315,43 @@ fn per_node<'py, T: IntoPyObject<'py> + Copy>(
     Ok(out.unbind())
 }
 
-/// Groups of nodes as lists of ids.
+/// `{id: [floats]}`, one row of `values` per node.
+fn rows_to_py(py: Python<'_>, p: &ironweaver_core::Projection, values: &[f32], width: usize) -> PyResult<Py<PyDict>> {
+    let _gc = GcPause::new(py);
+    let out = PyDict::new(py);
+    if width > 0 {
+        for (u, row) in values.chunks(width).enumerate() {
+            let list = PyList::new(py, row.iter().map(|&x| x as f64))?;
+            out.set_item(p.id(u as u32), list)?;
+        }
+    }
+    Ok(out.unbind())
+}
+
+/// Python strings for node ids, each created once (walks repeat ids).
+struct Ids<'py, 'p> {
+    py: Python<'py>,
+    p: &'p ironweaver_core::Projection,
+    cache: Vec<Option<Bound<'py, PyString>>>,
+}
+
+impl<'py, 'p> Ids<'py, 'p> {
+    fn new(py: Python<'py>, p: &'p ironweaver_core::Projection) -> Self {
+        Ids { py, p, cache: vec![None; p.node_count()] }
+    }
+
+    fn get(&mut self, u: u32) -> Bound<'py, PyString> {
+        self.cache[u as usize].get_or_insert_with(|| PyString::new(self.py, self.p.id(u))).clone()
+    }
+}
+
+/// Groups of nodes (or walks) as lists of ids.
 fn groups_to_py(py: Python<'_>, p: &ironweaver_core::Projection, groups: &[Vec<u32>]) -> PyResult<Py<PyList>> {
     let _gc = GcPause::new(py);
+    let mut ids = Ids::new(py, p);
     let out = PyList::empty(py);
     for g in groups {
-        out.append(g.iter().map(|&u| p.id(u)).collect::<Vec<_>>())?;
+        out.append(PyList::new(py, g.iter().map(|&u| ids.get(u)))?)?;
     }
     Ok(out.unbind())
 }
@@ -545,6 +586,227 @@ impl Projection {
             }
         }
         Ok(out.unbind())
+    }
+
+    /// {id: betweenness centrality}, like networkx.betweenness_centrality.
+    /// `k` estimates it from `k` random sources (`seed` makes it
+    /// repeatable). `weighted=None` uses the projection's weights if it has
+    /// them; False counts hops.
+    #[pyo3(signature = (k=None, *, normalized=true, endpoints=false, weighted=None, seed=None))]
+    fn betweenness_centrality(
+        &self,
+        py: Python<'_>,
+        k: Option<usize>,
+        normalized: bool,
+        endpoints: bool,
+        weighted: Option<bool>,
+        seed: Option<u64>,
+    ) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        if k == Some(0) {
+            return Err(PyValueError::new_err("k must be at least 1"));
+        }
+        let sources = k.map(|k| algo::sample_sources(p, k, seed.unwrap_or_else(algo::random_seed)));
+        let opts = algo::Betweenness { normalized, endpoints, weighted: self.weights(weighted), sources };
+        let values = py.detach(|| algo::betweenness_centrality(p, &opts)).map_err(graph_error)?;
+        per_node(py, p, &values)
+    }
+
+    /// {id: closeness centrality}, like networkx.closeness_centrality
+    /// (distances *to* each node on a directed projection).
+    #[pyo3(signature = (*, wf_improved=true, weighted=None))]
+    fn closeness_centrality(&self, py: Python<'_>, wf_improved: bool, weighted: Option<bool>) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let weighted = self.weights(weighted);
+        let values = py.detach(|| algo::closeness_centrality(p, weighted, wf_improved)).map_err(graph_error)?;
+        per_node(py, p, &values)
+    }
+
+    /// {id: harmonic centrality}: the sum of 1 / distance from every node
+    /// that reaches it, like networkx.harmonic_centrality.
+    #[pyo3(signature = (*, weighted=None))]
+    fn harmonic_centrality(&self, py: Python<'_>, weighted: Option<bool>) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let weighted = self.weights(weighted);
+        let values = py.detach(|| algo::harmonic_centrality(p, weighted)).map_err(graph_error)?;
+        per_node(py, p, &values)
+    }
+
+    /// Similarity of each (id, id) pair by shared neighbours (edges as
+    /// undirected): "jaccard", "overlap", "common_neighbors",
+    /// "adamic_adar", "resource_allocation" or "preferential_attachment".
+    #[pyo3(signature = (pairs, metric="jaccard"))]
+    fn similarity(&self, py: Python<'_>, pairs: Vec<(String, String)>, metric: &str) -> PyResult<Vec<f64>> {
+        let metric: algo::Similarity = metric.parse().map_err(graph_error)?;
+        let dense: Vec<(u32, u32)> =
+            pairs.iter().map(|(a, b)| Ok((self.index(a, "Node")?, self.index(b, "Node")?))).collect::<PyResult<_>>()?;
+        let p = &self.inner;
+        py.detach(|| algo::similarity(p, &dense, metric)).map_err(graph_error)
+    }
+
+    /// The `k` nodes most similar to each node (sharing at least one
+    /// neighbour, score above `min_score`), best first:
+    /// {id: [(other_id, score), ...]}. `ids` limits the nodes asked about;
+    /// a single id returns just its list.
+    #[pyo3(signature = (ids=None, k=10, *, metric="jaccard", min_score=0.0))]
+    fn most_similar(
+        &self,
+        py: Python<'_>,
+        ids: Option<&Bound<'_, PyAny>>,
+        k: usize,
+        metric: &str,
+        min_score: f64,
+    ) -> PyResult<Py<PyAny>> {
+        let metric: algo::Similarity = metric.parse().map_err(graph_error)?;
+        let (single, sources) = match ids {
+            None => (false, None),
+            Some(x) if x.is_none() => (false, None),
+            Some(x) => match x.extract::<String>() {
+                Ok(id) => (true, Some(vec![self.index(&id, "Node")?])),
+                Err(_) => (false, Some(self.indices(&x.extract::<Vec<String>>()?, "Node")?)),
+            },
+        };
+        let p = &self.inner;
+        let results =
+            py.detach(|| algo::most_similar(p, sources.as_deref(), k, metric, min_score)).map_err(graph_error)?;
+        let _gc = GcPause::new(py);
+        let to_list = |row: &[(u32, f64)]| -> Vec<(&str, f64)> { row.iter().map(|&(v, s)| (p.id(v), s)).collect() };
+        if single {
+            return Ok(to_list(&results[0]).into_pyobject(py)?.into_any().unbind());
+        }
+        let out = PyDict::new(py);
+        for (i, row) in results.iter().enumerate() {
+            let u = sources.as_ref().map_or(i as u32, |s| s[i]);
+            out.set_item(p.id(u), to_list(row))?;
+        }
+        Ok(out.into_any().unbind())
+    }
+
+    /// Communities by the Leiden algorithm (maximising modularity; edges
+    /// as undirected, weighted if the projection is), as lists of ids,
+    /// largest first. Every community is connected. `seed` makes the
+    /// result repeatable. The algorithm runs again from its own result
+    /// until that changes nothing, at most `max_iter` times.
+    #[pyo3(signature = (resolution=1.0, *, randomness=0.01, max_iter=10, seed=None))]
+    fn leiden(
+        &self,
+        py: Python<'_>,
+        resolution: f64,
+        randomness: f64,
+        max_iter: usize,
+        seed: Option<u64>,
+    ) -> PyResult<Py<PyList>> {
+        let p = &self.inner;
+        let seed = seed.unwrap_or_else(algo::random_seed);
+        let opts = algo::Leiden { resolution, randomness, max_iter, seed };
+        let groups = py.detach(|| algo::leiden(p, &opts)).map_err(graph_error)?;
+        groups_to_py(py, p, &groups)
+    }
+
+    /// Modularity of a partition of the nodes into communities (iterables
+    /// of ids, e.g. lists or sets; every node exactly once), like networkx.community.modularity.
+    #[pyo3(signature = (communities, resolution=1.0))]
+    fn modularity(&self, py: Python<'_>, communities: &Bound<'_, PyAny>, resolution: f64) -> PyResult<f64> {
+        let p = &self.inner;
+        let mut labels = vec![algo::NONE; p.node_count()];
+        for (c, members) in communities.try_iter()?.enumerate() {
+            for id in members?.try_iter()? {
+                let id: String = id?.extract()?;
+                let u = self.index(&id, "Node")? as usize;
+                if labels[u] != algo::NONE {
+                    return Err(PyValueError::new_err(format!("node '{}' is in more than one community", id)));
+                }
+                labels[u] = c as u32;
+            }
+        }
+        if let Some(u) = labels.iter().position(|&l| l == algo::NONE) {
+            return Err(PyValueError::new_err(format!("node '{}' is in no community", p.id(u as u32))));
+        }
+        py.detach(|| algo::modularity(p, &labels, resolution)).map_err(graph_error)
+    }
+
+    /// Edges of a minimum spanning forest (edges as undirected, weighted
+    /// by the projection's weights, 1 if unweighted), as (id, id, weight);
+    /// `maximum=True` for the heaviest forest.
+    #[pyo3(signature = (*, maximum=false))]
+    fn minimum_spanning_tree(&self, py: Python<'_>, maximum: bool) -> Vec<(&str, &str, f64)> {
+        let p = &self.inner;
+        let edges = py.detach(|| algo::spanning_forest(p, maximum));
+        edges.into_iter().map(|(a, b, w)| (p.id(a), p.id(b), w)).collect()
+    }
+
+    /// {id: embedding} by FastRP (fast random projection): nodes with
+    /// similar neighbourhoods get similar vectors. Follows the
+    /// projection's edges (project with direction="both" for undirected).
+    #[pyo3(signature = (
+        dimension=128,
+        *,
+        iteration_weights=vec![0.0, 1.0, 1.0],
+        self_influence=0.0,
+        normalization_strength=0.0,
+        seed=None
+    ))]
+    fn fastrp(
+        &self,
+        py: Python<'_>,
+        dimension: usize,
+        iteration_weights: Vec<f64>,
+        self_influence: f64,
+        normalization_strength: f64,
+        seed: Option<u64>,
+    ) -> PyResult<Py<PyDict>> {
+        let p = &self.inner;
+        let opts = algo::FastRP {
+            dimension,
+            iteration_weights,
+            self_influence,
+            normalization_strength,
+            seed: seed.unwrap_or_else(algo::random_seed),
+        };
+        let values = py.detach(|| algo::fastrp(p, &opts)).map_err(graph_error)?;
+        rows_to_py(py, p, &values, dimension)
+    }
+
+    /// node2vec random walks (lists of ids), `walks_per_node` from each
+    /// source (every node by default): `p` > 1 makes going back less
+    /// likely, `q` > 1 keeps walks local, `q` < 1 pushes them outwards.
+    /// Weighted if the projection is.
+    #[pyo3(signature = (walk_length=80, walks_per_node=10, *, p=1.0, q=1.0, sources=None, seed=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn node2vec_walks(
+        &self,
+        py: Python<'_>,
+        walk_length: usize,
+        walks_per_node: usize,
+        p: f64,
+        q: f64,
+        sources: Option<Vec<String>>,
+        seed: Option<u64>,
+    ) -> PyResult<Py<PyList>> {
+        let starts = sources.map(|s| self.indices(&s, "Root node")).transpose()?;
+        let opts = algo::Node2Vec { walk_length, walks_per_node, p, q, seed: seed.unwrap_or_else(algo::random_seed) };
+        let proj = &self.inner;
+        let walks = py.detach(|| algo::node2vec_walks(proj, starts.as_deref(), &opts)).map_err(graph_error)?;
+        groups_to_py(py, proj, &walks)
+    }
+
+    /// Up to `k` shortest loopless paths from `source` to `target`,
+    /// cheapest first: [{"nodelist": [...], "cost": c}, ...]. `method` as
+    /// in shortest_paths.
+    #[pyo3(signature = (source, target, k, method=None))]
+    fn k_shortest_paths(
+        &self,
+        py: Python<'_>,
+        source: &str,
+        target: &str,
+        k: usize,
+        method: Option<&str>,
+    ) -> PyResult<Py<PyList>> {
+        let weighted = self.uses_weights(method)?;
+        let (s, t) = (self.index(source, "Root node")?, self.index(target, "Target node")?);
+        let p = &self.inner;
+        let paths = py.detach(|| algo::k_shortest_paths(p, s, t, k, weighted)).map_err(graph_error)?;
+        paths_to_py(py, p, paths.into_iter().map(Some).collect(), weighted)
     }
 
     fn __repr__(&self) -> String {

@@ -125,6 +125,24 @@ Below is a quick guide to notable functions and where to find them.
   - `structure.rs`: `triangles`, `clustering`, `core_number`.
   - `community.rs`: `label_propagation` (synchronous CDLP).
   - `bfs.rs`: `bfs_levels` (parallel, direction-optimizing).
+  - `sssp.rs`: `Search` (reusable single-source BFS / Dijkstra, forwards or
+    backwards) and `SimpleRow` (lightest of parallel edges, no self-loops),
+    shared by the shortest-path based algorithms.
+  - `betweenness.rs`: `betweenness_centrality` + `Betweenness` options
+    (Brandes, parallel over sources; `sample_sources` for estimates;
+    networkx scaling).
+  - `closeness.rs`: `closeness_centrality`, `harmonic_centrality`.
+  - `similarity.rs`: `Similarity` metrics, `similarity` (pairs),
+    `most_similar` (top k per node through common neighbours).
+  - `leiden.rs`: `leiden` + `Leiden` options (local moving, refinement,
+    aggregation; repeated from its own result), `modularity`.
+  - `spanning.rs`: `spanning_forest` (Kruskal).
+  - `ksp.rs`: `k_shortest_paths` (Yen).
+  - `embedding.rs`: `fastrp` + `FastRP` options.
+  - `node2vec.rs`: `node2vec_walks` + `Node2Vec` options (rejection
+    sampling).
+  - `mod.rs` helpers: `ordered_sum` (parallel sums independent of the
+    thread count), `mix` (per-item seeds), `random_seed`.
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `WalkPlan::items`,
   `random_walks` convenience.
