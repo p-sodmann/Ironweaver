@@ -73,7 +73,7 @@ jobs:
       - name: Build and install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin pytest networkx numpy scipy
+          python -m pip install maturin pytest networkx numpy scipy psutil
           python -m pip install -e .
       # Includes tests/test_docs_examples.py (README, llms.txt, docs/*.md)
       - run: python -m pytest -q

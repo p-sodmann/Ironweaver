@@ -13,6 +13,10 @@ import pytest
 pytest.importorskip("networkx")
 pytest.importorskip("ironweaver")
 
+# The benchmark reads the process RSS from /proc (Linux) or via psutil
+if not os.path.exists("/proc/self/status"):
+    pytest.importorskip("psutil")
+
 SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "benchmarks", "compare_networkx_memory.py")
 

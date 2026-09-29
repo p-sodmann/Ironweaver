@@ -127,6 +127,12 @@ impl WalkIndex {
 
 /// Fenwick (binary indexed) tree over f64 weights: O(log n) point update and
 /// O(log n) sampling proportional to weight.
+/// The lowest set bit of `i` (`i > 0`), which steps through a Fenwick tree.
+/// (`usize::isolate_lowest_one` needs Rust 1.98.)
+fn lowest_bit(i: usize) -> usize {
+    1 << i.trailing_zeros()
+}
+
 struct Fenwick {
     tree: Vec<f64>,
 }
@@ -136,7 +142,7 @@ impl Fenwick {
         let mut tree = vec![0.0; n + 1];
         for i in 1..=n {
             tree[i] += initial;
-            let parent = i + (i & i.wrapping_neg());
+            let parent = i + lowest_bit(i);
             if parent <= n {
                 let v = tree[i];
                 tree[parent] += v;
@@ -149,7 +155,7 @@ impl Fenwick {
         let mut i = idx + 1;
         while i < self.tree.len() {
             self.tree[i] += delta;
-            i += i & i.wrapping_neg();
+            i += lowest_bit(i);
         }
     }
 
@@ -158,7 +164,7 @@ impl Fenwick {
         let mut sum = 0.0;
         while i > 0 {
             sum += self.tree[i];
-            i -= i & i.wrapping_neg();
+            i -= lowest_bit(i);
         }
         sum
     }
