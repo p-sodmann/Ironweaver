@@ -327,6 +327,41 @@ impl Node {
         self.walk(py, depth, filter, edge_filter, false)
     }
 
+    /// Every path from this node with `min_hops..=max_hops` edges, as `Path`
+    /// objects (`path.nodes`, `path.edges`), depth first.
+    ///
+    /// `direction`: "out" (default), "in" or "both". `types`: edge type(s)
+    /// to follow; `where`: an Expr every edge must match. `uniqueness`:
+    /// "trail" (default: no edge twice), "path" (no node twice) or "walk"
+    /// (anything; needs `max_hops`). `limit` stops after that many paths.
+    #[pyo3(signature = (
+        min_hops=1,
+        max_hops=None,
+        *,
+        direction=None,
+        types=None,
+        r#where=None,
+        uniqueness="trail",
+        limit=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn paths<'py>(
+        &self,
+        py: Python<'py>,
+        min_hops: usize,
+        max_hops: Option<usize>,
+        direction: Option<&'py str>,
+        types: Option<Bound<'py, PyAny>>,
+        r#where: Option<Bound<'py, PyAny>>,
+        uniqueness: &'py str,
+        limit: Option<usize>,
+    ) -> PyResult<Py<pyo3::types::PyList>> {
+        self.read(py, |_| ())?;
+        let opts =
+            crate::vertex::query::PathOptions { min_hops, max_hops, direction, types, r#where, uniqueness, limit };
+        crate::vertex::query::node_paths(py, &self.vertex, self.ix, opts)
+    }
+
     /// Breadth-first traversal of reachable nodes. Returns a new Vertex with
     /// copies of the reached nodes (and the edges between them); the visiting
     /// order is in `meta["nodelist"]`.

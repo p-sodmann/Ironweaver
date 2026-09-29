@@ -43,6 +43,7 @@ pub mod graph;
 pub mod ops;
 pub mod pathfinding;
 pub mod projection;
+pub mod query;
 pub mod random_walks;
 pub mod record;
 pub mod traversal;

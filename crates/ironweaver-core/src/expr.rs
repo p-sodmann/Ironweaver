@@ -6,6 +6,10 @@
 // bindings can filter without calling Python functions, and a query engine
 // can use them as its predicate representation.
 //
+// The attribute names "labels" (nodes) and "type" (edges) are the graph
+// fields: `labels` is the list of the node's label names, `type` the edge's
+// type (missing if it has none), whatever the payload holds under that name.
+//
 // Missing attributes (or none values) make every comparison false, like
 // SQL NULL: `attr("x") != 1` is false when `x` is missing; use `Not` /
 // `Exists` to say otherwise. Numbers compare across `Int` / `Float`.
@@ -56,6 +60,14 @@ pub enum Expr {
     Not(Box<Expr>),
 }
 
+/// What evaluation needs besides the payload.
+struct Context<'a> {
+    label: &'a dyn Fn(&str) -> bool,
+    ty: &'a dyn Fn(&str) -> bool,
+    /// The value of a reserved attribute path, if `path` is one.
+    reserved: &'a dyn Fn(&[String]) -> Option<Option<Value>>,
+}
+
 impl CmpOp {
     fn holds(self, attr: Option<&Value>, value: &Value) -> bool {
         let Some(a) = attr else { return false };
@@ -74,34 +86,51 @@ impl Expr {
     /// Whether the node matches.
     pub fn matches_node<N: Attributes, E>(&self, g: &Graph<N, E>, ix: NodeIx) -> Result<bool, N::Error> {
         let Some(node) = g.node(ix) else { return Ok(false) };
-        self.eval(&node.data, &|name| g.symbol(name).is_some_and(|s| node.has_label(s)), &|_| false)
+        let ctx = Context {
+            label: &|name| g.symbol(name).is_some_and(|s| node.has_label(s)),
+            ty: &|_| false,
+            reserved: &|path| {
+                (path.len() == 1 && path[0] == "labels").then(|| {
+                    let names = node.labels().iter().map(|&s| Value::String(g.symbol_name(s).to_owned()));
+                    Some(Value::List(names.collect()))
+                })
+            },
+        };
+        self.eval(&node.data, &ctx)
     }
 
     /// Whether the edge matches.
     pub fn matches_edge<N, E: Attributes>(&self, g: &Graph<N, E>, e: EdgeIx) -> Result<bool, E::Error> {
         let Some(edge) = g.edge(e) else { return Ok(false) };
         let ty = edge.edge_type();
-        self.eval(&edge.data, &|_| false, &|name| ty.is_some() && g.symbol(name) == ty)
+        let ctx = Context {
+            label: &|_| false,
+            ty: &|name| ty.is_some() && g.symbol(name) == ty,
+            reserved: &|path| {
+                (path.len() == 1 && path[0] == "type").then(|| ty.map(|t| Value::String(g.symbol_name(t).to_owned())))
+            },
+        };
+        self.eval(&edge.data, &ctx)
     }
 
-    fn eval<P: Attributes>(
-        &self,
-        data: &P,
-        label: &dyn Fn(&str) -> bool,
-        ty: &dyn Fn(&str) -> bool,
-    ) -> Result<bool, P::Error> {
+    fn eval<P: Attributes>(&self, data: &P, ctx: &Context<'_>) -> Result<bool, P::Error> {
+        // An attribute's value: a graph field for reserved names
+        let with = |path: &[String], f: &dyn Fn(Option<&Value>) -> bool| -> Result<bool, P::Error> {
+            match (ctx.reserved)(path) {
+                Some(v) => Ok(f(v.as_ref().filter(|v| !v.is_none()))),
+                None => data.with_value(path, f),
+            }
+        };
         Ok(match self {
             Expr::Const(b) => *b,
-            Expr::Compare { path, op, value } => data.with_value(path, |a| op.holds(a, value))?,
-            Expr::In { path, values } => {
-                data.with_value(path, |a| a.is_some_and(|a| values.iter().any(|v| a.loose_eq(v))))?
-            }
-            Expr::Exists { path } => data.with_value(path, |a| a.is_some())?,
-            Expr::Label(name) => label(name),
-            Expr::Type(name) => ty(name),
+            Expr::Compare { path, op, value } => with(path, &|a| op.holds(a, value))?,
+            Expr::In { path, values } => with(path, &|a| a.is_some_and(|a| values.iter().any(|v| a.loose_eq(v))))?,
+            Expr::Exists { path } => with(path, &|a| a.is_some())?,
+            Expr::Label(name) => (ctx.label)(name),
+            Expr::Type(name) => (ctx.ty)(name),
             Expr::And(items) => {
                 for item in items {
-                    if !item.eval(data, label, ty)? {
+                    if !item.eval(data, ctx)? {
                         return Ok(false);
                     }
                 }
@@ -109,13 +138,13 @@ impl Expr {
             }
             Expr::Or(items) => {
                 for item in items {
-                    if item.eval(data, label, ty)? {
+                    if item.eval(data, ctx)? {
                         return Ok(true);
                     }
                 }
                 false
             }
-            Expr::Not(inner) => !inner.eval(data, label, ty)?,
+            Expr::Not(inner) => !inner.eval(data, ctx)?,
         })
     }
 
@@ -181,7 +210,16 @@ mod tests {
         assert!(node(&both, a) && !node(&both, b) && node(&either, b));
         assert_eq!(Expr::Not(Box::new(both)).depth(), 3);
 
+        // "labels" / "type" are the graph fields
+        let labels = Value::List(vec![Value::from("Person")]);
+        assert!(node(&Expr::Compare { path: path("labels"), op: CmpOp::Eq, value: labels.clone() }, a));
+        assert!(!node(&Expr::Compare { path: path("labels"), op: CmpOp::Eq, value: labels }, b));
+        assert!(node(&Expr::Exists { path: path("labels") }, b)); // an empty list
         let edge = |x: &Expr| x.matches_edge::<_, _>(&g, e).map_err(|e: GraphError| e).unwrap();
+        assert!(
+            edge(&cmp("type", CmpOp::Eq, "knows"))
+                && edge(&Expr::In { path: path("type"), values: vec![Value::from("knows")] })
+        );
         assert!(edge(&Expr::Type("knows".into())) && !edge(&Expr::Type("likes".into())));
         assert!(edge(&cmp("w", CmpOp::Eq, 2)) && !edge(&Expr::Label("Person".into())));
     }

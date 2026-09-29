@@ -464,6 +464,10 @@ edge = graph.add_edge(from_id, to_id, attr=None, type=None)   # edge.type, edge.
 graph.get_edge(edge_id) -> Edge; graph.nodes_with_label(label) -> list[Node]
 # expressions evaluated in Rust: from ironweaver import attr, label, edge_type
 graph.filter((attr("age") > 30) & label("Person")); graph.project(edge_filter=edge_type("knows"))
+rows = graph.match("(a:Person)-[k:knows*1..2]->(b)", where=None, ids=None, limit=None)
+# -> [{"a": Node, "k": [Edge, ...], "b": Node}, ...]; Cypher-like patterns (docs/patterns.md)
+paths = node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None,
+                   uniqueness="trail", limit=None) -> list[Path]   # path.nodes, path.edges
 expanded = graph.expand(source: Vertex, depth: int = 1, direction: str = "out") -> Vertex
 filtered = graph.filter(predicate) -> Vertex   # lambda/callable — raises ValueError if no args
 filtered = graph.filter(**filters) -> Vertex    # id, ids, or attribute=value filters

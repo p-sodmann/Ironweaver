@@ -532,6 +532,11 @@ impl<N, E> Graph<N, E> {
         Some(self.node(ix)?.labels.iter().map(|&s| self.symbols.name(s)).collect())
     }
 
+    /// Number of nodes carrying `label`.
+    pub fn label_count(&self, label: &str) -> usize {
+        self.symbols.get(label).and_then(|s| self.labeled.get(&s)).map_or(0, |set| set.len())
+    }
+
     /// Nodes carrying `label`, in slot order.
     pub fn nodes_with_label(&self, label: &str) -> Vec<NodeIx> {
         let mut out: Vec<NodeIx> = match self.symbols.get(label).and_then(|s| self.labeled.get(&s)) {

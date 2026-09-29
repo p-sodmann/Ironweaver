@@ -7,6 +7,7 @@ pub(crate) mod callbacks;
 mod core;
 mod manipulation;
 mod pathfinding;
+pub(crate) mod query;
 mod serialization;
 pub(crate) mod subgraph;
 

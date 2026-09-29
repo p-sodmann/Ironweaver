@@ -87,6 +87,7 @@ assert v.filter(where=label("Blue")).keys() == ["c"]        # the same, as a key
   - `attr("name")`: `attr("pos.lat")` reaches into nested dicts; for a name containing dots, pass a list (`attr(["a.b"])`).
   - Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`, `.is_in([...])`, `.exists()`.
   - `label("L")` for nodes and `edge_type("t")` for edges.
+  - `attr("labels")` is a node's list of labels and `attr("type")` an edge's type, as everywhere else in the Python API.
   - Combine with `&`, `|` and `~`.
 - **Parentheses:** Python's `&` and `|` bind tighter than comparisons, so write `(attr("a") > 1) & label("L")`. Leaving the parentheses out, or using `and` / `or` / `not`, raises a `TypeError` that says so.
 - **Missing values:** a missing or `None` attribute makes every comparison false, like SQL `NULL`, so `attr("status") != "x"` is false for nodes without a status. Use `~` or `.exists()` to say otherwise.

@@ -200,6 +200,35 @@ assert pa.k_shortest_paths("p", "s", 2)[0] == {"nodelist": ["p", "q", "r", "s"],
 
 Directed algorithms follow the projection's `direction` ("in" reverses edges, "both" makes them undirected). Details: docs/analytics.md.
 
+## Pattern matching and variable-length paths
+
+```python
+m = Vertex()
+for id in ["ann", "bob"]:
+    m.add_node(id, {"age": 30}, labels=["Person"])
+m.add_node("acme", labels=["Company"])
+m.add_edge("ann", "bob", type="knows")
+m.add_edge("ann", "acme", type="works_at")
+m.add_edge("bob", "acme", type="works_at")
+rows = m.match("(a:Person)-[w:works_at]->(c:Company)<-[:works_at]-(b)")   # Cypher-like
+assert sorted((r["a"].id, r["b"].id) for r in rows) == [("ann", "bob"), ("bob", "ann")]
+rows = m.match("(a)-[p:knows|works_at*1..2]->(b {age: 30})", ids={"a": "ann"}, where={"b": label("Person")})
+assert [len(r["p"]) for r in rows] == [1]                                 # p: list of Edges
+paths = m["ann"].paths(1, 2, types=["knows", "works_at"])                 # Path objects
+assert [p.ids() for p in paths] == [["ann", "bob"], ["ann", "bob", "acme"], ["ann", "acme"]]
+```
+
+- `vertex.match(pattern, *, where={name: Expr}, ids={name: id or [ids]}, limit=None)`: one dict per match, `{name: Node | Edge | list[Edge]}` for the named variables.
+  - Nodes: `(name:Label1:Label2 {key: 'value', n: 1})`.
+  - Edges: `-[name:T1|T2*min..max]->`, `<-[...]-` or `-[...]-` (either direction), and `-->` / `<--` / `--`.
+  - Lengths: `*`, `*n`, `*n..m`, `*..m` or `*n..`.
+  - Comma-separated paths share variables.
+  - Each edge variable binds a different edge (Cypher); nodes may repeat.
+  - Anchor large graphs with a label, `ids` or a condition.
+- `node.paths(min_hops=1, max_hops=None, *, direction="out", types=None, where=None, uniqueness="trail", limit=None)`: `Path` objects with `.nodes`, `.edges`, `.ids()`, and `len()` = the number of edges.
+  - `uniqueness`: "trail" (no edge twice), "path" (no node twice) or "walk" (needs max_hops).
+- Details: docs/patterns.md.
+
 ## Random walks
 
 ```python
@@ -285,6 +314,6 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 ## More
 
 - [README.md](README.md): overview and examples
-- [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
+- [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/analytics.md](docs/analytics.md), [docs/patterns.md](docs/patterns.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
 - [python/ironweaver/__init__.pyi](python/ironweaver/__init__.pyi): full typed API with docstrings
 - [AGENTS.md](AGENTS.md): source layout for working on the library itself

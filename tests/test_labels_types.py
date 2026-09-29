@@ -78,6 +78,12 @@ def test_reserved_names_in_filters_and_views():
     assert g.project(node_filter=label("Person")).ids() == ["ann", "bob"]
     assert sorted(g.filter(label("Person") & (attr("age") > 30)).keys()) == ["ann"]
     assert g.filter(lambda n: n.has_label("Admin")).keys() == ["ann"]
+    # Expressions and pattern property maps see the fields too
+    assert g.project(edge_filter=attr("type") == "knows").edge_count() == 2
+    assert g.project(edge_filter=attr("type").is_in(["knows", "x"])).edge_count() == 2
+    assert sorted(g.filter(attr("labels") == ["Person", "Admin"]).keys()) == ["ann"]
+    assert len(g.match("(a)-[{type: 'knows'}]->(b)")) == 2
+    assert [m["e"].to_node.id for m in g.match("(a {age: 31})-[e]->(b)", where={"e": ~attr("type").exists()})] == ["acme"]
     assert g.remove_edge("bob", "ann", {"type": "knows"}) == 1
     assert g.remove_edge("ann", "bob", {"type": "other"}) == 0
 

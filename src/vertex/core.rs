@@ -321,6 +321,33 @@ impl Vertex {
         Edge::handle(slf.py(), &slf.clone().unbind(), ix)
     }
 
+    /// Every occurrence of a pattern, as a list of dicts ``{name: Node | Edge |
+    /// list[Edge]}`` (named variables only)
+    ///
+    /// The pattern is Cypher-like: ``(a:Person {name: "Ann"})-[k:KNOWS*1..3]->(b)``,
+    /// with ``<-[...]-`` and ``-[...]-`` (either direction), ``-->`` / ``<--`` /
+    /// ``--``, several paths separated by commas, and a name used twice meaning
+    /// the same node. Each edge variable binds a different edge; nodes may repeat.
+    ///
+    /// Args:
+    ///     pattern (str): The pattern.
+    ///     where (dict, optional): ``{name: Expr}`` extra conditions per variable.
+    ///     ids (dict, optional): ``{name: id or [ids]}`` fixes node variables.
+    ///     limit (int, optional): Stop after this many matches.
+    ///
+    /// Raises:
+    ///     ValueError: An invalid pattern or an unknown variable name
+    #[pyo3(name = "match", signature = (pattern, *, r#where=None, ids=None, limit=None))]
+    fn match_pattern(
+        slf: &Bound<'_, Self>,
+        pattern: &str,
+        r#where: Option<Bound<'_, PyDict>>,
+        ids: Option<Bound<'_, PyDict>>,
+        limit: Option<usize>,
+    ) -> PyResult<Py<PyList>> {
+        super::query::match_pattern(slf, pattern, r#where.as_ref(), ids.as_ref(), limit)
+    }
+
     /// Nodes carrying ``label``, in graph order (uses the label index)
     fn nodes_with_label(slf: &Bound<'_, Self>, label: &str) -> PyResult<Vec<Py<Node>>> {
         let vertex = slf.clone().unbind();

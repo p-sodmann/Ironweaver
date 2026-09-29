@@ -351,6 +351,23 @@ class Node:
         follows; *depth* bounds the path length.
         """
         ...
+    def paths(
+        self,
+        min_hops: int = ...,
+        max_hops: int | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+        types: str | list[str] | None = ...,
+        where: Expr | None = ...,
+        uniqueness: Literal["trail", "path", "walk"] = ...,
+        limit: int | None = ...,
+    ) -> list[Path]:
+        """Every path from this node with *min_hops*..*max_hops* edges, depth
+        first. *uniqueness*: "trail" (no edge twice; default), "path" (no
+        node twice) or "walk" (needs *max_hops*). *types* / *where* restrict
+        the edges followed; *limit* caps the number of paths.
+        """
+        ...
     def attr_get(self, key: str) -> Any | None:
         """Return attr[key], or None if the key does not exist."""
         ...
@@ -367,19 +384,20 @@ class Node:
 
 @final
 class Path:
-    """An ordered sequence of nodes.
+    """A path: its nodes in order and the edges between them.
 
-    .. note::
-        No current public API method returns a ``Path`` object directly.
-        ``shortest_path_bfs`` and the traversal methods return a
-        :class:`Vertex` subgraph; use ``result.meta["nodelist"]`` for the
-        ordered node-ID list. ``Path`` is reserved for future use.
+    Returned by :meth:`Node.paths`. ``len(path)`` is the number of edges.
     """
 
     nodes: list[Node]
+    edges: list[Edge]
 
-    def __new__(cls, nodes: list[Node] | None) -> Path: ...
+    def __new__(cls, nodes: list[Node] | None = ..., edges: list[Edge] | None = ...) -> Path: ...
+    def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
+    def ids(self) -> list[str]:
+        """The node ids in order."""
+        ...
     def toJSON(self) -> list[str]:
         """Return the list of node IDs along this path."""
         ...
@@ -702,6 +720,22 @@ class Vertex:
         ...
     def nodes_with_label(self, label: str) -> list[Node]:
         """Nodes carrying *label*, in graph order (label index)."""
+        ...
+    def match(
+        self,
+        pattern: str,
+        *,
+        where: dict[str, Expr] | None = ...,
+        ids: dict[str, str | list[str]] | None = ...,
+        limit: int | None = ...,
+    ) -> list[dict[str, Node | Edge | list[Edge]]]:
+        """Every occurrence of a Cypher-like pattern, e.g.
+        ``"(a:Person {name: 'Ann'})-[k:KNOWS*1..3]->(b)"``: one dict per match
+        from variable name to Node, Edge, or list of Edges (variable-length).
+        Each pattern edge binds a different edge; nodes may repeat.
+        *where* adds Expr conditions per variable, *ids* fixes node
+        variables, *limit* caps the matches. See docs/patterns.md.
+        """
         ...
     def remove_node(self, id: str) -> Node:
         """Remove a node and every edge attached to it.

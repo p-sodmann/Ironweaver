@@ -143,6 +143,16 @@ Below is a quick guide to notable functions and where to find them.
     sampling).
   - `mod.rs` helpers: `ordered_sum` (parallel sums independent of the
     thread count), `mix` (per-item seeds), `random_seed`.
+- **query/** – query primitives for a query engine.
+  - `paths.rs`: `expand_paths` (variable-length paths, `Hops` min / max,
+    `Uniqueness` walk / trail / path, streamed to a visitor), `steps`
+    (one step in a direction; `Both` lists self-loops once).
+  - `pattern.rs`: `Pattern` / `NodePattern` / `EdgePattern`,
+    `Pattern::parse` (Cypher-like text: labels, types, `*min..max`,
+    `{key: value}`), `add_filter`, `bind_ids`.
+  - `matcher.rs`: `for_each_match` / `find_matches` (backtracking; plan
+    from the most selective node; edges distinct per match, nodes may
+    repeat), `Match`, `Bound`. Tests compare with brute force.
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `WalkPlan::items`,
   `random_walks` convenience.
@@ -182,11 +192,11 @@ Below is a quick guide to notable functions and where to find them.
   missing parentheses; nesting capped, `&` / `|` chains flattened).
 - **node.rs** – `Node` handle: getters/setters, `labels` / `add_label` /
   `remove_label` / `has_label`, `_traverse` (wrapped as `traverse` in
-  `__init__.py`), `bfs`, `bfs_search`, `attr_get`, `attr_set`,
+  `__init__.py`), `bfs`, `bfs_search`, `paths`, `attr_get`, `attr_set`,
   `attr_list_append`; `edge_predicate` (dict / callable edge filters).
 - **edge.rs** – `Edge` handle: `id` (the `EdgeId`), `type`, getters/setters,
   `attr_get`, `attr_set`, `toJSON`.
-- **path.rs** – `Path`. **observed_dictionary.rs** – `ObservedDictionary`.
+- **path.rs** – `Path` (nodes and edges of a path; `Node.paths`). **observed_dictionary.rs** – `ObservedDictionary`.
 - **projection.rs** – the `Projection` class (queries and analytics
   methods release the GIL),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
@@ -197,7 +207,7 @@ Below is a quick guide to notable functions and where to find them.
   object creation.
 - **vertex/core.rs** – the `Vertex` class: constructors (`new`, `from_nodes`,
   `from_nodes_with_path`), `add_node` (`labels=`), `add_edge` (`type=`),
-  `get_node`, `get_edge`, `nodes_with_label`, `has_node`,
+  `get_node`, `get_edge`, `nodes_with_label`, `match`, `has_node`,
   `node_count`, `nodes`, GC support (`__traverse__` / `__clear__`), and thin
   wrappers around the modules below.
 - **vertex/manipulation.rs** – `remove_node`, `remove_edge`.
@@ -211,6 +221,9 @@ Below is a quick guide to notable functions and where to find them.
   `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
 - **vertex/analysis.rs** – `get_metadata`, `to_networkx`.
 - **vertex/callbacks.rs** – `fire` (runs a callback list).
+- **vertex/query.rs** – `match_pattern` (`Vertex.match`: `where` Exprs,
+  `ids`, results as Node / Edge / list[Edge]) and `node_paths`
+  (`Node.paths`, returns `Path`s).
 
 - **python/ironweaver/lgf_parser.py**
   - `parse_lgf`, `parse_lgf_file`
