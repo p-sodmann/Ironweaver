@@ -156,6 +156,8 @@ pub struct Symbol(u32);
 pub struct Symbols {
     names: Vec<Box<str>>,
     index: StrMap<Box<str>, Symbol>,
+    /// Bytes of the names, counted twice (list and index).
+    name_bytes: usize,
 }
 
 impl Symbols {
@@ -170,6 +172,7 @@ impl Symbols {
         let s = Symbol(u32::try_from(self.names.len()).expect("too many labels and types"));
         self.names.push(name.into());
         self.index.insert(name.into(), s);
+        self.name_bytes += 2 * name.len();
         s
     }
 
@@ -348,7 +351,7 @@ impl<T> Arena<T> {
 ///
 /// Iteration order is slot order: insertion order until nodes are removed,
 /// after which new nodes reuse the freed slots.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Graph<N, E> {
     nodes: Arena<Node<N>>,
     edges: Arena<Edge<E>>,
@@ -361,6 +364,42 @@ pub struct Graph<N, E> {
     labeled: HashMap<Symbol, IxSet<NodeIx>>,
     /// Property indexes (see `index.rs`).
     pub(crate) indexes: Indexes,
+    /// Heap bytes that grow with the graph, kept up to date by every change
+    /// so `memory_usage` is O(1): each live node's id, labels and adjacency
+    /// lists, the id index's keys and the label sets.
+    heap: usize,
+}
+
+impl<N: Clone, E: Clone> Clone for Graph<N, E> {
+    fn clone(&self) -> Self {
+        let mut g = Graph {
+            nodes: self.nodes.clone(),
+            edges: self.edges.clone(),
+            index: self.index.clone(),
+            edge_index: self.edge_index.clone(),
+            next_edge_id: self.next_edge_id,
+            symbols: self.symbols.clone(),
+            labeled: self.labeled.clone(),
+            indexes: self.indexes.clone(),
+            heap: 0,
+        };
+        // Cloned strings and lists have other capacities
+        g.recount();
+        g
+    }
+}
+
+/// Heap bytes of a node's id, labels and adjacency lists.
+fn node_heap<N>(n: &Node<N>) -> usize {
+    use std::mem::size_of;
+    n.id.capacity()
+        + n.labels.capacity() * size_of::<Symbol>()
+        + (n.out.capacity() + n.inc.capacity()) * size_of::<EdgeIx>()
+}
+
+/// Heap bytes of a label's node set.
+fn label_set_heap(set: &IxSet<NodeIx>) -> usize {
+    hash_table_bytes(set.capacity(), std::mem::size_of::<NodeIx>())
 }
 
 impl<N, E> Default for Graph<N, E> {
@@ -384,6 +423,7 @@ impl<N, E> Graph<N, E> {
             symbols: Symbols::default(),
             labeled: HashMap::new(),
             indexes: Indexes::default(),
+            heap: 0,
         }
     }
 
@@ -423,6 +463,7 @@ impl<N, E> Graph<N, E> {
             .nodes
             .insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data }, "nodes")?;
         let ix = NodeIx { slot, generation };
+        self.heap += id.capacity() + node_heap(self.node_ref_mut(ix));
         self.index.insert(id, ix);
         self.indexes.touch(ix);
         Ok(ix)
@@ -536,8 +577,14 @@ impl<N, E> Graph<N, E> {
         match labels.binary_search(&sym) {
             Ok(_) => Ok(false),
             Err(at) => {
+                let before = labels.capacity();
                 labels.insert(at, sym);
-                self.labeled.entry(sym).or_default().insert(ix);
+                let grown = (labels.capacity() - before) * std::mem::size_of::<Symbol>();
+                let set = self.labeled.entry(sym).or_default();
+                let before = label_set_heap(set);
+                set.insert(ix);
+                let grown = grown + label_set_heap(set) - before;
+                self.heap += grown;
                 Ok(true)
             }
         }
@@ -580,21 +627,31 @@ impl<N, E> Graph<N, E> {
 
     fn unindex_label(&mut self, sym: Symbol, ix: NodeIx) {
         if let Some(set) = self.labeled.get_mut(&sym) {
+            // A hash set's capacity can change on removal too
+            self.heap -= label_set_heap(set);
             set.remove(&ix);
             if set.is_empty() {
                 self.labeled.remove(&sym);
+            } else {
+                self.heap += label_set_heap(set);
             }
         }
     }
 
     pub(crate) fn attach_out(&mut self, ix: EdgeIx) {
         let from = self.edge_ref(ix).from;
-        self.node_ref_mut(from).out.push(ix);
+        let out = &mut self.node_ref_mut(from).out;
+        let before = out.capacity();
+        out.push(ix);
+        self.heap += (out.capacity() - before) * std::mem::size_of::<EdgeIx>();
     }
 
     pub(crate) fn attach_in(&mut self, ix: EdgeIx) {
         let to = self.edge_ref(ix).to;
-        self.node_ref_mut(to).inc.push(ix);
+        let inc = &mut self.node_ref_mut(to).inc;
+        let before = inc.capacity();
+        inc.push(ix);
+        self.heap += (inc.capacity() - before) * std::mem::size_of::<EdgeIx>();
     }
 
     pub fn node_ix(&self, id: &str) -> Option<NodeIx> {
@@ -649,16 +706,20 @@ impl<N, E> Graph<N, E> {
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateNode(id));
         }
-        self.index.remove(&old);
-        self.index.insert(id.clone(), ix);
-        self.node_ref_mut(ix).id = id;
+        let (old_key, _) = self.index.remove_entry(&old).expect("live nodes are indexed");
+        let key = id.clone();
+        self.heap = self.heap + key.capacity() + id.capacity() - old_key.capacity();
+        self.index.insert(key, ix);
+        let old_id = std::mem::replace(&mut self.node_ref_mut(ix).id, id);
+        self.heap -= old_id.capacity();
         Ok(())
     }
 
     /// Remove a node and every edge attached to it; returns its id and payload.
     pub fn remove_node(&mut self, ix: NodeIx) -> Option<(String, N)> {
         let node = self.nodes.remove(ix.slot, ix.generation)?;
-        self.index.remove(&node.id);
+        let (key, _) = self.index.remove_entry(&node.id).expect("live nodes are indexed");
+        self.heap -= key.capacity() + node_heap(&node);
         self.indexes.remove(ix);
         for &label in &node.labels {
             self.unindex_label(label, ix);
@@ -715,26 +776,42 @@ impl<N, E> Graph<N, E> {
     /// the id, edge-id and label indexes and the property indexes. Memory
     /// that payloads own elsewhere (attribute maps, Python objects) is not
     /// counted.
+    ///
+    /// O(1) (O(number of property indexes)): the parts that grow with the
+    /// graph are counted as it changes, so this is cheap enough to call on
+    /// every write.
     pub fn memory_usage(&self) -> usize {
+        self.fixed_memory() + self.heap + self.indexes.memory_usage()
+    }
+
+    /// The parts of `memory_usage` read off capacities.
+    fn fixed_memory(&self) -> usize {
         use std::mem::size_of;
         let mut total = size_of::<Self>();
         total += self.nodes.slots.capacity() * size_of::<Slot<Node<N>>>() + self.nodes.free.capacity() * 4;
         total += self.edges.slots.capacity() * size_of::<Slot<Edge<E>>>() + self.edges.free.capacity() * 4;
-        for (_, n) in self.nodes() {
-            total += n.id.capacity() + n.labels.capacity() * size_of::<Symbol>();
-            total += (n.out.capacity() + n.inc.capacity()) * size_of::<EdgeIx>();
-        }
-        // The id index holds a second copy of every id
         total += hash_table_bytes(self.index.capacity(), size_of::<(String, NodeIx)>());
-        total += self.index.keys().map(String::capacity).sum::<usize>();
         total += self.edge_index.dense.capacity() * 4;
         total += hash_table_bytes(self.edge_index.sparse.capacity(), size_of::<(EdgeId, u32)>());
-        total += self.symbols.names.iter().map(|n| 2 * n.len()).sum::<usize>();
+        total += self.symbols.name_bytes;
         total += self.symbols.names.capacity() * size_of::<Box<str>>();
         total += hash_table_bytes(self.symbols.index.capacity(), size_of::<(Box<str>, Symbol)>());
-        total += hash_table_bytes(self.labeled.capacity(), size_of::<(Symbol, IxSet<NodeIx>)>());
-        total += self.labeled.values().map(|s| hash_table_bytes(s.capacity(), size_of::<NodeIx>())).sum::<usize>();
-        total + self.indexes.memory_usage()
+        total + hash_table_bytes(self.labeled.capacity(), size_of::<(Symbol, IxSet<NodeIx>)>())
+    }
+
+    /// The counted heap bytes, recomputed (O(n)).
+    fn count_heap(&self) -> usize {
+        let nodes: usize = self.nodes().map(|(_, n)| node_heap(n)).sum();
+        // The id index holds a second copy of every id
+        let keys: usize = self.index.keys().map(String::capacity).sum();
+        nodes + keys + self.labeled.values().map(label_set_heap).sum::<usize>()
+    }
+
+    /// Recompute the counters behind `memory_usage` (after bulk changes
+    /// that bypass them).
+    fn recount(&mut self) {
+        self.heap = self.count_heap();
+        self.indexes.recount();
     }
 
     /// All nodes, in slot order.
@@ -845,6 +922,8 @@ impl<N, E> Graph<N, E> {
         }
         // Ids of edges that were not copied stay unused in the subgraph too
         out.reserve_edge_ids(self.next_edge_id());
+        // Labels and adjacency lists were set directly
+        out.recount();
         Ok(out)
     }
 }
@@ -1016,5 +1095,87 @@ mod tests {
         // At least the ids (twice), slots and adjacency entries
         assert!(m > 1000 * (2 * 7 + 2 * std::mem::size_of::<EdgeIx>()), "{m}");
         assert!(m < 1000 * 400, "{m}");
+    }
+
+    /// The incremental counters equal a full recount.
+    fn check_counters<N: Clone, E: Clone>(g: &Graph<N, E>) {
+        assert_eq!(g.heap, g.count_heap());
+        let mut fresh = g.indexes.clone();
+        fresh.recount();
+        for (a, b) in g.indexes.list_heaps().zip(fresh.list_heaps()) {
+            assert_eq!(a, b);
+        }
+        assert_eq!(g.memory_usage(), g.fixed_memory() + g.count_heap() + g.indexes.memory_usage());
+    }
+
+    #[test]
+    fn memory_counters_follow_every_change() {
+        use crate::{Record, Value};
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let mut g: Graph<Record, Record> = Graph::new();
+        g.create_index::<GraphError>(&["k".to_string()]).unwrap();
+        let mut ids: Vec<String> = Vec::new();
+        for step in 0..4000 {
+            let live: Vec<NodeIx> = g.node_indices().collect();
+            let pick = |rng: &mut rand::rngs::StdRng| live[rng.gen_range(0..live.len())];
+            match rng.gen_range(0..10) {
+                0..=2 => {
+                    let id = format!("node-{step}-{}", "x".repeat(rng.gen_range(0..20)));
+                    let mut id_with_room = String::with_capacity(id.len() + rng.gen_range(0..8));
+                    id_with_room.push_str(&id);
+                    let value = match rng.gen_range(0..3) {
+                        0 => Value::from(rng.gen_range(0..5)),
+                        1 => Value::from(format!("text{}", rng.gen_range(0..5))),
+                        _ => Value::None,
+                    };
+                    g.add_node(id_with_room, Record::with_attr([("k", value)])).unwrap();
+                    ids.push(id);
+                }
+                3 | 4 if !live.is_empty() => {
+                    let (a, b) = (pick(&mut rng), pick(&mut rng));
+                    g.add_edge(a, b, Record::default()).unwrap();
+                }
+                5 if !live.is_empty() => {
+                    let a = pick(&mut rng);
+                    let label = ["A", "B", "C", "D"][rng.gen_range(0..4)];
+                    if rng.gen_bool(0.6) {
+                        g.add_label(a, label).unwrap();
+                    } else {
+                        g.remove_label(a, label).unwrap();
+                    }
+                }
+                6 if !live.is_empty() => {
+                    let a = pick(&mut rng);
+                    g.remove_node(a).unwrap();
+                }
+                7 if g.edge_count() > 0 => {
+                    let edges: Vec<EdgeIx> = g.edges().map(|(e, _)| e).collect();
+                    g.remove_edge(edges[rng.gen_range(0..edges.len())]).unwrap();
+                }
+                8 if !live.is_empty() => {
+                    let a = pick(&mut rng);
+                    let _ = g.rename_node(a, format!("renamed-{step}"));
+                }
+                _ if !live.is_empty() => {
+                    let a = pick(&mut rng);
+                    g.node_mut(a).unwrap().data.attr.insert("k".into(), Value::from(format!("v{}", step % 7)));
+                    g.flush_indexes().unwrap();
+                }
+                _ => {}
+            }
+            assert_eq!(g.heap, g.count_heap(), "step {step}");
+            if step % 50 == 0 {
+                check_counters(&g);
+                let copy = g.clone();
+                check_counters(&copy);
+                let half: Vec<NodeIx> = g.node_indices().step_by(2).collect();
+                let sub =
+                    g.induced_subgraph(half, |n| Ok::<_, GraphError>(n.data.clone()), |e| Ok(e.data.clone())).unwrap();
+                check_counters(&sub);
+            }
+        }
+        check_counters(&g);
+        assert!(g.node_count() > 100);
     }
 }
