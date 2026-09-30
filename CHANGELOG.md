@@ -80,7 +80,8 @@ a query layer and database foundations.
   `indexes`, and `find(name, value)` / `find_range(name, low, high)`
   (which scan when there is no index). `filter(where=...)` and `match` use
   indexes for equality, range and `is_in` conditions. Indexes follow every
-  change made through the graph; they are not saved. In the core:
+  change made through the graph and are saved with it (the indexed paths,
+  in `metadata.indexes`; loading rebuilds them). In the core:
   `Graph::create_index`, `find_nodes`, `find_nodes_in_range`,
   `index_candidates`, with exact results while payload changes are pending
   (`flush_indexes`).

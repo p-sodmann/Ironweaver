@@ -59,7 +59,7 @@ assert [n.id for n in g.find("age", 30)] == ["alice"]
 assert [n.id for n in g.find_range("age", 20, 30, inclusive="left")] == ["bob"]
 ```
 
-- **Indexes:** `find(name, value)` / `find_range(name, low=None, high=None, *, inclusive="both")` work without an index (scan) and use one if it exists; indexes follow changes and are not saved.
+- **Indexes:** `find(name, value)` / `find_range(name, low=None, high=None, *, inclusive="both")` work without an index (scan) and use one if it exists; indexes follow changes and are saved with the graph (loading rebuilds them).
 - **Graph fields:** labels, types and edge ids are fields on the graph. Filters, projections and algorithms match them without reading attributes.
 - **Old attribute names still work:** `"labels"` (a list of str) and `"type"` (a str) as attribute names are mapped onto the fields by `add_node` / `add_edge`, by `attr` / `attr_get` / `attr_set`, and by dict filters.
 - **Nodes have no type:** a node's `attr["type"]` stays an ordinary attribute.

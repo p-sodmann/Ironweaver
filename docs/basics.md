@@ -100,7 +100,7 @@ g.drop_index("city")
 - Only scalar values are indexed; lists, dicts, None and NaN never match, as in filter expressions.
 - `filter(where=...)` and `match` use indexes on the attributes they compare (equality, ranges, `is_in`), and `match` starts from the pattern node with the fewest candidates.
 - Indexes follow changes made through the graph (`add_node(s)`, `attr_set`, assigning `attr`, `remove_node`). Changing a list or dict *inside* an attribute value in place doesn't count, but such values aren't indexed anyway.
-- Indexes are not saved with the graph: create them again after loading.
+- Indexes are saved with the graph (which attributes are indexed, not the index contents): loading a file rebuilds them.
 
 ### Serialization
 

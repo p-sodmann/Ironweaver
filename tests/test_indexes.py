@@ -130,3 +130,26 @@ def test_memory_usage():
     assert deep > structure + 1000 * 100
     g.create_index("name")
     assert g.memory_usage() > structure
+
+
+@pytest.mark.parametrize("fmt", ["json", "bin", "json_str"])
+def test_indexes_are_saved_and_rebuilt(tmp_path, fmt):
+    g = iw.Vertex()
+    for i in range(20):
+        g.add_node(f"n{i}", {"age": i % 5, "city": ["Oslo", "Rome"][i % 2]})
+    g.create_index("age")
+    g.create_index("city")
+    if fmt == "json":
+        g.save_to_json(str(tmp_path / "g.json"))
+        h = iw.Vertex.load_from_json(str(tmp_path / "g.json"))
+    elif fmt == "json_str":
+        h = iw.Vertex.load_from_json(g.save_to_json())
+    else:
+        g.save_to_binary(str(tmp_path / "g.bin"))
+        h = iw.Vertex.load_from_binary(str(tmp_path / "g.bin"))
+    assert h.indexes == ["age", "city"]
+    assert [n.id for n in h.find("age", 3)] == ["n3", "n8", "n13", "n18"]
+    assert len(h.find("city", "Rome")) == 10
+    # Still follows changes after loading
+    h["n0"].attr_set("age", 3)
+    assert [n.id for n in h.find("age", 3)] == ["n0", "n3", "n8", "n13", "n18"]

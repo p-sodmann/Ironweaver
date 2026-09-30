@@ -8,10 +8,14 @@
 //     edges:    { edge_id: { id, from_id, to_id, type, attr, meta } },
 //     meta:     { .. },
 //     metadata: { version: "2.0", node_count, edge_count, timestamp,
-//                 next_edge_id } }
+//                 next_edge_id, indexes } }
 //
 // Edge ids are the `EdgeId`s in decimal; `next_edge_id` (a decimal string)
-// keeps ids of removed edges from being reused after loading. Every
+// keeps ids of removed edges from being reused after loading. `indexes`
+// (only written if there are any) lists the property index paths, each a
+// list of strings; loaders recreate the indexes (definitions only: the
+// contents are rebuilt from the nodes). Readers that don't know it ignore
+// it, and files without it load with no indexes. Every
 // attribute value is an externally tagged `Value` (e.g. `{"Float": 1.5}`).
 //
 // Binary files are framed:
@@ -194,19 +198,21 @@ pub fn from_binary(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), Graph
 /// and its graph-level meta, without holding the whole file in memory
 /// (see [`LoadGraph::build_from_reader`]).
 pub fn from_binary_reader(reader: impl std::io::Read) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
-    let (graph, meta) = LoadGraph::build_from_reader(
+    let (mut graph, meta) = LoadGraph::build_from_reader(
         reader,
         |n| Ok::<_, GraphError>(Record { attr: n.attr().to_attrs(), meta: n.meta().to_attrs() }),
         |e| Ok(Record { attr: e.attr().to_attrs(), meta: e.meta().to_attrs() }),
     )?;
+    graph.flush_indexes()?;
     Ok((graph, meta.to_attrs()))
 }
 
 fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
-    let graph = doc.build(
+    let mut graph = doc.build(
         |n| Ok::<_, GraphError>(Record { attr: n.attr().to_attrs(), meta: n.meta().to_attrs() }),
         |e| Ok(Record { attr: e.attr().to_attrs(), meta: e.meta().to_attrs() }),
     )?;
+    graph.flush_indexes()?;
     Ok((graph, doc.meta().to_attrs()))
 }
 

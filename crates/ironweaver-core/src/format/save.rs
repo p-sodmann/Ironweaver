@@ -326,6 +326,8 @@ struct Metadata<'a> {
     edge_count: usize,
     next_edge_id: u64,
     timestamp: &'a Timestamp,
+    /// Paths of the property indexes (definitions only; loaders rebuild them).
+    indexes: Vec<&'a [String]>,
 }
 
 impl Serialize for Metadata<'_> {
@@ -345,6 +347,10 @@ impl Serialize for Metadata<'_> {
         }
         // A string: the full u64 range doesn't fit an Int
         entries.push(("next_edge_id", Value::String(self.next_edge_id.to_string())));
+        if !self.indexes.is_empty() {
+            let path = |p: &&[String]| Value::List(p.iter().map(|k| Value::String(k.clone())).collect());
+            entries.push(("indexes", Value::List(self.indexes.iter().map(path).collect())));
+        }
         let mut map = s.serialize_map(Some(entries.len()))?;
         for (k, value) in &entries {
             map.serialize_entry(k, &Tagged { value, half: false, depth: 1 })?;
@@ -469,6 +475,7 @@ impl<N, E, C: Codec<N, E>> Serialize for GraphWriter<'_, N, E, C> {
                 edge_count: self.graph.edge_count(),
                 next_edge_id: self.graph.next_edge_id().0,
                 timestamp: &self.timestamp,
+                indexes: self.graph.index_paths(),
             },
         )?;
         st.end()

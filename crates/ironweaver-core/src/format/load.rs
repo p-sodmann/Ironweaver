@@ -503,6 +503,12 @@ impl<'a> LoadGraph<'a> {
         self.version
     }
 
+    /// Paths of the property indexes saved with the graph (`metadata.indexes`;
+    /// none for files without it).
+    pub fn index_paths(&self) -> Result<Vec<Vec<String>>, GraphError> {
+        index_paths(&self.metadata)
+    }
+
     /// The graph-level `meta` map.
     pub fn meta(&self) -> &LoadAttrs<'a> {
         &self.meta
@@ -528,6 +534,11 @@ impl<'a> LoadGraph<'a> {
     /// lists its edges in the order of its `edge_ids` / `inverse_edge_ids`,
     /// so edge order survives a round trip; edges missing from those lists
     /// (hand-written or older files) are appended.
+    ///
+    /// Property indexes saved with the graph are recreated, empty and with
+    /// every node marked dirty (lookups are exact meanwhile, but read the
+    /// nodes): call [`Graph::flush_indexes`] to fill them in (the `Record`
+    /// loaders in [`format`](crate::format) do).
     pub fn build<'s, N, E, X>(
         &'s self,
         mut make_node: impl FnMut(&'s LoadNode<'a>) -> Result<N, X>,
@@ -571,6 +582,7 @@ impl<'a> LoadGraph<'a> {
                 graph.reserve_edge_ids(EdgeId(next));
             }
         }
+        restore_indexes(&mut graph, &self.metadata)?;
 
         let mut out_done = vec![false; edge_ixs.len()];
         let mut in_done = vec![false; edge_ixs.len()];
@@ -603,4 +615,35 @@ impl<'a> LoadGraph<'a> {
         }
         Ok(graph)
     }
+}
+
+/// The index paths in a document's `metadata.indexes`: a list of paths,
+/// each a list of strings.
+pub(super) fn index_paths(metadata: &LoadAttrs<'_>) -> Result<Vec<Vec<String>>, GraphError> {
+    let bad = || GraphError::Format("metadata.indexes must be a list of lists of strings".into());
+    let Some(value) = metadata.get("indexes") else { return Ok(Vec::new()) };
+    let LoadKind::List(paths) = value.kind() else { return Err(bad()) };
+    paths
+        .iter()
+        .map(|p| match p.kind() {
+            LoadKind::List(keys) => keys
+                .iter()
+                .map(|k| match k.kind() {
+                    LoadKind::String(s) => Ok(s.to_owned()),
+                    _ => Err(bad()),
+                })
+                .collect(),
+            _ => Err(bad()),
+        })
+        .collect()
+}
+
+/// Recreate the saved property indexes, empty: every node is marked dirty,
+/// so lookups are exact at once (they read the nodes) and
+/// `Graph::flush_indexes` fills them in.
+pub(super) fn restore_indexes<N, E>(graph: &mut Graph<N, E>, metadata: &LoadAttrs<'_>) -> Result<(), GraphError> {
+    for path in index_paths(metadata)? {
+        graph.create_index_with_keys(&path, std::iter::empty())?;
+    }
+    Ok(())
 }

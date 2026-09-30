@@ -222,6 +222,9 @@ Below is a quick guide to notable functions and where to find them.
     saves are deterministic); `with_timestamp`; `tagged` encoders.
   - `load.rs`: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
     borrowed structs, `LoadGraph::build` makes the `Graph`.
+    `metadata.indexes` (written by `save.rs` only if there are indexes)
+    holds the property index paths; `restore_indexes` recreates them empty
+    and dirty, the `Record` loaders flush them and the bindings `reindex`.
   - `stream.rs`: `LoadGraph::build_from_reader` decodes a binary file from
     a `Read` (postcard flavor `Framed`: CRC32 of all but the last 16 bytes,
     trailer checked at the end) and builds the graph entry by entry;

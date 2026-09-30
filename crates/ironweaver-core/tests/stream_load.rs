@@ -249,3 +249,49 @@ fn crafted_deep_values_are_rejected() {
     let err = format::from_binary_reader(&framed[..]).err().unwrap();
     assert!(err.to_string().contains("nested more than"), "{err}");
 }
+
+#[test]
+fn index_definitions_are_saved_and_rebuilt() {
+    let path = |p: &str| p.split('.').map(str::to_owned).collect::<Vec<_>>();
+    let mut g = sample(30);
+    assert!(g.create_index::<GraphError>(&path("i")).unwrap());
+    assert!(g.create_index::<GraphError>(&path("nested.day")).unwrap());
+    let meta = Attrs::new();
+    let bin = format::to_binary(&g, &meta, false).unwrap();
+    let json = format::to_json(&g, &meta, false).unwrap();
+    let text = String::from_utf8(json.clone()).unwrap();
+    assert!(
+        text.contains(
+            r#""indexes":{"List":[{"List":[{"String":"i"}]},{"List":[{"String":"nested"},{"String":"day"}]}]}"#
+        ),
+        "{text}"
+    );
+    assert_eq!(LoadGraph::from_json_slice(&json).unwrap().index_paths().unwrap(), [path("i"), path("nested.day")]);
+    for loaded in [
+        format::from_binary(&bin).unwrap().0,
+        format::from_binary_reader(&bin[..]).unwrap().0,
+        format::from_json(&json).unwrap().0,
+    ] {
+        assert_eq!(loaded.index_paths(), [path("i").as_slice(), path("nested.day").as_slice()]);
+        assert!(!loaded.indexes_dirty());
+        let found = loaded.find_nodes(&path("i"), &Value::from(7)).unwrap().unwrap();
+        assert_eq!(found.iter().map(|&n| loaded.node(n).unwrap().id()).collect::<Vec<_>>(), ["n7"]);
+    }
+    // The generic builder leaves them dirty but exact
+    let doc = LoadGraph::from_binary_slice(&bin).unwrap();
+    let built: G = doc
+        .build(
+            |n| Ok::<_, GraphError>(Record { attr: n.attr().to_attrs(), meta: Attrs::new() }),
+            |_| Ok(Record::default()),
+        )
+        .unwrap();
+    assert!(built.indexes_dirty());
+    assert_eq!(built.find_nodes(&path("i"), &Value::from(7)).unwrap().unwrap().len(), 1);
+
+    // No indexes: no field, so files without indexes are unchanged
+    let plain = String::from_utf8(format::to_json(&sample(3), &meta, false).unwrap()).unwrap();
+    assert!(!plain.contains("indexes"));
+    // A malformed field is a format error
+    let bad = text.replacen(r#"{"String":"i"}"#, r#"{"Int":1}"#, 1);
+    assert!(matches!(format::from_json(bad.as_bytes()), Err(GraphError::Format(_))));
+}

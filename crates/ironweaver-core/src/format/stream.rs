@@ -265,8 +265,9 @@ where
     }
 
     /// List every edge on its endpoints, in the saved order (see
-    /// `LoadGraph::build`), and keep removed ids unused.
-    fn finish(mut self, metadata: &LoadAttrs<'_>) -> Graph<N, E> {
+    /// `LoadGraph::build`), keep removed ids unused and recreate the
+    /// saved indexes.
+    fn finish(mut self, metadata: &LoadAttrs<'_>) -> Result<Graph<N, E>, GraphError> {
         let g = &mut self.graph;
         if let Some(LoadKind::String(next)) = metadata.get("next_edge_id").map(LoadValue::kind) {
             if let Ok(next) = next.parse() {
@@ -303,7 +304,8 @@ where
                 g.attach_in(e);
             }
         }
-        self.graph
+        super::load::restore_indexes(&mut self.graph, metadata)?;
+        Ok(self.graph)
     }
 }
 
@@ -466,7 +468,7 @@ impl LoadGraph<'_> {
             return Err(x);
         }
         let (meta, metadata) = decoded.map_err(super::postcard_error)?;
-        let graph = builder.finish(&metadata);
+        let graph = builder.finish(&metadata)?;
         Ok((graph, meta.into_owned()))
     }
 }

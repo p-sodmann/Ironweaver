@@ -765,10 +765,10 @@ class Vertex:
         """Index node attribute *name* for fast :meth:`find` / :meth:`find_range`.
 
         ``filter(where=...)`` and :meth:`match` use indexes automatically.
-        The index follows every change made through the graph's methods; it
-        is not saved with the graph. Only scalar values are indexed (numbers,
-        strings, bools, bytes, dates, datetimes). Returns False if the index
-        already existed.
+        The index follows every change made through the graph's methods, and
+        is saved with the graph (its definition; loading rebuilds it). Only
+        scalar values are indexed (numbers, strings, bools, bytes, dates,
+        datetimes). Returns False if the index already existed.
         """
         ...
     def drop_index(self, name: str) -> bool:
