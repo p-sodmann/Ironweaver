@@ -36,10 +36,15 @@
 // asking a `Codec` to encode the payloads. Loading parses into borrowed
 // structs (`LoadGraph`; strings point into the input buffer wherever
 // possible) and `LoadGraph::build` turns them into a `Graph`, with payloads
-// made by the caller.
+// made by the caller. Binary files can also load from a reader
+// (`LoadGraph::build_from_reader`, `stream.rs`), building the graph while
+// decoding, so the file's bytes and the graph are never in memory at once.
+// Attribute maps are written sorted by key, so equal graphs save to equal
+// bytes (see `GraphWriter`).
 
 mod load;
 mod save;
+mod stream;
 
 /// The format version written.
 pub const FORMAT_VERSION: &str = "2.0";
@@ -105,6 +110,36 @@ fn binary_trailer(len: u64, crc: u32) -> [u8; TRAILER_LEN] {
     t
 }
 
+fn bad_binary(what: &str) -> GraphError {
+    GraphError::Format(format!("invalid ironweaver binary file: {}", what))
+}
+
+/// Check the version in a binary file's header.
+fn check_version(header: &[u8]) -> Result<(), GraphError> {
+    let version = u16::from_le_bytes([header[8], header[9]]);
+    if version != 2 {
+        return Err(GraphError::Format(format!(
+            "binary format version {} is not supported (written by a newer ironweaver?)",
+            version
+        )));
+    }
+    Ok(())
+}
+
+/// Check a binary file's trailer against the payload's length and CRC32.
+fn check_trailer(trailer: &[u8], len: u64, crc: u32) -> Result<(), GraphError> {
+    if &trailer[12..] != END {
+        return Err(bad_binary("truncated (no trailer)"));
+    }
+    if u64::from_le_bytes(trailer[..8].try_into().expect("8 bytes")) != len {
+        return Err(bad_binary("length mismatch (truncated?)"));
+    }
+    if u32::from_le_bytes(trailer[8..12].try_into().expect("4 bytes")) != crc {
+        return Err(bad_binary("checksum mismatch (corrupted)"));
+    }
+    Ok(())
+}
+
 /// The postcard payload of a framed binary file (after checking header,
 /// length and checksum), or `None` if `bytes` is not framed (a version 1
 /// bincode file).
@@ -112,29 +147,12 @@ fn binary_payload(bytes: &[u8]) -> Result<Option<&[u8]>, GraphError> {
     if !bytes.starts_with(MAGIC) {
         return Ok(None);
     }
-    let bad = |what: &str| GraphError::Format(format!("invalid ironweaver binary file: {}", what));
     if bytes.len() < HEADER_LEN + TRAILER_LEN {
-        return Err(bad("truncated"));
+        return Err(bad_binary("truncated"));
     }
-    let version = u16::from_le_bytes([bytes[8], bytes[9]]);
-    if version != 2 {
-        return Err(GraphError::Format(format!(
-            "binary format version {} is not supported (written by a newer ironweaver?)",
-            version
-        )));
-    }
+    check_version(&bytes[..HEADER_LEN])?;
     let (body, trailer) = bytes[HEADER_LEN..].split_at(bytes.len() - HEADER_LEN - TRAILER_LEN);
-    if &trailer[12..] != END {
-        return Err(bad("truncated (no trailer)"));
-    }
-    let len = u64::from_le_bytes(trailer[..8].try_into().expect("8 bytes"));
-    let crc = u32::from_le_bytes(trailer[8..12].try_into().expect("4 bytes"));
-    if len != body.len() as u64 {
-        return Err(bad("length mismatch (truncated?)"));
-    }
-    if crc32fast::hash(body) != crc {
-        return Err(bad("checksum mismatch (corrupted)"));
-    }
+    check_trailer(trailer, body.len() as u64, crc32fast::hash(body))?;
     Ok(Some(body))
 }
 
@@ -170,6 +188,18 @@ pub fn from_json(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphEr
 /// Decode a bincode document into a `Graph<Record, Record>` and its graph-level meta.
 pub fn from_binary(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
     records(&LoadGraph::from_binary_slice(bytes)?)
+}
+
+/// Decode a binary document from a reader into a `Graph<Record, Record>`
+/// and its graph-level meta, without holding the whole file in memory
+/// (see [`LoadGraph::build_from_reader`]).
+pub fn from_binary_reader(reader: impl std::io::Read) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
+    let (graph, meta) = LoadGraph::build_from_reader(
+        reader,
+        |n| Ok::<_, GraphError>(Record { attr: n.attr().to_attrs(), meta: n.meta().to_attrs() }),
+        |e| Ok(Record { attr: e.attr().to_attrs(), meta: e.meta().to_attrs() }),
+    )?;
+    Ok((graph, meta.to_attrs()))
 }
 
 fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphError> {

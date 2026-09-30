@@ -329,7 +329,8 @@ pub mod bytes {
         if d.is_human_readable() {
             d.deserialize_str(BytesVisitor)
         } else {
-            d.deserialize_bytes(BytesVisitor)
+            // Copied anyway, so no need to borrow (and streams can't lend)
+            d.deserialize_byte_buf(BytesVisitor)
         }
     }
 }

@@ -94,6 +94,22 @@ a query layer and database foundations.
   In the core, `cancel::Token` / `cancel::run` stop them from another
   thread (`GraphError::Interrupted`).
 - `ironweaver.__version__`; `Path` objects now carry `edges`.
+- **Core, for servers built on it** (`ironweaver-core` only):
+  - visit budgets: `traversal::dfs_limited` / `bfs_limited` /
+    `expand_limited`, `query::expand_paths_limited` and
+    `WalkPlan::run_limited` take a `Budget` (`max_visited`, `max_results`)
+    and either fail with `GraphError::BudgetExceeded` or return the first
+    results with `truncated` set;
+  - `Expr`, `CmpOp`, `Pattern` (and its parts) implement serde `Serialize`
+    / `Deserialize`, with expression nesting capped at `MAX_EXPR_DEPTH`;
+    `Pattern` implements `Display` (and `to_text`), and
+    `Pattern::parse(&p.to_string())` gives back an equal pattern;
+  - `LoadGraph::build_from_reader` / `format::from_binary_reader` load a
+    binary file from any `Read`, building the graph while decoding (the
+    file's bytes are never all in memory; the checksum is checked at the
+    end and a mismatch drops the partial graph);
+  - `GraphWriter::with_timestamp` fixes or omits `metadata.timestamp`, for
+    byte-identical saves.
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).
@@ -107,6 +123,19 @@ a query layer and database foundations.
 
 - Saving is atomic (temporary file, fsync, rename); loading refuses values
   nested deeper than 100 levels and checks the binary checksum.
+- Saves are deterministic: attribute maps of core `Record`s (and dict
+  values) are written sorted by key, in files and in serde output (op
+  logs), so equal graphs with equal slot order save to equal bytes (apart
+  from the save timestamp).
+- `Graph::memory_usage` (and `Vertex.memory_usage()`) is O(1): the parts
+  that grow with the graph are counted as it changes. Property indexes now
+  count each indexed node's copy of its key.
+- `Graph::apply_all` no longer panics if undoing an op fails during a
+  rollback (a bug): the rest of the rollback runs and the error is
+  `GraphError::Internal`. Its docs now say what a rollback doesn't restore
+  (adjacency order, the edge id counter). `GraphError` is `#[non_exhaustive]`.
+- In pattern text, an empty property map (`(a {})`) means no condition, and
+  conditions from several mentions of a node are one flat `And`.
 - Large speed-ups across traversal, pathfinding, serialization and graph
   building (see `performance_results/`).
 - PyO3 0.29.

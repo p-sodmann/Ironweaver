@@ -90,6 +90,11 @@ Below is a quick guide to notable functions and where to find them.
   `nodes_with_label`, `set_edge_type` / `edge_type_name`, `edges_between`,
   `nodes`, `edges`, `neighbors`, `induced_subgraph` (shared by
   filter/expand/shortest paths/traversals; keeps ids, labels, types).
+  `memory_usage` is O(1): the `heap` counter tracks each node's id, labels
+  and adjacency lists, the id index keys and the label sets (and each
+  property index its keys and postings). Code that changes those must
+  update the counter (capacity before / after, also on removal from a hash
+  set) or call `recount`; a randomized test checks it against a recount.
 - **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
   Posting>` + each node's key): `create_index` / `create_index_with_keys`,
   `find_nodes`, `find_nodes_in_range`, `index_candidates(Expr)` (used by
@@ -101,12 +106,19 @@ Below is a quick guide to notable functions and where to find them.
   totally ordered scalar keys agreeing with `loose_eq` / `loose_cmp`).
 - **ops.rs** – `Op<N, E>` (changes as data, nodes by id, edges by
   `EdgeId`; serde), `Graph::apply` (checks first, returns the undo ops),
-  `apply_all` (atomic), `AttrPatch` (per-attribute ops; `Record` has it).
+  `apply_all` (atomic; a failing undo is `GraphError::Internal`, never a
+  panic), `AttrPatch` (per-attribute ops; `Record` has it).
 - **expr.rs** – `Expr` / `CmpOp`: filter expressions (compare / in / exists
   on attribute paths, `Label`, `Type`, and / or / not), `matches_node` /
   `matches_edge`, read through `Attributes::with_value`. Missing values make
-  comparisons false.
-- **error.rs** – `GraphError` (its `Display` text is the user-facing message).
+  comparisons false. Serde (externally tagged), with `And` / `Or` / `Not`
+  nesting capped at `MAX_EXPR_DEPTH` both ways (the bindings use it too).
+- **error.rs** – `GraphError` (`#[non_exhaustive]`; its `Display` text is
+  the user-facing message; `BudgetExceeded`, `Internal` for broken
+  invariants).
+- **budget.rs** – `Budget` (`max_visited`, `max_results`, `OnLimit`),
+  `Limited<T>` (`value`, `truncated`, `visited`) and the crate-internal
+  `Meter` that searches count with (`enter` / `produce`, `finish`).
 - **cancel.rs** – cancellation: `Token`, `run` (runs a closure under a
   token; `Err(Interrupted)` if cancelled), `run_polling` (with a hook the
   sequential loops call now and then), `stop()` -> `Stop`: parallel loops
@@ -115,8 +127,9 @@ Below is a quick guide to notable functions and where to find them.
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
   graphs), the `Attributes` trait and `Lookup`.
-- **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS),
-  `bidirectional_bfs` (used by the `bfs` path method and `Node.bfs_search`).
+- **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS), their
+  `*_limited` variants under a `Budget`, `bidirectional_bfs` (used by the
+  `bfs` path method and `Node.bfs_search`).
 - **pathfinding/** (everything behind `Vertex.shortest_path`)
   - `mod.rs`: `find_path` entry point, `PathMethod` + the `METHODS`
     registry, `resolve` / `check_options` / `edge_cost` / `check_max_cost`,
@@ -178,17 +191,22 @@ Below is a quick guide to notable functions and where to find them.
     thread count), `mix` (per-item seeds), `random_seed`.
 - **query/** – query primitives for a query engine.
   - `paths.rs`: `expand_paths` (variable-length paths, `Hops` min / max,
-    `Uniqueness` walk / trail / path, streamed to a visitor), `steps`
-    (one step in a direction; `Both` lists self-loops once).
-  - `pattern.rs`: `Pattern` / `NodePattern` / `EdgePattern`,
+    `Uniqueness` walk / trail / path, streamed to a visitor),
+    `expand_paths_limited` (under a `Budget`), `steps` (one step in a
+    direction; `Both` lists self-loops once).
+  - `pattern.rs`: `Pattern` / `NodePattern` / `EdgePattern` (serde),
     `Pattern::parse` (Cypher-like text: labels, types, `*min..max`,
-    `{key: value}`), `add_filter`, `bind_ids`.
+    `{key: value}`), `add_filter`, `bind_ids`; `Display` / `to_text`
+    write text that parses back to an equal pattern (`TextWriter` picks an
+    order that reproduces the node numbering; a random test checks the
+    round trip) and mark what text can't express in `<...>`.
   - `matcher.rs`: `for_each_match` / `find_matches` (backtracking; plan
     from the most selective node; edges distinct per match, nodes may
     repeat), `Match`, `Bound`. Tests compare with brute force.
 - **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
-  access, so the bindings release the GIL) / `WalkPlan::items`,
-  `random_walks` convenience.
+  access, so the bindings release the GIL) / `run_limited` (a `Budget`
+  caps the attempts in advance) / `WalkPlan::items`, `random_walks`
+  convenience.
 - **format/** – on-disk format version 2 (JSON via sonic-rs; binary:
   header + postcard payload + trailer with length and CRC32; layout in the
   comment at the top of `mod.rs`). Version 1 files (JSON "1.x", headerless
@@ -200,12 +218,18 @@ Below is a quick guide to notable functions and where to find them.
   postcard drops custom error messages, so raise them with `ser_error` /
   `de_error`.
   - `save.rs`: `GraphWriter` streams a graph into the serializer, payloads
-    encoded by a `Codec` (`RecordCodec` for `Record`); `tagged` encoders.
+    encoded by a `Codec` (`RecordCodec` for `Record`, keys sorted so
+    saves are deterministic); `with_timestamp`; `tagged` encoders.
   - `load.rs`: `LoadGraph::from_json_slice` / `from_binary_slice` parse into
     borrowed structs, `LoadGraph::build` makes the `Graph`.
-  - `mod.rs`: `to_json` / `to_binary` / `from_json` / `from_binary` for
-    `Graph<Record, Record>`; `write_atomic` (temp file + fsync + rename,
-    used by every file save).
+  - `stream.rs`: `LoadGraph::build_from_reader` decodes a binary file from
+    a `Read` (postcard flavor `Framed`: CRC32 of all but the last 16 bytes,
+    trailer checked at the end) and builds the graph entry by entry;
+    strings are read owned there (`owned_strings`), so loader types must
+    not borrow from the input in any other way.
+  - `mod.rs`: `to_json` / `to_binary` / `from_json` / `from_binary` /
+    `from_binary_reader` for `Graph<Record, Record>`; `write_atomic` (temp
+    file + fsync + rename, used by every file save).
   - Values nest at most `MAX_DEPTH` (100) levels: `LoadValue` rejects deeper
     input (so crafted files cannot overflow the stack) and savers check with
     `tagged::check_depth`. Any new recursive (de)serializer must do the same.

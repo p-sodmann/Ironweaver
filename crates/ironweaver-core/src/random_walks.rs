@@ -407,7 +407,7 @@ impl WalkPlan {
     /// number of attempts at `max_visited / max_length`; the walks made are
     /// the first ones [`run`](Self::run) would make with the same seed.
     /// `max_results` keeps the first walks (after duplicates are removed).
-    /// In [`OnLimit::Error`](crate::OnLimit::Error) mode, attempts that
+    /// In [`OnLimit::Error`] mode, attempts that
     /// don't fit fail before any walking. `visited` counts the nodes the
     /// walks passed through (walks shorter than `min_length` included).
     pub fn run_limited(&self, budget: Budget) -> Result<Limited<Vec<Walk>>, GraphError> {

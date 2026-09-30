@@ -7,14 +7,16 @@ use pyo3::exceptions::{PyKeyboardInterrupt, PyOverflowError, PyRuntimeError, PyT
 use pyo3::PyErr;
 
 /// The Python exception for a core error: `TypeError` for wrong types,
-/// `RuntimeError` for format errors and stale handles, `KeyboardInterrupt`
-/// for cancelled computations, `OverflowError` for size limits, `ValueError`
-/// otherwise.
+/// `RuntimeError` for format errors, stale handles, exceeded budgets and
+/// internal errors, `KeyboardInterrupt` for cancelled computations,
+/// `OverflowError` for size limits, `ValueError` otherwise.
 pub fn graph_error(e: GraphError) -> PyErr {
     match e {
         GraphError::InvalidType(msg) => PyTypeError::new_err(msg),
         GraphError::Format(msg) => PyRuntimeError::new_err(msg),
-        GraphError::Stale => PyRuntimeError::new_err(e.to_string()),
+        GraphError::Stale | GraphError::BudgetExceeded { .. } | GraphError::Internal(_) => {
+            PyRuntimeError::new_err(e.to_string())
+        }
         GraphError::Interrupted => PyKeyboardInterrupt::new_err(e.to_string()),
         GraphError::Capacity(msg) => PyOverflowError::new_err(msg),
         _ => PyValueError::new_err(e.to_string()),

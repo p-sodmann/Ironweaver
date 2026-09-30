@@ -58,6 +58,10 @@ All integers are little-endian. `save_to_binary_f16` stores floats (and lists of
 
 Every save writes to a temporary file, flushes it to disk and then renames it over the target, so a crash mid-save never leaves a half-written file behind.
 
+Saves are deterministic: attribute maps are written sorted by key, so two graphs with the same contents and the same node and edge order save to the same bytes, except for `metadata.timestamp` (the time of the save). In Rust, `GraphWriter::with_timestamp` fixes or leaves out the timestamp for byte-identical files.
+
+Rust programs can also load a binary file from a reader (`format::from_binary_reader`, `LoadGraph::build_from_reader`): the graph is built while the payload is decoded, so the file's bytes are never all in memory next to the graph. The checksum is still checked, at the end; a file that fails it is rejected as a whole.
+
 ## Format 1 (ironweaver 0.1)
 
 Format 1 files (JSON with `metadata.version` "1.x", or binary files without the `IRONWEAV` header) are converted while loading:
