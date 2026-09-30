@@ -24,7 +24,10 @@ pub enum Value {
     Bool(bool),
     None,
     List(#[serde(with = "nested")] Vec<Value>),
-    Dict(#[serde(with = "nested")] HashMap<String, Value>),
+    Dict(
+        #[serde(serialize_with = "nested::serialize_dict", deserialize_with = "nested::deserialize")]
+        HashMap<String, Value>,
+    ),
     /// A byte string (base64 in JSON).
     Bytes(#[serde(with = "temporal::bytes")] Vec<u8>),
     /// A calendar date ("YYYY-MM-DD" in JSON).
@@ -35,7 +38,7 @@ pub enum Value {
 
 /// Serde helpers for the contents of a list / dict value: count the nesting
 /// depth (per thread) and refuse to go deeper than `MAX_DEPTH`.
-mod nested {
+pub(crate) mod nested {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::cell::Cell;
 
@@ -47,19 +50,30 @@ mod nested {
     }
 
     fn enter<T, E>(err: impl FnOnce() -> E, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
-        struct Level;
+        enter_level(&DEPTH, MAX_DEPTH, err, f)
+    }
+
+    /// Run `f` one level deeper on the per-thread counter `depth`: the
+    /// value inside `depth` containers is `depth + 1` levels deep, so this
+    /// fails with `err()` once `max` containers are open.
+    pub(crate) fn enter_level<T, E>(
+        depth: &'static std::thread::LocalKey<Cell<usize>>,
+        max: usize,
+        err: impl FnOnce() -> E,
+        f: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        struct Level(&'static std::thread::LocalKey<Cell<usize>>);
         impl Drop for Level {
             fn drop(&mut self) {
-                DEPTH.with(|c| c.set(c.get() - 1));
+                self.0.with(|c| c.set(c.get() - 1));
             }
         }
-        let depth = DEPTH.with(|c| {
+        let open = depth.with(|c| {
             c.set(c.get() + 1);
             c.get()
         });
-        let _level = Level;
-        // A value inside `depth` containers is `depth + 1` levels deep
-        if depth >= MAX_DEPTH {
+        let _level = Level(depth);
+        if open >= max {
             return Err(err());
         }
         f()
@@ -76,6 +90,28 @@ mod nested {
     pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
         enter(|| crate::format::de_error::<D::Error>(message()), || T::deserialize(d))
     }
+
+    /// A dict's entries, sorted by key.
+    pub fn serialize_dict<S: Serializer>(
+        v: &std::collections::HashMap<String, super::Value>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        enter(|| crate::format::ser_error::<S::Error>(message()), || super::serialize_sorted(v, s))
+    }
+}
+
+/// The entries of an attribute map sorted by key: what savers write, so
+/// that equal maps give equal bytes.
+pub fn sorted_entries(map: &HashMap<String, Value>) -> Vec<(&String, &Value)> {
+    let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+    entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    entries
+}
+
+/// Serialize an attribute map with its keys sorted (serde
+/// `serialize_with` helper; `Record` and `Value::Dict` use it).
+pub fn serialize_sorted<S: serde::Serializer>(map: &HashMap<String, Value>, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_map(sorted_entries(map))
 }
 
 impl Value {

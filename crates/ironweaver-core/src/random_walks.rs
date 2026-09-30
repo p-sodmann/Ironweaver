@@ -9,6 +9,7 @@ use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::budget::{Budget, Limited, Meter, OnLimit};
 use crate::{Attributes, Graph, GraphError, Lookup};
 
 /// Number of walk attempts handled by one RNG stream in uniform mode. Chunks
@@ -398,6 +399,43 @@ where
 impl WalkPlan {
     /// Perform the walks; duplicates are removed (first occurrence kept).
     pub fn run(&self) -> Vec<Walk> {
+        self.run_attempts(self.opts.num_attempts).0
+    }
+
+    /// [`run`](Self::run) under a [`Budget`]. A walk's work is bounded in
+    /// advance (at most `max_length` nodes), so `max_visited` caps the
+    /// number of attempts at `max_visited / max_length`; the walks made are
+    /// the first ones [`run`](Self::run) would make with the same seed.
+    /// `max_results` keeps the first walks (after duplicates are removed).
+    /// In [`OnLimit::Error`](crate::OnLimit::Error) mode, attempts that
+    /// don't fit fail before any walking. `visited` counts the nodes the
+    /// walks passed through (walks shorter than `min_length` included).
+    pub fn run_limited(&self, budget: Budget) -> Result<Limited<Vec<Walk>>, GraphError> {
+        let mut meter = Meter::new(budget);
+        let mut attempts = self.opts.num_attempts;
+        if let Some(max) = budget.max_visited {
+            let fit = max / self.opts.max_length;
+            if fit < attempts {
+                attempts = fit;
+                meter.stopped();
+                if budget.on_limit == OnLimit::Error {
+                    return meter.finish(Vec::new());
+                }
+            }
+        }
+        let (mut walks, visited) = self.run_attempts(attempts);
+        meter.add_visited(visited);
+        let mut kept = 0;
+        while kept < walks.len() && meter.produce() {
+            kept += 1;
+        }
+        walks.truncate(kept);
+        meter.finish(walks)
+    }
+
+    /// The first `num_attempts` attempts, deduplicated, and the number of
+    /// nodes walked through.
+    fn run_attempts(&self, num_attempts: usize) -> (Vec<Walk>, usize) {
         let index = &self.index;
         let opts = &self.opts;
         let fixed_start = self.start;
@@ -405,15 +443,16 @@ impl WalkPlan {
         let (max_length, allow_revisit, include_edges) = (opts.max_length, opts.allow_revisit, opts.include_edge_types);
         let stop = crate::cancel::stop();
 
-        let walks: Vec<Walk> = if opts.stratified {
+        let (walks, visited): (Vec<Walk>, usize) = if opts.stratified {
             // Visit counts persist across all attempts so that later walks are
             // steered towards nodes that earlier walks neglected; this is
             // inherently sequential.
             let mut rng = StdRng::seed_from_u64(base_seed);
             let mut strat = Stratification::new(index);
             let mut scratch = Scratch::new(index.ids.len());
-            let mut walks = Vec::with_capacity(opts.num_attempts);
-            for _ in 0..opts.num_attempts {
+            let mut walks = Vec::with_capacity(num_attempts);
+            let mut visited = 0;
+            for _ in 0..num_attempts {
                 if stop.requested() {
                     break;
                 }
@@ -428,25 +467,26 @@ impl WalkPlan {
                     &mut scratch,
                     &mut rng,
                 );
+                visited += walk.nodes.len();
                 if walk.nodes.len() >= opts.min_length {
                     walks.push(walk);
                 }
             }
-            walks
+            (walks, visited)
         } else {
             let start = fixed_start.expect("validated: start node is required");
-            let num_attempts = opts.num_attempts;
             let n_chunks = num_attempts.div_ceil(CHUNK);
-            let per_chunk: Vec<Vec<Walk>> = (0..n_chunks)
+            let per_chunk: Vec<(Vec<Walk>, usize)> = (0..n_chunks)
                 .into_par_iter()
                 .map(|chunk| {
                     if stop.requested() {
-                        return Vec::new();
+                        return (Vec::new(), 0);
                     }
                     let mut rng = StdRng::seed_from_u64(chunk_seed(base_seed, chunk));
                     let mut scratch = Scratch::new(index.ids.len());
                     let attempts = CHUNK.min(num_attempts - chunk * CHUNK);
                     let mut walks = Vec::with_capacity(attempts);
+                    let mut visited = 0;
                     for _ in 0..attempts {
                         let walk = perform_walk(
                             index,
@@ -458,17 +498,19 @@ impl WalkPlan {
                             &mut scratch,
                             &mut rng,
                         );
+                        visited += walk.nodes.len();
                         if walk.nodes.len() >= opts.min_length {
                             walks.push(walk);
                         }
                     }
-                    walks
+                    (walks, visited)
                 })
                 .collect();
-            per_chunk.into_iter().flatten().collect()
+            let visited = per_chunk.iter().map(|(_, v)| v).sum();
+            (per_chunk.into_iter().flat_map(|(w, _)| w).collect(), visited)
         };
 
-        deduplicate_walks(walks, include_edges)
+        (deduplicate_walks(walks, include_edges), visited)
     }
 
     /// The walk as node ids, or, with `include_edge_types`, alternating node

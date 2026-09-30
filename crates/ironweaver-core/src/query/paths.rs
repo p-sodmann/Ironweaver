@@ -3,12 +3,14 @@
 // Variable-length paths: every path of `min..=max` edges from a node,
 // following edges in a direction, with a uniqueness rule (walk: anything
 // goes; trail: no edge twice; path: no node twice). Enumerated depth-first
-// with an explicit stack, streamed to a visitor that can stop early.
+// with an explicit stack, streamed to a visitor that can stop early, and
+// optionally under a `Budget`.
 
+use crate::budget::{Budget, Limited, Meter};
 use crate::{Direction, Edge, EdgeIx, Graph, GraphError, NodeIx};
 
 /// What may repeat along a variable-length path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Uniqueness {
     /// Nodes and edges may repeat (needs a maximum length).
     Walk,
@@ -35,7 +37,7 @@ impl std::str::FromStr for Uniqueness {
 }
 
 /// Path length bounds, in edges.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Hops {
     pub min: usize,
     /// No limit if `None` (not allowed for walks).
@@ -77,6 +79,46 @@ pub fn expand_paths<N, E, X>(
     direction: Direction,
     hops: Hops,
     uniqueness: Uniqueness,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+    visit: impl FnMut(&[EdgeIx], &[NodeIx]) -> Result<bool, X>,
+) -> Result<(), X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    expand_metered(g, start, direction, hops, uniqueness, &mut meter, edge_ok, visit)
+}
+
+/// [`expand_paths`] under a [`Budget`]: every step onto a node (the start
+/// included) counts as visited, every path passed to `visit` as a result.
+/// `visit` returning false stops the search without marking it truncated.
+#[allow(clippy::too_many_arguments)]
+pub fn expand_paths_limited<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    direction: Direction,
+    hops: Hops,
+    uniqueness: Uniqueness,
+    budget: Budget,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+    visit: impl FnMut(&[EdgeIx], &[NodeIx]) -> Result<bool, X>,
+) -> Result<Limited<()>, X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(budget);
+    expand_metered(g, start, direction, hops, uniqueness, &mut meter, edge_ok, visit)?;
+    Ok(meter.finish(())?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand_metered<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    direction: Direction,
+    hops: Hops,
+    uniqueness: Uniqueness,
+    meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
     mut visit: impl FnMut(&[EdgeIx], &[NodeIx]) -> Result<bool, X>,
 ) -> Result<(), X>
@@ -86,7 +128,10 @@ where
     check_hops(hops, uniqueness)?;
     let mut nodes = vec![start];
     let mut edges: Vec<EdgeIx> = Vec::new();
-    if hops.min == 0 && !visit(&edges, &nodes)? {
+    if !meter.enter() {
+        return Ok(());
+    }
+    if hops.min == 0 && (!meter.produce() || !visit(&edges, &nodes)?) {
         return Ok(());
     }
     if hops.max == Some(0) || g.node(start).is_none() {
@@ -116,9 +161,12 @@ where
         if repeated || !edge_ok(e, g.edge_ref(e))? {
             continue;
         }
+        if !meter.enter() {
+            return Ok(());
+        }
         edges.push(e);
         nodes.push(n);
-        if edges.len() >= hops.min && !visit(&edges, &nodes)? {
+        if edges.len() >= hops.min && (!meter.produce() || !visit(&edges, &nodes)?) {
             return Ok(());
         }
         if hops.max.is_none_or(|max| edges.len() < max) {
