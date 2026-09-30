@@ -145,3 +145,45 @@ fn write_atomic_replaces_the_file_or_leaves_it_alone() {
     assert!(format::write_atomic(dir.join("missing/graph.json"), |_| Ok(())).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn equal_graphs_save_to_equal_bytes() {
+    use format::{GraphWriter, RecordCodec};
+    // Each HashMap has its own random seed, so equal maps usually iterate
+    // in different orders
+    let build = |reverse: bool| {
+        let mut keys: Vec<usize> = (0..50).collect();
+        if reverse {
+            keys.reverse();
+        }
+        let dict: Attrs = keys.iter().map(|k| (format!("d{k}"), Value::from(*k as i64))).collect();
+        let mut attr: Attrs = keys.iter().map(|k| (format!("k{k}"), Value::from(*k as i64))).collect();
+        attr.insert("dict".into(), Value::Dict(dict));
+        let mut g = G::new();
+        let a = g.add_node("a", Record { attr: attr.clone(), meta: attr.clone() }).unwrap();
+        g.add_edge(a, a, Record { attr, meta: Attrs::new() }).unwrap();
+        g
+    };
+    let (g1, g2) = (build(false), build(true));
+    let meta: Attrs = (0..20).map(|k| (format!("m{k}"), Value::from(k as i64))).collect();
+    let meta2: Attrs = meta.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let save = |g: &G, meta: &Attrs| {
+        let codec = RecordCodec { meta, half: false };
+        let mut bin = Vec::new();
+        GraphWriter::new(g, &codec).with_timestamp(None).write_binary(&mut bin).unwrap();
+        let json = GraphWriter::new(g, &codec).with_timestamp(Some("fixed".into())).to_json(false).unwrap();
+        (bin, json)
+    };
+    let (bin1, json1) = save(&g1, &meta);
+    let (bin2, json2) = save(&g2, &meta2);
+    assert_eq!(bin1, bin2);
+    assert_eq!(json1, json2);
+    let text = String::from_utf8(json1).unwrap();
+    assert!(text.contains(r#""timestamp":{"String":"fixed"}"#), "{text}");
+    assert!(text.find(r#""k0""#).unwrap() < text.find(r#""k1""#).unwrap());
+    format::from_binary(&bin1).unwrap();
+    // Record and Value serde (ops in a log) sort keys too
+    let r1 = sonic_rs::to_string(&g1.node_by_id("a").unwrap().data).unwrap();
+    let r2 = sonic_rs::to_string(&g2.node_by_id("a").unwrap().data).unwrap();
+    assert_eq!(r1, r2);
+}

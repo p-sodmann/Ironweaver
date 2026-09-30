@@ -10,5 +10,5 @@ pub mod paths;
 pub mod pattern;
 
 pub use matcher::{find_matches, for_each_match, Bound, Match};
-pub use paths::{expand_paths, steps, Hops, Uniqueness};
+pub use paths::{expand_paths, expand_paths_limited, steps, Hops, Uniqueness};
 pub use pattern::{EdgePattern, NodePattern, Pattern};

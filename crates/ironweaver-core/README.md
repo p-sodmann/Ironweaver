@@ -15,9 +15,10 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
   - label propagation, Leiden communities and modularity;
   - node similarity, spanning forests, k shortest paths, BFS levels and batch shortest paths;
   - FastRP embeddings and node2vec walks.
-- **Queries:** Cypher-like pattern matching and variable-length path expansion.
+- **Queries:** Cypher-like pattern matching and variable-length path expansion. Patterns and filter expressions implement serde, and patterns print back as text that parses to the same pattern.
+- **Budgets:** traversals, path expansion and random walks can run under a `Budget` (most nodes visited, most results), failing or returning the first results with a `truncated` flag.
 - **Pathfinding:** BFS, Dijkstra and A* with pluggable heuristics.
-- **A file format** (JSON, or binary with a header and a CRC32), with atomic saves.
+- **A file format** (JSON, or binary with a header and a CRC32), with atomic, deterministic saves, and binary loading from any reader without holding the whole file in memory.
 
 Payloads are read only through the `Attributes` trait, and user callbacks return `Result<_, X>` for your own error type `X`. `Record` (maps of `Value`s) is the ready-made payload.
 
@@ -73,6 +74,33 @@ path expansion, searches, random walks) check a cancellation token. Run one
 under `cancel::run(&token, || ...)` and call `token.cancel()` from another
 thread: it stops soon after and `run` returns `Err(GraphError::Interrupted)`.
 Without a token the checks cost nothing measurable.
+
+## Budgets
+
+Depth limits don't bound work: a depth-2 traversal from a node with a
+million neighbours visits a million nodes. The `*_limited` traversals,
+`query::expand_paths_limited` and `WalkPlan::run_limited` take a `Budget`
+and stop at its limits, with `GraphError::BudgetExceeded` or, with
+`truncate()`, the first results and `truncated` set:
+
+```rust
+use ironweaver_core::traversal::bfs_limited;
+use ironweaver_core::{Budget, Graph, GraphError, Record};
+
+let mut g: Graph<Record, Record> = Graph::new();
+let hub = g.add_node("hub", Record::default())?;
+for i in 0..1000 {
+    let leaf = g.add_node(format!("leaf{i}"), Record::default())?;
+    g.add_edge(hub, leaf, Record::default())?;
+}
+let all = |_, _: &_| Ok::<_, GraphError>(true);
+let first = bfs_limited(&g, hub, Some(2), Budget::default().max_results(10).truncate(), all)?;
+assert_eq!((first.value.len(), first.truncated), (10, true));
+assert!(bfs_limited(&g, hub, Some(2), Budget::default().max_results(10), all).is_err());
+# Ok::<(), GraphError>(())
+```
+
+For wall-clock limits, run the search under a cancellation token.
 
 ## Minimum supported Rust version
 

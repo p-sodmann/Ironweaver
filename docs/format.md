@@ -32,7 +32,7 @@ Both encodings hold the same document:
 { nodes:    { id: { id, labels, attr, meta, edge_ids, inverse_edge_ids } },
   edges:    { edge_id: { id, from_id, to_id, type, attr, meta } },
   meta:     { ... },
-  metadata: { version: "2.0", node_count, edge_count, timestamp, next_edge_id } }
+  metadata: { version: "2.0", node_count, edge_count, timestamp, next_edge_id, indexes } }
 ```
 
 - Edge ids are the persistent integer ids, written in decimal. `next_edge_id` keeps the ids of removed edges from being handed out again after loading.
@@ -42,6 +42,7 @@ Both encodings hold the same document:
   - date-times (`datetime.datetime`): `{"DateTime": "2024-05-01T12:30:00.250000+02:00"}`, microsecond precision. An aware datetime keeps its UTC offset but not its zone name (it loads with a fixed-offset `timezone`); a naive one loads naive.
 
   In binary files dates are day counts, date-times microseconds plus offset, bytes raw. Files saved before 0.2 stored datetimes as strings (and bytes as lists of ints); they load as they were saved.
+- `indexes` lists the indexed attribute paths (each a list of strings), and is only written when there are indexes. Loading recreates them from the nodes; the index contents aren't stored. Files without it load with no indexes, and readers that don't know it ignore it.
 - Values may nest at most 100 levels deep; deeper files are rejected when loading, so a crafted file can't exhaust the stack.
 
 **JSON** is the document above, compact by default (`save_to_json(path, pretty=True)` indents it).
@@ -57,6 +58,10 @@ trailer  16 bytes   u64 payload length, u32 CRC32 of the payload, b"IWND"
 All integers are little-endian. `save_to_binary_f16` stores floats (and lists of floats) at half precision, for embeddings where the saving matters more than the precision.
 
 Every save writes to a temporary file, flushes it to disk and then renames it over the target, so a crash mid-save never leaves a half-written file behind.
+
+Saves are deterministic: attribute maps are written sorted by key, so two graphs with the same contents and the same node and edge order save to the same bytes, except for `metadata.timestamp` (the time of the save). In Rust, `GraphWriter::with_timestamp` fixes or leaves out the timestamp for byte-identical files.
+
+Rust programs can also load a binary file from a reader (`format::from_binary_reader`, `LoadGraph::build_from_reader`): the graph is built while the payload is decoded, so the file's bytes are never all in memory next to the graph. The checksum is still checked, at the end; a file that fails it is rejected as a whole.
 
 ## Format 1 (ironweaver 0.1)
 

@@ -46,7 +46,10 @@ pub type Attrs = HashMap<String, Value>;
 /// free-form metadata (`meta`), mirroring the Python API.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Record {
+    // Keys sorted when serialized, so equal records give equal bytes
+    #[serde(serialize_with = "crate::value::serialize_sorted")]
     pub attr: Attrs,
+    #[serde(serialize_with = "crate::value::serialize_sorted")]
     pub meta: Attrs,
 }
 

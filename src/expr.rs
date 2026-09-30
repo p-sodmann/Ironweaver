@@ -6,6 +6,7 @@
 // Python's `&` / `|` bind tighter than comparisons, so comparisons need
 // parentheses; `30 & label(...)` raises a TypeError that says so.
 
+use ironweaver_core::expr::MAX_EXPR_DEPTH;
 use ironweaver_core::{CmpOp, Expr as Core, Value};
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -14,8 +15,8 @@ use pyo3::types::PyString;
 
 use crate::convert::to_value;
 
-/// Deepest `&` / `|` / `~` nesting allowed (chains of `&` or `|` flatten).
-const MAX_EXPR_DEPTH: usize = 100;
+// Deepest `&` / `|` / `~` nesting allowed (chains of `&` or `|` flatten) is
+// the core's `MAX_EXPR_DEPTH`, so every expression can be serialized.
 
 /// A filter expression over a node or an edge, evaluated in Rust. Build it
 /// with `attr`, `label` and `edge_type`, and combine with `&`, `|`, `~`.

@@ -69,6 +69,23 @@ fn set_is_empty(p: &Posting) -> bool {
     matches!(p, Posting::Many(set) if set.is_empty())
 }
 
+/// Heap bytes of a key (its text or bytes).
+fn key_heap(k: &Key) -> usize {
+    match k {
+        Key::String(s) => s.capacity(),
+        Key::Bytes(b) => b.capacity(),
+        _ => 0,
+    }
+}
+
+/// Heap bytes of a posting's node set.
+fn posting_heap(p: &Posting) -> usize {
+    match p {
+        Posting::One(_) => 0,
+        Posting::Many(set) => hash_table_bytes(set.capacity(), std::mem::size_of::<NodeIx>()),
+    }
+}
+
 /// One property index.
 #[derive(Clone, Debug)]
 struct PropertyIndex {
@@ -76,9 +93,16 @@ struct PropertyIndex {
     map: BTreeMap<Key, Posting>,
     /// Each indexed node's key, to remove it without reading its payload.
     keys: IxMap<NodeIx, Key>,
+    /// Heap bytes of the keys (in `map` and `keys`) and posting sets, kept
+    /// up to date by `set` / `unset`.
+    heap: usize,
 }
 
 impl PropertyIndex {
+    fn new(path: &[String]) -> Self {
+        PropertyIndex { path: path.to_vec(), map: BTreeMap::new(), keys: IxMap::default(), heap: 0 }
+    }
+
     fn set(&mut self, ix: NodeIx, key: Option<Key>) {
         if let Some(old) = self.keys.get(&ix) {
             if key.as_ref() == Some(old) {
@@ -88,22 +112,40 @@ impl PropertyIndex {
         }
         if let Some(k) = key {
             match self.map.get_mut(&k) {
-                Some(p) => p.insert(ix),
+                Some(p) => {
+                    let before = posting_heap(p);
+                    p.insert(ix);
+                    self.heap = self.heap + posting_heap(p) - before;
+                }
                 None => {
-                    self.map.insert(k.clone(), Posting::One(ix));
+                    let copy = k.clone();
+                    self.heap += key_heap(&copy);
+                    self.map.insert(copy, Posting::One(ix));
                 }
             }
+            self.heap += key_heap(&k);
             self.keys.insert(ix, k);
         }
     }
 
     fn unset(&mut self, ix: NodeIx) {
         if let Some(old) = self.keys.remove(&ix) {
+            self.heap -= key_heap(&old);
             let p = self.map.get_mut(&old).expect("indexed keys have postings");
-            if p.remove(ix) {
-                self.map.remove(&old);
+            let before = posting_heap(p);
+            let empty = p.remove(ix);
+            self.heap = self.heap + posting_heap(p) - before;
+            if empty {
+                let (key, p) = self.map.remove_entry(&old).expect("just found");
+                self.heap -= key_heap(&key) + posting_heap(&p);
             }
         }
+    }
+
+    /// The heap bytes, recomputed.
+    fn count_heap(&self) -> usize {
+        let map: usize = self.map.iter().map(|(k, p)| key_heap(k) + posting_heap(p)).sum();
+        map + self.keys.values().map(key_heap).sum::<usize>()
     }
 }
 
@@ -134,26 +176,31 @@ impl Indexes {
     }
 
     /// Approximate bytes used (see `Graph::memory_usage`).
+    /// O(number of indexes): the keys' and postings' heap bytes are
+    /// counted as they change.
     pub(crate) fn memory_usage(&self) -> usize {
         use std::mem::size_of;
-        let heap = |k: &Key| match k {
-            Key::String(s) => s.capacity(),
-            Key::Bytes(b) => b.capacity(),
-            _ => 0,
-        };
         let mut total = hash_table_bytes(self.dirty.capacity(), size_of::<NodeIx>());
         for index in &self.list {
             // B-tree nodes hold up to 11 entries; assume two thirds full
             total += index.map.len() * (size_of::<Key>() + size_of::<Posting>()) * 3 / 2;
-            for (k, p) in &index.map {
-                total += 2 * heap(k);
-                if let Posting::Many(set) = p {
-                    total += hash_table_bytes(set.capacity(), size_of::<NodeIx>());
-                }
-            }
+            total += index.heap;
             total += hash_table_bytes(index.keys.capacity(), size_of::<(NodeIx, Key)>());
         }
         total
+    }
+
+    #[cfg(test)]
+    pub(crate) fn list_heaps(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.list.iter().map(|i| (i.heap, i.count_heap()))
+    }
+
+    /// Recompute the heap counters (after a clone: copies of strings have
+    /// other capacities).
+    pub(crate) fn recount(&mut self) {
+        for index in &mut self.list {
+            index.heap = index.count_heap();
+        }
     }
 
     pub(crate) fn remove(&mut self, ix: NodeIx) {
@@ -271,7 +318,7 @@ impl<N, E> Graph<N, E> {
             return Ok(false);
         }
         let first = self.indexes.list.is_empty();
-        let mut index = PropertyIndex { path: path.to_vec(), map: BTreeMap::new(), keys: IxMap::default() };
+        let mut index = PropertyIndex::new(path);
         let mut seen = IxSet::default();
         for (ix, key) in keys {
             if self.node(ix).is_some() {
@@ -353,7 +400,7 @@ impl<N: Attributes, E> Graph<N, E> {
         if self.has_index(path) {
             return Ok(false);
         }
-        let mut index = PropertyIndex { path: path.to_vec(), map: BTreeMap::new(), keys: IxMap::default() };
+        let mut index = PropertyIndex::new(path);
         for (ix, node) in self.nodes() {
             index.set(ix, key_of(&node.data, path)?);
         }

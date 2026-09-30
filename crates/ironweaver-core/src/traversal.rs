@@ -5,11 +5,14 @@
 //
 // Edge filters are closures returning `Result<bool, X>`, so a filter can fail
 // (e.g. a Python callback raising) and the error is passed straight back.
+// The `*_limited` variants bound the work and the result size with a
+// `Budget` (see `budget.rs`).
 
 use std::collections::VecDeque;
 
+use crate::budget::{Budget, Limited, Meter};
 use crate::graph::{IxMap, IxSet};
-use crate::{Direction, Edge, EdgeIx, Graph, NodeIx};
+use crate::{Direction, Edge, EdgeIx, Graph, GraphError, NodeIx};
 
 /// Depth-first (pre-order) traversal from `start` along outgoing edges for
 /// which `edge_ok` returns true. Returns the nodes in visiting order; `depth`
@@ -22,29 +25,69 @@ pub fn dfs<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Vec<NodeIx>, X> {
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    dfs_metered(g, start, depth, &mut meter, edge_ok)
+}
+
+/// [`dfs`] under a [`Budget`]: nodes whose edges are followed count as
+/// visited, nodes returned as results.
+pub fn dfs_limited<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    depth: Option<usize>,
+    budget: Budget,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Limited<Vec<NodeIx>>, X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(budget);
+    let order = dfs_metered(g, start, depth, &mut meter, edge_ok)?;
+    Ok(meter.finish(order)?)
+}
+
+fn dfs_metered<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    depth: Option<usize>,
+    meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
     // Frame: (outgoing edges of the node, index of the next edge, node depth)
     type Frame<'g> = (&'g [EdgeIx], usize, usize);
-    struct Walk<'g> {
+    struct Walk<'g, 'm> {
         order: Vec<NodeIx>,
         visited: IxSet<NodeIx>,
         stack: Vec<Frame<'g>>,
+        meter: &'m mut Meter,
     }
-    fn enter<'g, N, E>(g: &'g Graph<N, E>, w: &mut Walk<'g>, ix: NodeIx, d: usize, depth: Option<usize>) {
-        if !w.visited.insert(ix) {
-            return;
+    /// Visit `ix` (if new); false if the budget stops the walk.
+    fn enter<'g, N, E>(g: &'g Graph<N, E>, w: &mut Walk<'g, '_>, ix: NodeIx, d: usize, depth: Option<usize>) -> bool {
+        if w.visited.contains(&ix) {
+            return true;
         }
+        if !w.meter.produce() {
+            return false;
+        }
+        w.visited.insert(ix);
         w.order.push(ix);
         if depth.is_none_or(|max| d < max) {
             if let Some(n) = g.node(ix) {
+                if !w.meter.enter() {
+                    return false;
+                }
                 w.stack.push((n.out_edges(), 0, d));
             }
         }
+        true
     }
 
-    let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new() };
-    enter(g, &mut w, start, 0, depth);
+    let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new(), meter };
+    if !enter(g, &mut w, start, 0, depth) {
+        return Ok(w.order);
+    }
     let stop = crate::cancel::stop();
     while let Some(frame) = w.stack.last_mut() {
         if stop.poll() {
@@ -58,8 +101,8 @@ pub fn dfs<N, E, X>(
         frame.1 += 1;
         let next_depth = frame.2 + 1;
         let edge = g.edge_ref(e);
-        if edge_ok(e, edge)? {
-            enter(g, &mut w, edge.target(), next_depth, depth);
+        if edge_ok(e, edge)? && !enter(g, &mut w, edge.target(), next_depth, depth) {
+            break;
         }
     }
     Ok(w.order)
@@ -72,15 +115,46 @@ pub fn bfs<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Vec<NodeIx>, X> {
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    bfs_metered(g, start, depth, &mut meter, edge_ok)
+}
+
+/// [`bfs`] under a [`Budget`]: nodes whose edges are followed count as
+/// visited, nodes returned as results.
+pub fn bfs_limited<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    depth: Option<usize>,
+    budget: Budget,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Limited<Vec<NodeIx>>, X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(budget);
+    let order = bfs_metered(g, start, depth, &mut meter, edge_ok)?;
+    Ok(meter.finish(order)?)
+}
+
+fn bfs_metered<N, E, X>(
+    g: &Graph<N, E>,
+    start: NodeIx,
+    depth: Option<usize>,
+    meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
+    if !meter.produce() {
+        return Ok(Vec::new());
+    }
     let mut order = vec![start];
     let mut visited = IxSet::default();
     visited.insert(start);
     let mut queue = VecDeque::from([(start, 0usize)]);
 
     let stop = crate::cancel::stop();
-    while let Some((ix, d)) = queue.pop_front() {
+    'search: while let Some((ix, d)) = queue.pop_front() {
         if stop.poll() {
             break;
         }
@@ -91,9 +165,16 @@ pub fn bfs<N, E, X>(
             Some(n) => n,
             None => continue,
         };
+        if !meter.enter() {
+            break;
+        }
         for &e in node.out_edges() {
             let edge = g.edge_ref(e);
-            if edge_ok(e, edge)? && visited.insert(edge.target()) {
+            if edge_ok(e, edge)? && !visited.contains(&edge.target()) {
+                if !meter.produce() {
+                    break 'search;
+                }
+                visited.insert(edge.target());
                 order.push(edge.target());
                 queue.push_back((edge.target(), d + 1));
             }
@@ -111,25 +192,60 @@ pub fn expand<N, E>(
     depth: usize,
     direction: Direction,
 ) -> Vec<NodeIx> {
+    expand_metered(g, seeds, depth, direction, &mut Meter::new(Budget::UNLIMITED))
+}
+
+/// [`expand`] under a [`Budget`]: nodes whose neighbours are listed count
+/// as visited, nodes returned (seeds included) as results.
+pub fn expand_limited<N, E>(
+    g: &Graph<N, E>,
+    seeds: impl IntoIterator<Item = NodeIx>,
+    depth: usize,
+    direction: Direction,
+    budget: Budget,
+) -> Result<Limited<Vec<NodeIx>>, GraphError> {
+    let mut meter = Meter::new(budget);
+    let order = expand_metered(g, seeds, depth, direction, &mut meter);
+    meter.finish(order)
+}
+
+fn expand_metered<N, E>(
+    g: &Graph<N, E>,
+    seeds: impl IntoIterator<Item = NodeIx>,
+    depth: usize,
+    direction: Direction,
+    meter: &mut Meter,
+) -> Vec<NodeIx> {
     let mut order = Vec::new();
     let mut discovered = IxSet::default();
     let mut queue = VecDeque::new();
     for seed in seeds {
-        if g.node(seed).is_some() && discovered.insert(seed) {
+        if g.node(seed).is_some() && !discovered.contains(&seed) {
+            if !meter.produce() {
+                return order;
+            }
+            discovered.insert(seed);
             order.push(seed);
             queue.push_back((seed, 0usize));
         }
     }
     let stop = crate::cancel::stop();
-    while let Some((ix, d)) = queue.pop_front() {
+    'search: while let Some((ix, d)) = queue.pop_front() {
         if stop.poll() {
             break;
         }
         if d >= depth {
             continue;
         }
+        if !meter.enter() {
+            break;
+        }
         for (_, neighbor) in g.neighbors(ix, direction) {
-            if discovered.insert(neighbor) {
+            if !discovered.contains(&neighbor) {
+                if !meter.produce() {
+                    break 'search;
+                }
+                discovered.insert(neighbor);
                 order.push(neighbor);
                 if d + 1 < depth {
                     queue.push_back((neighbor, d + 1));

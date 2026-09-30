@@ -85,7 +85,20 @@ fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
         meta.set_item(key, crate::convert::to_python(py, value, &mut strings.borrow_mut())?)?;
     }
     vertex.meta = meta.unbind();
-    Py::new(py, vertex)
+    let vertex = Py::new(py, vertex)?;
+    // Indexes saved with the graph come back empty: fill them in
+    let nodes: Vec<_> = {
+        let v = vertex.try_borrow(py)?;
+        if v.graph.index_paths().is_empty() {
+            Vec::new()
+        } else {
+            v.graph.node_indices().collect()
+        }
+    };
+    if !nodes.is_empty() {
+        super::index::reindex(py, &vertex, &nodes)?;
+    }
+    Ok(vertex)
 }
 
 /// Load graph from JSON file (when source is a string path) or from JSON string/dict (when source is a dict or JSON string)

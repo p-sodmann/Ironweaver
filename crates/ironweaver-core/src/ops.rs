@@ -9,7 +9,8 @@
 //
 // Every op is checked before the graph is touched, so a failing op leaves
 // the graph unchanged. Undoing restores ids, labels, types and payloads; the
-// order of edges in adjacency lists may differ (re-added edges go last).
+// order of edges in adjacency lists may differ (re-added edges go last), and
+// the edge id counter is never lowered (see `apply_all`).
 
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +106,14 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
         self.edge_ix(id).ok_or(GraphError::EdgeNotFound(id.0))
     }
 
+    fn live_node(&mut self, ix: NodeIx) -> Result<&mut crate::Node<N>, GraphError> {
+        self.node_mut(ix).ok_or_else(|| internal("a node just looked up is gone"))
+    }
+
+    fn live_edge(&mut self, e: EdgeIx) -> Result<&mut crate::Edge<E>, GraphError> {
+        self.edge_mut(e).ok_or_else(|| internal("an edge just looked up is gone"))
+    }
+
     /// Apply one op; returns the ops that undo it (apply them in order).
     /// On error the graph is unchanged.
     pub fn apply(&mut self, op: Op<N, E>) -> Result<Vec<Op<N, E>>, GraphError> {
@@ -121,17 +130,17 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
             }
             Op::RemoveNode { id } => {
                 let ix = self.node_named(&id)?;
-                let node = self.node(ix).expect("just looked up");
-                let labels = self.label_names(ix).expect("live").into_iter().map(str::to_owned).collect();
+                let node = self.node(ix).ok_or_else(|| internal("a node just looked up is gone"))?;
+                let labels = node.labels().iter().map(|&s| self.symbol_name(s).to_owned()).collect();
                 // Incident edges, each once (a self-loop is in both lists)
                 let mut edges: Vec<EdgeIx> = node.out_edges().to_vec();
                 edges.extend(node.in_edges().iter().filter(|&&e| self.edge(e).is_some_and(|x| x.source() != ix)));
                 let mut undo = Vec::with_capacity(edges.len() + 1);
                 let mut restore = Vec::with_capacity(edges.len());
                 for e in edges {
-                    restore.push(self.take_edge(e));
+                    restore.push(self.take_edge(e)?);
                 }
-                let (id, data) = self.remove_node(ix).expect("live");
+                let (id, data) = self.remove_node(ix).ok_or_else(|| internal("a node just looked up is gone"))?;
                 undo.push(Op::AddNode { id, labels, data });
                 undo.extend(restore);
                 undo
@@ -159,12 +168,12 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
             }
             Op::SetNode { id, data } => {
                 let ix = self.node_named(&id)?;
-                let old = std::mem::replace(&mut self.node_mut(ix).expect("live").data, data);
+                let old = std::mem::replace(&mut self.live_node(ix)?.data, data);
                 vec![Op::SetNode { id, data: old }]
             }
             Op::SetNodeAttr { id, key, value } => {
                 let ix = self.node_named(&id)?;
-                let old = self.node_mut(ix).expect("live").data.set_attr(&key, value);
+                let old = self.live_node(ix)?.data.set_attr(&key, value);
                 vec![Op::SetNodeAttr { id, key, value: old }]
             }
             Op::AddEdge { id, from, to, ty, data } => {
@@ -174,7 +183,7 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
             }
             Op::RemoveEdge { id } => {
                 let e = self.edge_with(id)?;
-                vec![self.take_edge(e)]
+                vec![self.take_edge(e)?]
             }
             Op::SetEdgeType { id, ty } => {
                 let e = self.edge_with(id)?;
@@ -183,45 +192,86 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
             }
             Op::SetEdge { id, data } => {
                 let e = self.edge_with(id)?;
-                let old = std::mem::replace(&mut self.edge_mut(e).expect("live").data, data);
+                let old = std::mem::replace(&mut self.live_edge(e)?.data, data);
                 vec![Op::SetEdge { id, data: old }]
             }
             Op::SetEdgeAttr { id, key, value } => {
                 let e = self.edge_with(id)?;
-                let old = self.edge_mut(e).expect("live").data.set_attr(&key, value);
+                let old = self.live_edge(e)?.data.set_attr(&key, value);
                 vec![Op::SetEdgeAttr { id, key, value: old }]
             }
         })
     }
 
     /// Remove a live edge; the op that adds it back.
-    fn take_edge(&mut self, e: EdgeIx) -> Op<N, E> {
+    fn take_edge(&mut self, e: EdgeIx) -> Result<Op<N, E>, GraphError> {
         let ty = self.edge_type_name(e).map(str::to_owned);
-        let edge = self.remove_edge(e).expect("live");
-        let name = |ix: NodeIx| self.node(ix).expect("endpoints are live").id().to_owned();
-        Op::AddEdge { id: edge.id(), from: name(edge.source()), to: name(edge.target()), ty, data: edge.data }
+        let edge = self.remove_edge(e).ok_or_else(|| internal("an incident edge is gone"))?;
+        let name =
+            |ix: NodeIx| self.node(ix).map(|n| n.id().to_owned()).ok_or_else(|| internal("an edge endpoint is gone"));
+        Ok(Op::AddEdge { id: edge.id(), from: name(edge.source())?, to: name(edge.target())?, ty, data: edge.data })
     }
 
     /// Apply `ops` in order, all or nothing: if one fails, the ones before
     /// it are undone and the error is returned (with the failing op's
     /// position). Returns the ops that undo the whole batch.
+    ///
+    /// After a rollback the graph has the same nodes, edges, ids, labels,
+    /// types and payloads as before, but two things callers can observe may
+    /// differ:
+    ///
+    /// - adjacency order: edges that were removed and re-added go last in
+    ///   their endpoints' lists;
+    /// - the edge id counter is not lowered: if the batch added an edge
+    ///   (with an explicit id at or above [`next_edge_id`](Graph::next_edge_id)),
+    ///   `next_edge_id()` stays raised. Ids are never reused either way.
+    ///
+    /// Undoing an applied op is not expected to fail. If it does anyway (a
+    /// bug), the rest of the rollback still runs and the error is
+    /// [`GraphError::Internal`] (at the failing op's position): the graph may
+    /// then be inconsistent and should be reloaded. This never panics.
     pub fn apply_all(&mut self, ops: impl IntoIterator<Item = Op<N, E>>) -> Result<Vec<Op<N, E>>, (usize, GraphError)> {
         let mut undo: Vec<Vec<Op<N, E>>> = Vec::new();
         for (i, op) in ops.into_iter().enumerate() {
             match self.apply(op) {
                 Ok(inverse) => undo.push(inverse),
                 Err(e) => {
-                    for inverse in undo.into_iter().rev() {
-                        for op in inverse {
-                            self.apply(op).expect("undoing an applied op succeeds");
-                        }
-                    }
-                    return Err((i, e));
+                    return Err(match self.roll_back(undo) {
+                        Ok(()) => (i, e),
+                        Err(failed) => (
+                            i,
+                            GraphError::Internal(format!(
+                                "op {} failed ({}), and undoing the ops before it failed too ({}); the graph may be \
+                                 inconsistent",
+                                i, e, failed
+                            )),
+                        ),
+                    });
                 }
             }
         }
         Ok(undo.into_iter().rev().flatten().collect())
     }
+
+    /// Apply the undo lists in reverse; every one is tried, the first error
+    /// is returned.
+    fn roll_back(&mut self, undo: Vec<Vec<Op<N, E>>>) -> Result<(), GraphError> {
+        let mut first = Ok(());
+        for inverse in undo.into_iter().rev() {
+            for op in inverse {
+                if let Err(e) = self.apply(op) {
+                    if first.is_ok() {
+                        first = Err(e);
+                    }
+                }
+            }
+        }
+        first
+    }
+}
+
+fn internal(msg: &str) -> GraphError {
+    GraphError::Internal(msg.to_owned())
 }
 
 #[cfg(test)]
@@ -346,6 +396,35 @@ mod tests {
         assert_ne!(state(&g), before);
         g.apply_all(undo).unwrap();
         assert_eq!(state(&g), before);
+    }
+
+    #[test]
+    fn rollback_keeps_the_edge_id_counter_raised() {
+        let mut g = sample();
+        let next = g.next_edge_id();
+        let batch: Vec<O> = vec![
+            Op::AddEdge { id: EdgeId(40), from: "a".into(), to: "b".into(), ty: None, data: Record::default() },
+            Op::RemoveNode { id: "zz".into() },
+        ];
+        assert_eq!(g.apply_all(batch).unwrap_err(), (1, GraphError::NodeNotFound("zz".into())));
+        assert!(g.edge_ix(EdgeId(40)).is_none());
+        assert_eq!(g.next_edge_id(), EdgeId(41));
+        assert!(g.next_edge_id() > next);
+    }
+
+    #[test]
+    fn a_failing_undo_is_an_error_not_a_panic() {
+        let mut g = sample();
+        // An undo list that can't be applied (as if `apply` had a bug)
+        let undo = vec![
+            vec![Op::RemoveNode { id: "missing".into() }],
+            vec![Op::SetNodeAttr { id: "a".into(), key: "k".into(), value: Some(Value::from(1)) }],
+        ];
+        assert_eq!(g.roll_back(undo), Err(GraphError::NodeNotFound("missing".into())));
+        // The rest of the rollback still ran
+        assert_eq!(g.node_by_id("a").unwrap().data.attr.get("k"), Some(&Value::from(1)));
+        let msg = GraphError::Internal("x".into()).to_string();
+        assert_eq!(msg, "internal error: x");
     }
 
     #[test]

@@ -13,13 +13,24 @@
 // Missing attributes (or none values) make every comparison false, like
 // SQL NULL: `attr("x") != 1` is false when `x` is missing; use `Not` /
 // `Exists` to say otherwise. Numbers compare across `Int` / `Float`.
+//
+// Expressions serialize with serde (externally tagged, like `Value` and
+// `Op`), so they can travel over the network or be stored. Nesting of
+// `And` / `Or` / `Not` is limited to `MAX_EXPR_DEPTH` levels both ways, so a
+// crafted document can't overflow the stack.
 
 use std::cmp::Ordering;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{Attributes, EdgeIx, Graph, NodeIx, Value};
 
+/// Deepest [`Expr::depth`] that serde (de)serializes; deeper expressions
+/// are an error instead of a stack overflow.
+pub const MAX_EXPR_DEPTH: usize = 100;
+
 /// Comparison operator of [`Expr::Compare`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CmpOp {
     Eq,
     Ne,
@@ -30,7 +41,10 @@ pub enum CmpOp {
 }
 
 /// A predicate over a node or an edge.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Serialized externally tagged, e.g. `{"Compare": {"path": ["age"], "op":
+/// "Ge", "value": {"Int": 18}}}` or `{"Label": "Person"}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     /// Always true / false.
     Const(bool),
@@ -55,9 +69,36 @@ pub enum Expr {
     Label(String),
     /// Edges: has this type. Always false for nodes.
     Type(String),
-    And(Vec<Expr>),
-    Or(Vec<Expr>),
-    Not(Box<Expr>),
+    And(#[serde(with = "nested")] Vec<Expr>),
+    Or(#[serde(with = "nested")] Vec<Expr>),
+    Not(#[serde(with = "nested")] Box<Expr>),
+}
+
+/// Serde helpers for the operands of `And` / `Or` / `Not`: count the
+/// nesting depth (per thread) and refuse to go deeper than `MAX_EXPR_DEPTH`.
+mod nested {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::cell::Cell;
+
+    use super::MAX_EXPR_DEPTH;
+    use crate::value::nested::enter_level;
+
+    thread_local! {
+        // `And` / `Or` / `Not` entered on this thread
+        static DEPTH: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn message() -> String {
+        format!("expression nested more than {MAX_EXPR_DEPTH} levels deep")
+    }
+
+    pub fn serialize<S: Serializer, T: Serialize>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+        enter_level(&DEPTH, MAX_EXPR_DEPTH, || serde::ser::Error::custom(message()), || v.serialize(s))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+        enter_level(&DEPTH, MAX_EXPR_DEPTH, || serde::de::Error::custom(message()), || T::deserialize(d))
+    }
 }
 
 /// What evaluation needs besides the payload.
@@ -222,5 +263,50 @@ mod tests {
         );
         assert!(edge(&Expr::Type("knows".into())) && !edge(&Expr::Type("likes".into())));
         assert!(edge(&cmp("w", CmpOp::Eq, 2)) && !edge(&Expr::Label("Person".into())));
+    }
+
+    #[test]
+    fn serde_round_trip() {
+        let e = Expr::And(vec![
+            Expr::Label("Person".into()),
+            Expr::Not(Box::new(cmp("age", CmpOp::Lt, 18))),
+            Expr::Or(vec![
+                Expr::In { path: path("pos.city"), values: vec![Value::from("Berlin"), Value::from(1.5)] },
+                Expr::Exists { path: path("x") },
+                Expr::Type("KNOWS".into()),
+                Expr::Const(false),
+            ]),
+        ]);
+        let json = sonic_rs::to_string(&e).unwrap();
+        assert!(json.contains(r#"{"Compare":{"path":["age"],"op":"Lt","value":{"Int":18}}}"#), "{json}");
+        assert_eq!(sonic_rs::from_str::<Expr>(&json).unwrap(), e);
+        let bytes = postcard::to_stdvec(&e).unwrap();
+        assert_eq!(postcard::from_bytes::<Expr>(&bytes).unwrap(), e);
+    }
+
+    #[test]
+    fn serde_depth_limit() {
+        let nest = |depth: usize| {
+            let mut e = Expr::Const(true);
+            for _ in 1..depth {
+                e = Expr::Not(Box::new(e));
+            }
+            e
+        };
+        let ok = nest(MAX_EXPR_DEPTH);
+        assert_eq!(ok.depth(), MAX_EXPR_DEPTH);
+        let json = sonic_rs::to_string(&ok).unwrap();
+        assert_eq!(sonic_rs::from_str::<Expr>(&json).unwrap(), ok);
+        let err = sonic_rs::to_string(&nest(MAX_EXPR_DEPTH + 1)).unwrap_err();
+        assert!(err.to_string().contains("nested more than"), "{err}");
+
+        // Crafted input: far deeper than the limit, rejected without
+        // overflowing the stack (postcard has no recursion limit of its own)
+        let deeper = format!("{}{json}{}", r#"{"Not":"#.repeat(10), "}".repeat(10));
+        let err = sonic_rs::from_str::<Expr>(&deeper).unwrap_err();
+        assert!(err.to_string().contains("nested more than"), "{err}");
+        let mut bytes = vec![8u8; 100_000]; // `Not` is variant 8
+        bytes.extend(postcard::to_stdvec(&Expr::Const(true)).unwrap());
+        assert!(postcard::from_bytes::<Expr>(&bytes).is_err());
     }
 }

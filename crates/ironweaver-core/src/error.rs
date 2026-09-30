@@ -7,6 +7,7 @@ use std::fmt;
 /// The `Display` text is the user-facing message (the Python bindings pass
 /// it on unchanged).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum GraphError {
     /// A node with this id already exists.
     DuplicateNode(String),
@@ -28,6 +29,13 @@ pub enum GraphError {
     Interrupted,
     /// A size limit was reached (more than `u32::MAX` node or edge slots).
     Capacity(String),
+    /// A [`Budget`](crate::Budget) limit was reached: `visited` nodes had
+    /// been entered and `results` produced when the search stopped.
+    BudgetExceeded { visited: usize, results: usize },
+    /// An internal invariant failed (a bug). After this error from
+    /// [`Graph::apply_all`](crate::Graph::apply_all) the graph may be
+    /// inconsistent: reload it.
+    Internal(String),
 }
 
 impl fmt::Display for GraphError {
@@ -39,6 +47,10 @@ impl fmt::Display for GraphError {
             GraphError::EdgeNotFound(id) => write!(f, "Edge with id {} not found", id),
             GraphError::Stale => f.write_str("node or edge was removed from its graph"),
             GraphError::Interrupted => f.write_str("interrupted"),
+            GraphError::BudgetExceeded { visited, results } => {
+                write!(f, "budget exceeded after visiting {} nodes and producing {} results", visited, results)
+            }
+            GraphError::Internal(msg) => write!(f, "internal error: {}", msg),
             GraphError::InvalidArgument(msg)
             | GraphError::InvalidType(msg)
             | GraphError::Format(msg)

@@ -14,7 +14,25 @@ use crate::{Attrs, Date, DateTime, EdgeId, EdgeIx, Graph, GraphError, Value};
 
 /// A string from the input document: borrowed from the input buffer when it
 /// contains no escape sequences, owned otherwise.
-struct Str<'a>(Cow<'a, str>);
+pub(super) struct Str<'a>(Cow<'a, str>);
+
+thread_local! {
+    // Strings must be read as owned (`deserialize_string`): set while
+    // decoding from a stream, where nothing can be borrowed
+    static OWNED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run `f` with strings read as owned copies (see `Str`).
+pub(super) fn owned_strings<T>(f: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            OWNED.with(|c| c.set(self.0));
+        }
+    }
+    let _reset = Reset(OWNED.with(|c| c.replace(true)));
+    f()
+}
 
 impl<'de: 'a, 'a> Deserialize<'de> for Str<'a> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -37,13 +55,21 @@ impl<'de: 'a, 'a> Deserialize<'de> for Str<'a> {
             }
         }
 
-        d.deserialize_str(StrVisitor(PhantomData))
+        if OWNED.with(Cell::get) {
+            d.deserialize_string(StrVisitor(PhantomData))
+        } else {
+            d.deserialize_str(StrVisitor(PhantomData))
+        }
     }
 }
 
 impl Str<'_> {
-    fn as_str(&self) -> &str {
+    pub(super) fn as_str(&self) -> &str {
         &self.0
+    }
+
+    fn into_owned(self) -> Str<'static> {
+        Str(Cow::Owned(self.0.into_owned()))
     }
 }
 
@@ -156,6 +182,23 @@ impl<'a> LoadValue<'a> {
         }
     }
 
+    /// The same value, owning its strings.
+    pub fn into_owned(self) -> LoadValue<'static> {
+        LoadValue(match self.0 {
+            RawValue::String(s) => RawValue::String(s.into_owned()),
+            RawValue::Int(i) => RawValue::Int(i),
+            RawValue::Float(f) => RawValue::Float(f),
+            RawValue::Half(h) => RawValue::Half(h),
+            RawValue::Bool(b) => RawValue::Bool(b),
+            RawValue::None => RawValue::None,
+            RawValue::List(items) => RawValue::List(items.into_iter().map(LoadValue::into_owned).collect()),
+            RawValue::Dict(d) => RawValue::Dict(d.into_owned()),
+            RawValue::Bytes(b) => RawValue::Bytes(b),
+            RawValue::Date(d) => RawValue::Date(d),
+            RawValue::DateTime(t) => RawValue::DateTime(t),
+        })
+    }
+
     /// An owned copy.
     pub fn to_value(&self) -> Value {
         match self.kind() {
@@ -194,6 +237,11 @@ impl<'a> LoadAttrs<'a> {
         self.0 .0.iter().map(|(k, v)| (k.as_str(), v))
     }
 
+    /// The same map, owning its strings.
+    pub fn into_owned(self) -> LoadAttrs<'static> {
+        LoadAttrs(Entries(self.0 .0.into_iter().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()))
+    }
+
     /// An owned copy.
     pub fn to_attrs(&self) -> Attrs {
         self.iter().map(|(k, v)| (k.to_owned(), v.to_value())).collect()
@@ -229,9 +277,9 @@ pub struct LoadNode<'a> {
     #[serde(borrow)]
     meta: LoadAttrs<'a>,
     #[serde(borrow)]
-    edge_ids: Vec<Str<'a>>,
+    pub(super) edge_ids: Vec<Str<'a>>,
     #[serde(borrow)]
-    inverse_edge_ids: Vec<Str<'a>>,
+    pub(super) inverse_edge_ids: Vec<Str<'a>>,
 }
 
 impl<'a> LoadNode<'a> {
@@ -455,9 +503,19 @@ impl<'a> LoadGraph<'a> {
         self.version
     }
 
+    /// Paths of the property indexes saved with the graph (`metadata.indexes`;
+    /// none for files without it).
+    pub fn index_paths(&self) -> Result<Vec<Vec<String>>, GraphError> {
+        index_paths(&self.metadata)
+    }
+
     /// The graph-level `meta` map.
     pub fn meta(&self) -> &LoadAttrs<'a> {
         &self.meta
+    }
+
+    pub(super) fn into_meta(self) -> LoadAttrs<'a> {
+        self.meta
     }
 
     pub fn node_count(&self) -> usize {
@@ -476,6 +534,11 @@ impl<'a> LoadGraph<'a> {
     /// lists its edges in the order of its `edge_ids` / `inverse_edge_ids`,
     /// so edge order survives a round trip; edges missing from those lists
     /// (hand-written or older files) are appended.
+    ///
+    /// Property indexes saved with the graph are recreated, empty and with
+    /// every node marked dirty (lookups are exact meanwhile, but read the
+    /// nodes): call [`Graph::flush_indexes`] to fill them in (the `Record`
+    /// loaders in [`format`](crate::format) do).
     pub fn build<'s, N, E, X>(
         &'s self,
         mut make_node: impl FnMut(&'s LoadNode<'a>) -> Result<N, X>,
@@ -519,6 +582,7 @@ impl<'a> LoadGraph<'a> {
                 graph.reserve_edge_ids(EdgeId(next));
             }
         }
+        restore_indexes(&mut graph, &self.metadata)?;
 
         let mut out_done = vec![false; edge_ixs.len()];
         let mut in_done = vec![false; edge_ixs.len()];
@@ -551,4 +615,35 @@ impl<'a> LoadGraph<'a> {
         }
         Ok(graph)
     }
+}
+
+/// The index paths in a document's `metadata.indexes`: a list of paths,
+/// each a list of strings.
+pub(super) fn index_paths(metadata: &LoadAttrs<'_>) -> Result<Vec<Vec<String>>, GraphError> {
+    let bad = || GraphError::Format("metadata.indexes must be a list of lists of strings".into());
+    let Some(value) = metadata.get("indexes") else { return Ok(Vec::new()) };
+    let LoadKind::List(paths) = value.kind() else { return Err(bad()) };
+    paths
+        .iter()
+        .map(|p| match p.kind() {
+            LoadKind::List(keys) => keys
+                .iter()
+                .map(|k| match k.kind() {
+                    LoadKind::String(s) => Ok(s.to_owned()),
+                    _ => Err(bad()),
+                })
+                .collect(),
+            _ => Err(bad()),
+        })
+        .collect()
+}
+
+/// Recreate the saved property indexes, empty: every node is marked dirty,
+/// so lookups are exact at once (they read the nodes) and
+/// `Graph::flush_indexes` fills them in.
+pub(super) fn restore_indexes<N, E>(graph: &mut Graph<N, E>, metadata: &LoadAttrs<'_>) -> Result<(), GraphError> {
+    for path in index_paths(metadata)? {
+        graph.create_index_with_keys(&path, std::iter::empty())?;
+    }
+    Ok(())
 }

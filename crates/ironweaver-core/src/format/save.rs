@@ -163,7 +163,8 @@ struct TaggedMap<'a> {
 impl Serialize for TaggedMap<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(self.map.len()))?;
-        for (k, value) in self.map {
+        // Sorted by key, so equal graphs save to the same bytes
+        for (k, value) in crate::value::sorted_entries(self.map) {
             map.serialize_entry(k, &Tagged { value, half: self.half, depth: self.depth + 1 })?;
         }
         map.end()
@@ -208,11 +209,24 @@ impl Codec<Record, Record> for RecordCodec<'_> {
 /// then in each node's outgoing-edge order. Each node's `edge_ids` /
 /// `inverse_edge_ids` list its outgoing / incoming edges in order. Field
 /// order matters for the binary encoding and must match `load.rs`.
+///
+/// Attribute maps of `Record`s are written sorted by key, so two graphs with
+/// equal contents and equal slot order save to the same bytes, except for
+/// `metadata.timestamp` (the time of the save); turn that off with
+/// [`with_timestamp`](Self::with_timestamp) for byte-identical saves.
 pub struct GraphWriter<'a, N, E, C> {
     graph: &'a Graph<N, E>,
     codec: &'a C,
     /// Edge id by edge slot (empty for slots without an edge).
     ids: Vec<String>,
+    /// `metadata.timestamp`: the current time, a fixed text, or none.
+    timestamp: Timestamp,
+}
+
+enum Timestamp {
+    Now,
+    Fixed(String),
+    Omitted,
 }
 
 impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
@@ -221,7 +235,18 @@ impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
         for (e, edge) in graph.edges() {
             ids[e.slot()] = edge.id().0.to_string();
         }
-        GraphWriter { graph, codec, ids }
+        GraphWriter { graph, codec, ids, timestamp: Timestamp::Now }
+    }
+
+    /// Set `metadata.timestamp` to `timestamp`, or leave it out (`None`).
+    /// By default it is the time of the save (RFC 3339, UTC), which makes
+    /// every save of the same graph differ.
+    pub fn with_timestamp(mut self, timestamp: Option<String>) -> Self {
+        self.timestamp = match timestamp {
+            Some(t) => Timestamp::Fixed(t),
+            None => Timestamp::Omitted,
+        };
+        self
     }
 
     /// Render the graph as JSON bytes (always valid UTF-8).
@@ -296,23 +321,36 @@ struct EdgesMap<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
 
 struct GraphMeta<'a, N, E, C>(&'a GraphWriter<'a, N, E, C>);
 
-struct Metadata {
+struct Metadata<'a> {
     node_count: usize,
     edge_count: usize,
     next_edge_id: u64,
+    timestamp: &'a Timestamp,
+    /// Paths of the property indexes (definitions only; loaders rebuild them).
+    indexes: Vec<&'a [String]>,
 }
 
-impl Serialize for Metadata {
+impl Serialize for Metadata<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let timestamp = chrono::Utc::now().to_rfc3339();
-        let entries: [(&str, Value); 5] = [
+        let timestamp = match self.timestamp {
+            Timestamp::Now => Some(chrono::Utc::now().to_rfc3339()),
+            Timestamp::Fixed(t) => Some(t.clone()),
+            Timestamp::Omitted => None,
+        };
+        let mut entries: Vec<(&str, Value)> = vec![
             ("version", Value::String(super::FORMAT_VERSION.to_string())),
             ("node_count", Value::Int(self.node_count as i64)),
             ("edge_count", Value::Int(self.edge_count as i64)),
-            ("timestamp", Value::String(timestamp)),
-            // A string: the full u64 range doesn't fit an Int
-            ("next_edge_id", Value::String(self.next_edge_id.to_string())),
         ];
+        if let Some(t) = timestamp {
+            entries.push(("timestamp", Value::String(t)));
+        }
+        // A string: the full u64 range doesn't fit an Int
+        entries.push(("next_edge_id", Value::String(self.next_edge_id.to_string())));
+        if !self.indexes.is_empty() {
+            let path = |p: &&[String]| Value::List(p.iter().map(|k| Value::String(k.clone())).collect());
+            entries.push(("indexes", Value::List(self.indexes.iter().map(path).collect())));
+        }
         let mut map = s.serialize_map(Some(entries.len()))?;
         for (k, value) in &entries {
             map.serialize_entry(k, &Tagged { value, half: false, depth: 1 })?;
@@ -436,6 +474,8 @@ impl<N, E, C: Codec<N, E>> Serialize for GraphWriter<'_, N, E, C> {
                 node_count: self.graph.node_count(),
                 edge_count: self.graph.edge_count(),
                 next_edge_id: self.graph.next_edge_id().0,
+                timestamp: &self.timestamp,
+                indexes: self.graph.index_paths(),
             },
         )?;
         st.end()
