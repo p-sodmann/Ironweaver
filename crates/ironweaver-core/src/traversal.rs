@@ -6,7 +6,9 @@
 // Edge filters are closures returning `Result<bool, X>`, so a filter can fail
 // (e.g. a Python callback raising) and the error is passed straight back.
 // The `*_limited` variants bound the work and the result size with a
-// `Budget` (see `budget.rs`).
+// `Budget` (see `budget.rs`). Every search checks for cancellation and its
+// edge budget once per edge, so a node with millions of edges can't run
+// past either.
 
 use std::collections::VecDeque;
 
@@ -32,7 +34,7 @@ pub fn dfs<N, E, X>(
 }
 
 /// [`dfs`] under a [`Budget`]: nodes whose edges are followed count as
-/// visited, nodes returned as results.
+/// visited, edges passed to `edge_ok` as examined, nodes returned as results.
 pub fn dfs_limited<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
@@ -97,6 +99,9 @@ fn dfs_metered<N, E, X>(
             w.stack.pop();
             continue;
         }
+        if !w.meter.examine() {
+            break;
+        }
         let e = frame.0[frame.1];
         frame.1 += 1;
         let next_depth = frame.2 + 1;
@@ -122,7 +127,7 @@ pub fn bfs<N, E, X>(
 }
 
 /// [`bfs`] under a [`Budget`]: nodes whose edges are followed count as
-/// visited, nodes returned as results.
+/// visited, edges passed to `edge_ok` as examined, nodes returned as results.
 pub fn bfs_limited<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
@@ -169,6 +174,9 @@ fn bfs_metered<N, E, X>(
             break;
         }
         for &e in node.out_edges() {
+            if stop.poll() || !meter.examine() {
+                break 'search;
+            }
             let edge = g.edge_ref(e);
             if edge_ok(e, edge)? && !visited.contains(&edge.target()) {
                 if !meter.produce() {
@@ -196,7 +204,9 @@ pub fn expand<N, E>(
 }
 
 /// [`expand`] under a [`Budget`]: nodes whose neighbours are listed count
-/// as visited, nodes returned (seeds included) as results.
+/// as visited, the edges they are listed through as examined (with
+/// [`Direction::Both`], an edge is examined from both ends), nodes returned
+/// (seeds included) as results.
 pub fn expand_limited<N, E>(
     g: &Graph<N, E>,
     seeds: impl IntoIterator<Item = NodeIx>,
@@ -241,6 +251,9 @@ fn expand_metered<N, E>(
             break;
         }
         for (_, neighbor) in g.neighbors(ix, direction) {
+            if stop.poll() || !meter.examine() {
+                break 'search;
+            }
             if !discovered.contains(&neighbor) {
                 if !meter.produce() {
                     break 'search;
@@ -311,6 +324,9 @@ pub fn bidirectional_bfs<N, E, X>(
         let mut meeting = None;
         'level: for &ix in frontier.iter() {
             for (e, neighbor) in g.neighbors(ix, dir) {
+                if stop.poll() {
+                    return Ok(None);
+                }
                 if this.contains_key(&neighbor) || !edge_ok(e, g.edge_ref(e))? {
                     continue;
                 }

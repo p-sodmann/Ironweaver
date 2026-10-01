@@ -10,7 +10,7 @@
 //! - [`query`]: pattern matching and variable-length paths.
 //! - [`pathfinding`]: single shortest paths (BFS, Dijkstra, A*).
 //! - [`traversal`], [`random_walks`]: walks over the graph.
-//! - [`budget`]: [`Budget`] limits on visited nodes and results for traversals, path expansion and walks.
+//! - [`budget`]: [`Budget`] limits on visited nodes, examined edges and results for traversals, path expansion and walks.
 //! - [`format`](mod@format): saving and loading ([`Record`] graphs), format version 2.
 //! - [`value`], [`record`]: [`Value`], [`Record`] and the [`Attributes`] trait.
 

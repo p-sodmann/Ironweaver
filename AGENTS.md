@@ -116,9 +116,10 @@ Below is a quick guide to notable functions and where to find them.
 - **error.rs** – `GraphError` (`#[non_exhaustive]`; its `Display` text is
   the user-facing message; `BudgetExceeded`, `Internal` for broken
   invariants).
-- **budget.rs** – `Budget` (`max_visited`, `max_results`, `OnLimit`),
-  `Limited<T>` (`value`, `truncated`, `visited`) and the crate-internal
-  `Meter` that searches count with (`enter` / `produce`, `finish`).
+- **budget.rs** – `Budget` (`max_visited`, `max_edges`, `max_results`,
+  `OnLimit`), `Limited<T>` (`value`, `truncated`, `visited`, `edges`) and
+  the crate-internal `Meter` that searches count with (`enter` / `examine`
+  per edge / `produce`, `finish`). Searches poll cancellation per edge.
 - **cancel.rs** – cancellation: `Token`, `run` (runs a closure under a
   token; `Err(Interrupted)` if cancelled), `run_polling` (with a hook the
   sequential loops call now and then), `stop()` -> `Stop`: parallel loops
