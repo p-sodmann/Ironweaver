@@ -14,12 +14,20 @@
 // themselves) brings the index up to date and clears the marks; do it after
 // a batch of changes to keep lookups fast.
 //
+// An index can also be built off the graph (`begin_index_build`, then
+// `IndexBuild::read` / `insert` with only `&Graph`, then `install_index`):
+// while a build is open the graph records which nodes change, and
+// installing only looks at those (they are marked dirty), so the `&mut`
+// steps don't depend on the graph's size.
+//
 // Only scalar values are indexed (see `Key`): a node whose value at the
 // path is missing, none, a list, a dict or NaN is not in the index, which
 // matches `Expr` semantics (such values never compare equal or ordered).
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use crate::graph::{hash_table_bytes, IxMap, IxSet};
 use crate::{Attributes, CmpOp, Expr, Graph, GraphError, Key, NodeIx, Value};
@@ -149,21 +157,47 @@ impl PropertyIndex {
     }
 }
 
+/// The nodes changed (added, touched or removed) since an index build
+/// began.
+#[derive(Debug)]
+struct Tracker {
+    build: u64,
+    /// Gone once the `IndexBuild` is dropped: the tracker is then pruned.
+    alive: Weak<()>,
+    changed: IxSet<NodeIx>,
+    /// Every node may have changed (after `nodes_mut`).
+    all: bool,
+}
+
+/// Ids of index builds, unique in the process (so a build is never found
+/// in another graph).
+static NEXT_BUILD: AtomicU64 = AtomicU64::new(0);
+
 /// The property indexes of a graph, and which nodes they may be stale for.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Indexes {
     list: Vec<PropertyIndex>,
     dirty: IxSet<NodeIx>,
     /// Every node may be stale (after `nodes_mut`).
     all_dirty: bool,
+    /// Open index builds (see `begin_index_build`).
+    builds: Vec<Tracker>,
+}
+
+/// A clone has no open builds: they belong to the original graph.
+impl Clone for Indexes {
+    fn clone(&self) -> Self {
+        Indexes { list: self.list.clone(), dirty: self.dirty.clone(), all_dirty: self.all_dirty, builds: Vec::new() }
+    }
 }
 
 impl Indexes {
-    /// A node's payload may change.
+    /// A node's payload may change (or the node was added).
     #[inline]
     pub(crate) fn touch(&mut self, ix: NodeIx) {
-        if !self.list.is_empty() && !self.all_dirty {
-            self.dirty.insert(ix);
+        self.mark_dirty(ix);
+        if !self.builds.is_empty() {
+            self.track(ix);
         }
     }
 
@@ -173,6 +207,27 @@ impl Indexes {
             self.all_dirty = true;
             self.dirty.clear();
         }
+        self.builds.retain(|t| t.alive.strong_count() > 0);
+        for t in &mut self.builds {
+            t.all = true;
+            t.changed = IxSet::default();
+        }
+    }
+
+    #[inline]
+    fn mark_dirty(&mut self, ix: NodeIx) {
+        if !self.list.is_empty() && !self.all_dirty {
+            self.dirty.insert(ix);
+        }
+    }
+
+    fn track(&mut self, ix: NodeIx) {
+        self.builds.retain_mut(|t| {
+            if !t.all {
+                t.changed.insert(ix);
+            }
+            t.alive.strong_count() > 0
+        });
     }
 
     /// Approximate bytes used (see `Graph::memory_usage`).
@@ -181,6 +236,9 @@ impl Indexes {
     pub(crate) fn memory_usage(&self) -> usize {
         use std::mem::size_of;
         let mut total = hash_table_bytes(self.dirty.capacity(), size_of::<NodeIx>());
+        for t in &self.builds {
+            total += hash_table_bytes(t.changed.capacity(), size_of::<NodeIx>());
+        }
         for index in &self.list {
             // B-tree nodes hold up to 11 entries; assume two thirds full
             total += index.map.len() * (size_of::<Key>() + size_of::<Posting>()) * 3 / 2;
@@ -204,6 +262,9 @@ impl Indexes {
     }
 
     pub(crate) fn remove(&mut self, ix: NodeIx) {
+        if !self.builds.is_empty() {
+            self.track(ix);
+        }
         if self.list.is_empty() {
             return;
         }
@@ -345,7 +406,8 @@ impl<N, E> Graph<N, E> {
         let Some(at) = self.indexes.position(path) else { return false };
         self.indexes.list.remove(at);
         if self.indexes.list.is_empty() {
-            self.indexes = Indexes::default();
+            let builds = std::mem::take(&mut self.indexes.builds);
+            self.indexes = Indexes { builds, ..Indexes::default() };
         }
         true
     }
@@ -386,6 +448,172 @@ impl<N, E> Graph<N, E> {
         };
         out.sort_unstable_by_key(|ix| ix.slot());
         out
+    }
+
+    /// Start building an index on `path` off the graph: O(1). Until the
+    /// build is installed or cancelled the graph records which nodes
+    /// change. Fill the build with [`IndexBuild::read`] or
+    /// [`IndexBuild::insert`], which only borrow the graph shared (so they
+    /// can run under a read lock, in chunks), then install it with
+    /// [`install_index`](Self::install_index). Fails if `path` is invalid
+    /// or indexed already.
+    pub fn begin_index_build(&mut self, path: &[String]) -> Result<IndexBuild, GraphError> {
+        check_path(path)?;
+        if self.has_index(path) {
+            return Err(GraphError::InvalidArgument(format!("there is an index on {path:?} already")));
+        }
+        let id = NEXT_BUILD.fetch_add(1, Ordering::Relaxed);
+        let token = Arc::new(());
+        self.indexes.builds.retain(|t| t.alive.strong_count() > 0);
+        self.indexes.builds.push(Tracker {
+            build: id,
+            alive: Arc::downgrade(&token),
+            changed: IxSet::default(),
+            all: false,
+        });
+        Ok(IndexBuild { id, _token: token, index: PropertyIndex::new(path), unkeyed: IxSet::default() })
+    }
+
+    /// Install a build begun on this graph as the index on its path, in
+    /// O(nodes changed since [`begin_index_build`](Self::begin_index_build)):
+    /// removed nodes leave it, and changed or added nodes are marked dirty
+    /// (lookups re-read them until [`flush_indexes`](Self::flush_indexes)).
+    /// Live nodes the build didn't read are marked dirty too, which costs
+    /// a pass over the nodes; so does a `nodes_mut` during the build (every
+    /// node is then dirty). Returns false (and drops the build) if the path
+    /// was indexed meanwhile; fails if the build wasn't begun on this graph
+    /// or was installed or cancelled already.
+    pub fn install_index(&mut self, build: IndexBuild) -> Result<bool, GraphError> {
+        let tracker = self.take_tracker(build.id)?;
+        let IndexBuild { mut index, mut unkeyed, .. } = build;
+        if self.has_index(&index.path) {
+            return Ok(false);
+        }
+        // Read nodes that were removed later leave the index; then every
+        // read node is live
+        let changed: Vec<NodeIx> = if tracker.all {
+            let dead: Vec<NodeIx> = index.keys.keys().copied().filter(|&ix| self.node(ix).is_none()).collect();
+            for ix in dead {
+                index.unset(ix);
+            }
+            unkeyed.retain(|&ix| self.node(ix).is_some());
+            Vec::new()
+        } else {
+            let mut live = Vec::with_capacity(tracker.changed.len());
+            for ix in tracker.changed {
+                if self.node(ix).is_some() {
+                    live.push(ix);
+                } else {
+                    index.unset(ix);
+                    unkeyed.remove(&ix);
+                }
+            }
+            live
+        };
+        // Every live node must be read or changed (and so re-read)
+        let read = |ix: &NodeIx| index.keys.contains_key(ix) || unkeyed.contains(ix);
+        let covered = index.keys.len() + unkeyed.len() + changed.iter().filter(|ix| !read(ix)).count();
+        let missing: Vec<NodeIx> = if tracker.all || covered == self.node_count() {
+            Vec::new()
+        } else {
+            self.node_indices().filter(|ix| !read(ix)).collect()
+        };
+        if self.indexes.list.is_empty() {
+            // Nothing was tracked before the first index
+            self.indexes.dirty.clear();
+            self.indexes.all_dirty = false;
+        }
+        self.indexes.list.push(index);
+        if tracker.all {
+            self.indexes.all_dirty = true;
+            self.indexes.dirty.clear();
+        }
+        for ix in changed.into_iter().chain(missing) {
+            self.indexes.mark_dirty(ix);
+        }
+        Ok(true)
+    }
+
+    /// Drop a build without installing it, so the graph stops recording
+    /// changes for it; returns whether it was open on this graph. (Just
+    /// dropping it works too: the graph stops at its next change.)
+    pub fn cancel_index_build(&mut self, build: IndexBuild) -> bool {
+        self.take_tracker(build.id).is_ok()
+    }
+
+    /// Number of index builds begun on this graph and not yet installed,
+    /// cancelled or dropped.
+    pub fn open_index_builds(&self) -> usize {
+        self.indexes.builds.iter().filter(|t| t.alive.strong_count() > 0).count()
+    }
+
+    fn take_tracker(&mut self, build: u64) -> Result<Tracker, GraphError> {
+        let at = self.indexes.builds.iter().position(|t| t.build == build).ok_or_else(foreign_build)?;
+        Ok(self.indexes.builds.swap_remove(at))
+    }
+}
+
+fn foreign_build() -> GraphError {
+    GraphError::InvalidArgument("the index build is not open on this graph".into())
+}
+
+/// An index being built off the graph: see [`Graph::begin_index_build`].
+/// It owns the index under construction and doesn't borrow the graph, so
+/// it can be filled between (and outside) lock holds, and moved across
+/// threads.
+#[derive(Debug)]
+pub struct IndexBuild {
+    id: u64,
+    /// Lets the graph see that the build was dropped.
+    _token: Arc<()>,
+    index: PropertyIndex,
+    /// Nodes read that have no key (the others are in `index.keys`).
+    unkeyed: IxSet<NodeIx>,
+}
+
+impl IndexBuild {
+    /// The indexed path.
+    pub fn path(&self) -> &[String] {
+        &self.index.path
+    }
+
+    /// Number of nodes read so far (with a key or without).
+    pub fn len(&self) -> usize {
+        self.index.keys.len() + self.unkeyed.len()
+    }
+
+    /// Whether no node was read yet.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Record a node's key, read by the caller (`None`: the node has no
+    /// indexable value). `graph` must be the graph the build was begun on;
+    /// a stale `ix` is ignored. Reading a node again replaces its key.
+    pub fn insert<N, E>(&mut self, graph: &Graph<N, E>, ix: NodeIx, key: Option<Key>) -> Result<(), GraphError> {
+        self.check_graph(graph)?;
+        self.put(graph, ix, key);
+        Ok(())
+    }
+
+    fn check_graph<N, E>(&self, graph: &Graph<N, E>) -> Result<(), GraphError> {
+        if graph.indexes.builds.iter().any(|t| t.build == self.id) {
+            Ok(())
+        } else {
+            Err(foreign_build())
+        }
+    }
+
+    fn put<N, E>(&mut self, graph: &Graph<N, E>, ix: NodeIx, key: Option<Key>) {
+        if graph.node(ix).is_none() {
+            return;
+        }
+        if key.is_some() {
+            self.unkeyed.remove(&ix);
+        } else {
+            self.unkeyed.insert(ix);
+        }
+        self.index.set(ix, key);
     }
 }
 
@@ -617,6 +845,30 @@ impl<N: Attributes, E> Graph<N, E> {
     }
 }
 
+impl IndexBuild {
+    /// Read the keys of `nodes` from `graph` (the graph the build was begun
+    /// on), skipping stale handles. Call it once with
+    /// [`Graph::node_indices`], or in chunks between lock holds; nodes
+    /// changed in between are re-read when the build is installed.
+    pub fn read<N: Attributes, E, X>(
+        &mut self,
+        graph: &Graph<N, E>,
+        nodes: impl IntoIterator<Item = NodeIx>,
+    ) -> Result<(), X>
+    where
+        X: From<GraphError> + From<N::Error>,
+    {
+        self.check_graph(graph)?;
+        for ix in nodes {
+            if let Some(node) = graph.node(ix) {
+                let key = key_of(&node.data, &self.index.path)?;
+                self.put(graph, ix, key);
+            }
+        }
+        Ok(())
+    }
+}
+
 fn sorted_unique(mut v: Vec<NodeIx>) -> Vec<NodeIx> {
     v.sort_unstable_by_key(|ix| ix.slot());
     v.dedup();
@@ -796,6 +1048,135 @@ mod tests {
         assert_eq!(g.find_nodes(&path, &Value::Int(4)).unwrap().unwrap().len(), 1);
         assert!(g.drop_index(&path));
         assert!(g.index_paths().is_empty());
+    }
+
+    /// One random change: add, remove, relabel or set a node.
+    fn random_change(g: &mut G, live: &mut Vec<NodeIx>, rng: &mut StdRng) {
+        match rng.gen_range(0..5) {
+            0 => {
+                let ix = g.add_node(format!("m{}", rng.gen::<u64>()), Record::default()).unwrap();
+                set(g, ix, rng);
+                live.push(ix);
+            }
+            1 if !live.is_empty() => {
+                let ix = live.swap_remove(rng.gen_range(0..live.len()));
+                g.remove_node(ix);
+            }
+            2 if !live.is_empty() => {
+                let ix = live[rng.gen_range(0..live.len())];
+                g.add_label(ix, "L").unwrap();
+            }
+            _ if !live.is_empty() => {
+                let ix = live[rng.gen_range(0..live.len())];
+                set(g, ix, rng);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn builds_off_the_graph_survive_changes() {
+        let mut rng = StdRng::seed_from_u64(11);
+        for case in 0..60 {
+            let mut g = G::new();
+            let mut live = Vec::new();
+            for i in 0..30 {
+                let ix = g.add_node(format!("n{i}"), Record::default()).unwrap();
+                set(&mut g, ix, &mut rng);
+                live.push(ix);
+            }
+            // Sometimes another index exists already, with pending changes
+            if case % 3 == 0 {
+                g.create_index::<GraphError>(&p("y")).unwrap();
+                set(&mut g, live[0], &mut rng);
+            }
+            let mut build = g.begin_index_build(&p("x")).unwrap();
+            assert_eq!(g.open_index_builds(), 1);
+            // Read in chunks, changing the graph in between
+            let nodes: Vec<NodeIx> = g.node_indices().collect();
+            let skip = case % 4 == 1;
+            for (i, chunk) in nodes.chunks(7).enumerate() {
+                if skip && i == 1 {
+                    continue; // never read: install must find these
+                }
+                build.read::<_, _, GraphError>(&g, chunk.iter().copied()).unwrap();
+                for _ in 0..rng.gen_range(0..4) {
+                    random_change(&mut g, &mut live, &mut rng);
+                }
+                if case % 10 == 7 && i == 2 {
+                    for (_, n) in g.nodes_mut().take(1) {
+                        n.data.attr.insert("x".into(), Value::Int(1));
+                    }
+                }
+            }
+            for _ in 0..rng.gen_range(0..4) {
+                random_change(&mut g, &mut live, &mut rng);
+            }
+            assert!(g.install_index(build).unwrap());
+            assert_eq!(g.open_index_builds(), 0);
+            check(&g);
+            for (a, b) in g.indexes.list_heaps() {
+                assert_eq!(a, b);
+            }
+            random_change(&mut g, &mut live, &mut rng);
+            check(&g);
+            g.flush_indexes().unwrap();
+            assert!(!g.indexes_dirty());
+            check(&g);
+        }
+    }
+
+    #[test]
+    fn index_builds_belong_to_their_graph() {
+        let mut g = G::new();
+        let a = g.add_node("a", Record::with_attr([("x", Value::Int(1))])).unwrap();
+        let b = g.add_node("b", Record::with_attr([("x", Value::Int(2))])).unwrap();
+        assert!(g.begin_index_build(&p("labels")).is_err());
+
+        // Unchanged and fully read: installed clean
+        let mut build = g.begin_index_build(&p("x")).unwrap();
+        build.insert(&g, a, Key::of(&Value::Int(1))).unwrap();
+        build.insert(&g, b, Key::of(&Value::Int(2))).unwrap();
+        assert_eq!((build.path(), build.len()), (p("x").as_slice(), 2));
+        assert!(g.install_index(build).unwrap());
+        assert!(!g.indexes_dirty());
+        assert_eq!(g.find_nodes(&p("x"), &Value::Int(2)).unwrap().unwrap(), [b]);
+        assert!(g.begin_index_build(&p("x")).is_err());
+
+        // Another graph, a clone, or a second install: refused
+        let mut other = G::new();
+        let build = g.begin_index_build(&p("z")).unwrap();
+        let mut copy = g.clone();
+        assert_eq!(copy.open_index_builds(), 0);
+        let mut build2 = other.begin_index_build(&p("z")).unwrap();
+        assert!(build2.insert(&g, a, None).is_err());
+        assert!(build2.read::<_, _, GraphError>(&copy, [a]).is_err());
+        assert!(copy.install_index(build).is_err());
+        assert!(!g.cancel_index_build(build2));
+        // Dropped builds are no longer open, and are pruned on a change
+        assert_eq!((g.open_index_builds(), other.open_index_builds()), (0, 0));
+        assert_eq!(g.indexes.builds.len(), 1);
+        g.node_mut(a).unwrap();
+        assert!(g.indexes.builds.is_empty());
+        let build = g.begin_index_build(&p("z")).unwrap();
+        drop(build);
+        assert_eq!(g.open_index_builds(), 0);
+
+        // Indexed meanwhile: dropped, and stops tracking
+        let build = g.begin_index_build(&p("w")).unwrap();
+        g.create_index::<GraphError>(&p("w")).unwrap();
+        assert!(!g.install_index(build).unwrap());
+        assert_eq!(g.open_index_builds(), 0);
+
+        // Cancelled builds stop tracking; dropping the last index keeps
+        // the open builds
+        let build = g.begin_index_build(&p("v")).unwrap();
+        assert!(g.drop_index(&p("x")) && g.drop_index(&p("w")));
+        assert_eq!(g.open_index_builds(), 1);
+        g.node_mut(a).unwrap();
+        assert!(g.memory_usage() > 0);
+        assert!(g.cancel_index_build(build));
+        assert_eq!(g.open_index_builds(), 0);
     }
 
     #[test]

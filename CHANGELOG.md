@@ -84,7 +84,11 @@ a query layer and database foundations.
   in `metadata.indexes`; loading rebuilds them). In the core:
   `Graph::create_index`, `find_nodes`, `find_nodes_in_range`,
   `index_candidates`, with exact results while payload changes are pending
-  (`flush_indexes`).
+  (`flush_indexes`). An index can be built off the graph:
+  `Graph::begin_index_build` (O(1)) returns an `IndexBuild` that reads keys
+  through `&Graph` (under a read lock, in chunks), and `install_index` swaps
+  it in, in time proportional to the nodes changed meanwhile, which are
+  marked dirty.
 - `Vertex.memory_usage(deep=False)` (and `Graph::memory_usage` in the
   core): bytes used by the structure, with `deep` also the attribute dicts
   and their values.
