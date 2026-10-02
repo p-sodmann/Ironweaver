@@ -228,6 +228,18 @@ fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphE
 /// `path`. A failed or interrupted save leaves any previous file untouched
 /// (and removes the temporary file when it can). An existing file's
 /// permissions are kept; a symlink at `path` is replaced, not written through.
+///
+/// `Ok` means the new contents are on disk (fsynced), the rename is done,
+/// and, on Unix, the rename itself is durable: the directory holding `path`
+/// was fsynced too, so after a crash or power loss `path` holds the new
+/// file. Windows has no way to sync a directory; there the rename is
+/// done but not explicitly made durable.
+///
+/// If only that last step fails (the directory can't be opened or its fsync
+/// fails), the error is returned although `path` already names the new
+/// file: it may still revert to the old one after a crash. A failed fsync
+/// can't be made up for by syncing again, so callers that need durability
+/// should treat the save as failed.
 pub fn write_atomic(
     path: impl AsRef<Path>,
     write: impl FnOnce(&mut BufWriter<File>) -> io::Result<()>,
@@ -257,13 +269,13 @@ pub fn write_atomic(
         let _ = fs::remove_file(&tmp);
         return result;
     }
-    // Make the rename itself durable (best effort; not possible on Windows)
+    // Make the rename itself durable (not possible on Windows)
     #[cfg(unix)]
     if let Some(dir) = path.parent() {
         let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
-        }
+        File::open(dir).and_then(|d| d.sync_all()).map_err(|e| {
+            io::Error::new(e.kind(), format!("saved, but syncing the directory {} failed: {e}", dir.display()))
+        })?;
     }
     Ok(())
 }

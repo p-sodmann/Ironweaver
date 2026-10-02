@@ -149,6 +149,32 @@ fn write_atomic_replaces_the_file_or_leaves_it_alone() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn write_atomic_reports_a_failed_directory_sync() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("ironweaver-atomic-dir-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Writable but not readable: the file can be created and renamed, but
+    // the directory can't be opened to fsync it
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o300)).unwrap();
+    let path = dir.join("graph.json");
+    let result = format::write_atomic(&path, |out| std::io::Write::write_all(out, b"data"));
+    let readable = std::fs::File::open(&dir).is_ok(); // root reads anything
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    if readable {
+        result.unwrap();
+    } else {
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("syncing the directory"), "{err}");
+    }
+    // The rename itself happened; no temporary file is left
+    assert_eq!(std::fs::read(&path).unwrap(), b"data");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn equal_graphs_save_to_equal_bytes() {
     use format::{GraphWriter, RecordCodec};
