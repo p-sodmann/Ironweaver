@@ -126,6 +126,8 @@ a query layer and database foundations.
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).
+- `Graph::index_stats(path)` / `Vertex.index_stats(name)`: an index's
+  entry count, distinct keys, memory and dirty node count, in O(1).
 
 ### Changed
 

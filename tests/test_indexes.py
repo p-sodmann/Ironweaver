@@ -153,3 +153,23 @@ def test_indexes_are_saved_and_rebuilt(tmp_path, fmt):
     # Still follows changes after loading
     h["n0"].attr_set("age", 3)
     assert [n.id for n in h.find("age", 3)] == ["n0", "n3", "n8", "n13", "n18"]
+
+
+def test_index_stats():
+    g = people()
+    assert g.index_stats("city") is None
+    g.create_index("city")
+    g.create_index("age")
+    stats = g.index_stats("city")
+    assert stats == {"entries": 4, "distinct_keys": 2, "memory_bytes": stats["memory_bytes"], "dirty": 0}
+    assert 0 < stats["memory_bytes"] <= g.memory_usage()
+    # 25.0 and 31 / 40 are numbers, "unknown" a string: four distinct keys
+    assert g.index_stats("age")["entries"] == 4
+    assert g.index_stats("age")["distinct_keys"] == 4
+    g["bob"].attr_set("city", "Paris")
+    g.add_node("eve", {"city": "Oslo"})
+    g.remove_node("acme")
+    stats = g.index_stats("city")
+    assert (stats["entries"], stats["distinct_keys"], stats["dirty"]) == (4, 2, 0)
+    g.drop_index("city")
+    assert g.index_stats("city") is None
