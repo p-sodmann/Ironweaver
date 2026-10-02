@@ -126,7 +126,8 @@ Below is a quick guide to notable functions and where to find them.
   loop must check one and bail out early (the partial result is dropped).
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
-  graphs), the `Attributes` trait and `Lookup`.
+  graphs), the `Attributes` trait, `Lookup`, and `lookup` (the attribute
+  path rules on an `Attrs` map; `Record` uses it).
 - **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS), their
   `*_limited` variants under a `Budget`, `bidirectional_bfs` (used by the
   `bfs` path method and `Node.bfs_search`).
@@ -210,7 +211,8 @@ Below is a quick guide to notable functions and where to find them.
 - **format/** – on-disk format version 2 (JSON via sonic-rs; binary:
   header + postcard payload + trailer with length and CRC32; layout in the
   comment at the top of `mod.rs`). Version 1 files (JSON "1.x", headerless
-  bincode) keep loading: `load.rs` `V1*` structs, `migrate_v1` (attr
+  bincode, only with the default `format-v1` feature; CI also tests
+  without it) keep loading: `load.rs` `V1*` structs, `migrate_v1` (attr
   "labels" / "type" -> fields), new edge ids (Python keeps the old one in
   `meta["legacy_id"]`); `tests/data/legacy_*` (v1) and
   `tests/data/v2_*` (v2 golden files) must keep loading. The

@@ -15,7 +15,8 @@ categories = ["data-structures", "algorithms", "science"]
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 sonic-rs = "0.5"
-bincode = "1.3"
+# Only for reading format version 1 binary files (`format-v1` feature)
+bincode = { version = "1.3", optional = true }
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 crc32fast = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -23,3 +24,10 @@ half = { version = "2.2", features = ["serde"] }
 rand = "0.8"
 rayon = "1.10"
 foldhash = "0.2"
+
+[features]
+default = ["format-v1"]
+# Read binary files saved in format version 1 (ironweaver 0.1). Pulls in
+# bincode 1.x, which is unmaintained (RUSTSEC-2025-0141); turn default
+# features off if you only read files saved by 0.2 or later.
+format-v1 = ["dep:bincode"]

@@ -259,9 +259,19 @@ fn legacy_files_load() {
     let json = std::fs::read(format!("{data}legacy_graph.json")).unwrap();
     let bin = std::fs::read(format!("{data}legacy_graph.bin")).unwrap();
     let half = std::fs::read(format!("{data}legacy_graph_f16.bin")).unwrap();
-    for (g, meta) in
-        [format::from_json(&json).unwrap(), format::from_binary(&bin).unwrap(), format::from_binary(&half).unwrap()]
-    {
+    let mut loaded = vec![format::from_json(&json).unwrap()];
+    if cfg!(feature = "format-v1") {
+        loaded.extend([format::from_binary(&bin).unwrap(), format::from_binary(&half).unwrap()]);
+    } else {
+        // Without the feature, version 1 binary files are a clear error
+        for bytes in [&bin, &half] {
+            let err = format::from_binary(bytes).err().unwrap().to_string();
+            assert!(err.contains("`format-v1` feature"), "{err}");
+            let err = format::from_binary_reader(&bytes[..]).err().unwrap().to_string();
+            assert!(err.contains("`format-v1` feature"), "{err}");
+        }
+    }
+    for (g, meta) in loaded {
         assert_eq!(meta["title"], Value::from("legacy"));
         let mut ids: Vec<&str> = g.nodes().map(|(_, n)| n.id()).collect();
         ids.sort();

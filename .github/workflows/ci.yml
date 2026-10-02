@@ -32,6 +32,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p ironweaver-core
+      # Without the format-v1 feature (and bincode)
+      - run: cargo clippy -p ironweaver-core --all-targets --no-default-features -- -D warnings
+      - run: cargo test -p ironweaver-core --no-default-features
       - name: The core does not depend on pyo3
         run: |
           if cargo tree -p ironweaver-core -e normal | grep -q pyo3; then

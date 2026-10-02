@@ -110,7 +110,13 @@ a query layer and database foundations.
     file's bytes are never all in memory; the checksum is checked at the
     end and a mismatch drops the partial graph);
   - `GraphWriter::with_timestamp` fixes or omits `metadata.timestamp`, for
-    byte-identical saves.
+    byte-identical saves;
+  - `record::lookup` reads an attribute path from an `Attrs` map with the
+    same rules as `Record`, for other payload types that store `Attrs`;
+  - the `format-v1` feature (on by default) reads format version 1 binary
+    files. It is the only user of bincode 1.x (unmaintained,
+    RUSTSEC-2025-0141), so crates that only read files saved by 0.2 can
+    turn default features off and drop it.
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).
