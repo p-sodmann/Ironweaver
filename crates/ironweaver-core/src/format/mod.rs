@@ -73,8 +73,14 @@ fn remember(msg: &str) {
     });
 }
 
-/// The remembered error message, if any; clears it.
-fn take_error() -> Option<String> {
+/// The message of the first error raised through [`ser_error`] /
+/// [`de_error`] on this thread since the last call, if any; clears it.
+///
+/// The binary encoding (postcard) drops custom error messages, so a caller
+/// that encodes values, ops or expressions with postcard itself can call
+/// this before encoding (to clear a stale message) and after a failure (to
+/// report the real reason, such as a depth limit).
+pub fn take_error() -> Option<String> {
     LAST_ERROR.with(|e| e.borrow_mut().take())
 }
 

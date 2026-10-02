@@ -93,11 +93,11 @@ mod nested {
     }
 
     pub fn serialize<S: Serializer, T: Serialize>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-        enter_level(&DEPTH, MAX_EXPR_DEPTH, || serde::ser::Error::custom(message()), || v.serialize(s))
+        enter_level(&DEPTH, MAX_EXPR_DEPTH, || crate::format::ser_error::<S::Error>(message()), || v.serialize(s))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
-        enter_level(&DEPTH, MAX_EXPR_DEPTH, || serde::de::Error::custom(message()), || T::deserialize(d))
+        enter_level(&DEPTH, MAX_EXPR_DEPTH, || crate::format::de_error::<D::Error>(message()), || T::deserialize(d))
     }
 }
 
@@ -202,7 +202,7 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GraphError, Record};
+    use crate::{format, GraphError, Record};
 
     fn path(p: &str) -> Vec<String> {
         p.split('.').map(str::to_owned).collect()
@@ -307,6 +307,15 @@ mod tests {
         assert!(err.to_string().contains("nested more than"), "{err}");
         let mut bytes = vec![8u8; 100_000]; // `Not` is variant 8
         bytes.extend(postcard::to_stdvec(&Expr::Const(true)).unwrap());
+        format::take_error();
         assert!(postcard::from_bytes::<Expr>(&bytes).is_err());
+        assert!(format::take_error().unwrap().contains("expression nested more than"));
+
+        // Postcard drops custom messages: `take_error` has it
+        format::take_error();
+        assert!(postcard::to_stdvec(&nest(MAX_EXPR_DEPTH + 1)).is_err());
+        let msg = format::take_error().unwrap();
+        assert_eq!(msg, format!("expression nested more than {MAX_EXPR_DEPTH} levels deep"));
+        assert_eq!(format::take_error(), None);
     }
 }
