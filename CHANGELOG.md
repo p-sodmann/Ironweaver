@@ -146,6 +146,9 @@ a query layer and database foundations.
   rollback (a bug): the rest of the rollback runs and the error is
   `GraphError::Internal`. Its docs now say what a rollback doesn't restore
   (adjacency order, the edge id counter). `GraphError` is `#[non_exhaustive]`.
+  `Op::RemoveNode`, `Op::RenameNode` and `Op::RemoveEdge` no longer panic
+  either if the graph's id index or adjacency lists are inconsistent: `apply`
+  checks before changing anything and returns `GraphError::Internal`.
 - In pattern text, an empty property map (`(a {})`) means no condition, and
   conditions from several mentions of a node are one flat `And`.
 - Large speed-ups across traversal, pathfinding, serialization and graph

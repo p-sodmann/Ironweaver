@@ -131,6 +131,8 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
             Op::RemoveNode { id } => {
                 let ix = self.node_named(&id)?;
                 let node = self.node(ix).ok_or_else(|| internal("a node just looked up is gone"))?;
+                // Check the invariants first, so a broken one changes nothing
+                self.check_node(ix, node)?;
                 let labels = node.labels().iter().map(|&s| self.symbol_name(s).to_owned()).collect();
                 // Incident edges, each once (a self-loop is in both lists)
                 let mut edges: Vec<EdgeIx> = node.out_edges().to_vec();
@@ -140,7 +142,7 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
                 for e in edges {
                     restore.push(self.take_edge(e)?);
                 }
-                let (id, data) = self.remove_node(ix).ok_or_else(|| internal("a node just looked up is gone"))?;
+                let (id, data) = self.try_remove_node(ix)?.ok_or_else(|| internal("a node just looked up is gone"))?;
                 undo.push(Op::AddNode { id, labels, data });
                 undo.extend(restore);
                 undo
@@ -206,7 +208,7 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
     /// Remove a live edge; the op that adds it back.
     fn take_edge(&mut self, e: EdgeIx) -> Result<Op<N, E>, GraphError> {
         let ty = self.edge_type_name(e).map(str::to_owned);
-        let edge = self.remove_edge(e).ok_or_else(|| internal("an incident edge is gone"))?;
+        let edge = self.try_remove_edge(e)?.ok_or_else(|| internal("an incident edge is gone"))?;
         let name =
             |ix: NodeIx| self.node(ix).map(|n| n.id().to_owned()).ok_or_else(|| internal("an edge endpoint is gone"));
         Ok(Op::AddEdge { id: edge.id(), from: name(edge.source())?, to: name(edge.target())?, ty, data: edge.data })
