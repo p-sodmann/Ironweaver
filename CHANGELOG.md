@@ -84,7 +84,11 @@ a query layer and database foundations.
   in `metadata.indexes`; loading rebuilds them). In the core:
   `Graph::create_index`, `find_nodes`, `find_nodes_in_range`,
   `index_candidates`, with exact results while payload changes are pending
-  (`flush_indexes`).
+  (`flush_indexes`). An index can be built off the graph:
+  `Graph::begin_index_build` (O(1)) returns an `IndexBuild` that reads keys
+  through `&Graph` (under a read lock, in chunks), and `install_index` swaps
+  it in, in time proportional to the nodes changed meanwhile, which are
+  marked dirty.
 - `Vertex.memory_usage(deep=False)` (and `Graph::memory_usage` in the
   core): bytes used by the structure, with `deep` also the attribute dicts
   and their values.
@@ -159,6 +163,9 @@ a query layer and database foundations.
 
 ### Fixed
 
+- `Expr` serde keeps its depth-limit message ("expression nested more than
+  100 levels deep") under the binary encoding: postcard drops custom
+  messages, and `format::take_error` (now public) returns it after a failure.
 - Binary files with a non-zero `flags` or `reserved` header field are
   refused (they loaded as if intact): an unknown flag as "not supported
   (written by a newer ironweaver?)", a non-zero reserved field as damage.
@@ -169,6 +176,10 @@ a query layer and database foundations.
 - JSON files keep `-0.0` (it loaded as `0.0`), and NaN and ±infinity
   attribute values are saved as `"NaN"`, `"Infinity"` and `"-Infinity"`
   (they were written as `null`, and the file then failed to load).
+- `Value`'s serde counts depth like the file format (a value is depth 1,
+  a container's items one deeper), so an empty list or dict at depth 100
+  that a file can hold can also be encoded with serde (and in `Op`s); it
+  was rejected one level early.
 
 ## 0.1.0
 

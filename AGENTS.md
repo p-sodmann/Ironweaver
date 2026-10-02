@@ -102,6 +102,9 @@ Below is a quick guide to notable functions and where to find them.
   the matcher and `filter`), `set_index_keys` / `reindex_node` /
   `flush_indexes`. `add_node`, `node_mut`, `nodes_mut` mark nodes dirty;
   lookups re-read dirty nodes, so they are exact before a flush.
+  `begin_index_build` -> `IndexBuild` (filled through `&Graph`) ->
+  `install_index` (O(changed): while a build is open the graph records
+  node changes in `Indexes::touch` / `touch_all` / `remove`).
 - **temporal.rs** – `Date`, `DateTime` (offset or wall-clock), `Parts`, and
   the `bytes` serde helper (base64 in JSON); `value.rs` has `Key` (hashable,
   totally ordered scalar keys agreeing with `loose_eq` / `loose_cmp`).
