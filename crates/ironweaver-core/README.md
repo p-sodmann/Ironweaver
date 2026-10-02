@@ -80,8 +80,10 @@ Without a token the checks cost nothing measurable.
 Depth limits don't bound work: a depth-2 traversal from a node with a
 million neighbours visits a million nodes. The `*_limited` traversals,
 `query::expand_paths_limited` and `WalkPlan::run_limited` take a `Budget`
+(`max_visited` nodes entered, `max_edges` edges examined, `max_results`)
 and stop at its limits, with `GraphError::BudgetExceeded` or, with
-`truncate()`, the first results and `truncated` set:
+`truncate()`, the first results and `truncated` set. Only `max_edges`
+bounds the work at a single node with many edges:
 
 ```rust
 use ironweaver_core::traversal::bfs_limited;
@@ -97,6 +99,8 @@ let all = |_, _: &_| Ok::<_, GraphError>(true);
 let first = bfs_limited(&g, hub, Some(2), Budget::default().max_results(10).truncate(), all)?;
 assert_eq!((first.value.len(), first.truncated), (10, true));
 assert!(bfs_limited(&g, hub, Some(2), Budget::default().max_results(10), all).is_err());
+let some = bfs_limited(&g, hub, None, Budget::default().max_edges(100).truncate(), all)?;
+assert_eq!((some.value.len(), some.edges, some.truncated), (101, 100, true));
 # Ok::<(), GraphError>(())
 ```
 

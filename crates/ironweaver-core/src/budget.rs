@@ -11,7 +11,11 @@
 // (`WalkPlan::run_limited`) take a `Budget`. When a limit is reached they
 // either fail with `GraphError::BudgetExceeded` or return what they found
 // so far with `truncated` set; the budget says which. A check is a counter
-// comparison per node entered or result produced.
+// comparison per node entered, edge examined or result produced.
+//
+// `max_edges` is what bounds a search through a high-degree node: a node is
+// entered once, but each of its edges is examined (and passed to the edge
+// filter) one by one.
 //
 // Wall-clock limits are a separate mechanism: run the search under a
 // `cancel::Token`.
@@ -25,6 +29,11 @@ pub struct Budget {
     /// at their edges; for path expansion: step onto, the start included;
     /// for random walks: walk through).
     pub max_visited: Option<usize>,
+    /// Most edges the search may examine, whether or not they pass the edge
+    /// filter (for traversals and path expansion: every edge looked at from
+    /// a node entered, including edges to nodes already visited; for random
+    /// walks: steps taken).
+    pub max_edges: Option<usize>,
     /// Most results (nodes, paths or walks) the search may produce.
     pub max_results: Option<usize>,
     /// What reaching a limit does.
@@ -44,11 +53,18 @@ pub enum OnLimit {
 
 impl Budget {
     /// No limits.
-    pub const UNLIMITED: Budget = Budget { max_visited: None, max_results: None, on_limit: OnLimit::Error };
+    pub const UNLIMITED: Budget =
+        Budget { max_visited: None, max_edges: None, max_results: None, on_limit: OnLimit::Error };
 
     /// At most `n` nodes entered.
     pub fn max_visited(mut self, n: usize) -> Self {
         self.max_visited = Some(n);
+        self
+    }
+
+    /// At most `n` edges examined.
+    pub fn max_edges(mut self, n: usize) -> Self {
+        self.max_edges = Some(n);
         self
     }
 
@@ -76,6 +92,8 @@ pub struct Limited<T> {
     pub truncated: bool,
     /// Nodes entered (see [`Budget::max_visited`]).
     pub visited: usize,
+    /// Edges examined (see [`Budget::max_edges`]).
+    pub edges: usize,
 }
 
 /// Counts a search's work against a budget.
@@ -83,6 +101,7 @@ pub struct Limited<T> {
 pub(crate) struct Meter {
     budget: Budget,
     visited: usize,
+    edges: usize,
     results: usize,
     /// A limit was reached.
     hit: bool,
@@ -90,7 +109,7 @@ pub(crate) struct Meter {
 
 impl Meter {
     pub(crate) fn new(budget: Budget) -> Self {
-        Meter { budget, visited: 0, results: 0, hit: false }
+        Meter { budget, visited: 0, edges: 0, results: 0, hit: false }
     }
 
     /// Count entering a node; false (the search must stop) if that is over
@@ -102,6 +121,18 @@ impl Meter {
             return false;
         }
         self.visited += 1;
+        true
+    }
+
+    /// Count examining an edge; false (the search must stop, without
+    /// examining it) if that is over the budget.
+    #[inline]
+    pub(crate) fn examine(&mut self) -> bool {
+        if self.budget.max_edges.is_some_and(|max| self.edges >= max) {
+            self.hit = true;
+            return false;
+        }
+        self.edges += 1;
         true
     }
 
@@ -122,6 +153,11 @@ impl Meter {
         self.visited += n;
     }
 
+    /// Count `n` edges examined at once (for work bounded in advance).
+    pub(crate) fn add_edges(&mut self, n: usize) {
+        self.edges += n;
+    }
+
     /// Record that a limit stopped the search.
     pub(crate) fn stopped(&mut self) {
         self.hit = true;
@@ -131,8 +167,8 @@ impl Meter {
     /// [`OnLimit::Error`] mode.
     pub(crate) fn finish<T>(self, value: T) -> Result<Limited<T>, GraphError> {
         if self.hit && self.budget.on_limit == OnLimit::Error {
-            return Err(GraphError::BudgetExceeded { visited: self.visited, results: self.results });
+            return Err(GraphError::BudgetExceeded { visited: self.visited, edges: self.edges, results: self.results });
         }
-        Ok(Limited { value, truncated: self.hit, visited: self.visited })
+        Ok(Limited { value, truncated: self.hit, visited: self.visited, edges: self.edges })
     }
 }

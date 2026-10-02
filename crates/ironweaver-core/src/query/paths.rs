@@ -90,7 +90,8 @@ where
 }
 
 /// [`expand_paths`] under a [`Budget`]: every step onto a node (the start
-/// included) counts as visited, every path passed to `visit` as a result.
+/// included) counts as visited, every candidate edge as examined (before the
+/// uniqueness rule and `edge_ok`), every path passed to `visit` as a result.
 /// `visit` returning false stops the search without marking it truncated.
 #[allow(clippy::too_many_arguments)]
 pub fn expand_paths_limited<N, E, X>(
@@ -137,14 +138,15 @@ where
     if hops.max == Some(0) || g.node(start).is_none() {
         return Ok(());
     }
-    // One frame per path length: the candidate steps and the next one to try
-    let mut stack: Vec<(Vec<(EdgeIx, NodeIx)>, usize)> = vec![(steps(g, start, direction).collect(), 0)];
+    // One frame per path length: the node's candidate steps, read lazily
+    let both = direction == Direction::Both;
+    let mut stack = vec![Steps::new(g, start, direction)];
     let stop = crate::cancel::stop();
-    while let Some((candidates, next)) = stack.last_mut() {
+    while let Some(frame) = stack.last_mut() {
         if stop.poll() {
             return Ok(());
         }
-        let Some(&(e, n)) = candidates.get(*next) else {
+        let Some((e, n)) = frame.next(g, both) else {
             stack.pop();
             if !stack.is_empty() {
                 edges.pop();
@@ -152,7 +154,9 @@ where
             }
             continue;
         };
-        *next += 1;
+        if !meter.examine() {
+            return Ok(());
+        }
         let repeated = match uniqueness {
             Uniqueness::Walk => false,
             Uniqueness::Trail => edges.contains(&e),
@@ -170,13 +174,53 @@ where
             return Ok(());
         }
         if hops.max.is_none_or(|max| edges.len() < max) {
-            stack.push((steps(g, n, direction).collect(), 0));
+            stack.push(Steps::new(g, n, direction));
         } else {
             edges.pop();
             nodes.pop();
         }
     }
     Ok(())
+}
+
+/// The steps of [`steps`] as a cursor: one per node on the current path,
+/// so a node's edges are neither copied nor read ahead of the budget.
+struct Steps<'g> {
+    node: NodeIx,
+    out: &'g [EdgeIx],
+    inc: &'g [EdgeIx],
+    next: usize,
+}
+
+impl<'g> Steps<'g> {
+    fn new<N, E>(g: &'g Graph<N, E>, ix: NodeIx, direction: Direction) -> Self {
+        let node = g.node(ix);
+        let out = match node {
+            Some(n) if direction != Direction::In => n.out_edges(),
+            _ => &[],
+        };
+        let inc = match node {
+            Some(n) if direction != Direction::Out => n.in_edges(),
+            _ => &[],
+        };
+        Steps { node: ix, out, inc, next: 0 }
+    }
+
+    /// The next `(edge, neighbour)`, in the order of [`steps`].
+    fn next<N, E>(&mut self, g: &Graph<N, E>, both: bool) -> Option<(EdgeIx, NodeIx)> {
+        loop {
+            let i = self.next;
+            self.next += 1;
+            if let Some(&e) = self.out.get(i) {
+                return Some((e, g.edge_ref(e).target()));
+            }
+            let &e = self.inc.get(i - self.out.len())?;
+            let n = g.edge_ref(e).source();
+            if !(both && n == self.node) {
+                return Some((e, n));
+            }
+        }
+    }
 }
 
 pub(crate) fn check_hops(hops: Hops, uniqueness: Uniqueness) -> Result<(), GraphError> {

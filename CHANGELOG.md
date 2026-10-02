@@ -98,9 +98,11 @@ a query layer and database foundations.
 - **Core, for servers built on it** (`ironweaver-core` only):
   - visit budgets: `traversal::dfs_limited` / `bfs_limited` /
     `expand_limited`, `query::expand_paths_limited` and
-    `WalkPlan::run_limited` take a `Budget` (`max_visited`, `max_results`)
-    and either fail with `GraphError::BudgetExceeded` or return the first
-    results with `truncated` set;
+    `WalkPlan::run_limited` take a `Budget` (`max_visited`, `max_edges`,
+    `max_results`) and either fail with `GraphError::BudgetExceeded` or
+    return the first results with `truncated` set. `max_edges` counts every
+    edge examined, so a node with millions of edges can't run past the
+    budget, and the traversals check for cancellation once per edge;
   - `Expr`, `CmpOp`, `Pattern` (and its parts) implement serde `Serialize`
     / `Deserialize`, with expression nesting capped at `MAX_EXPR_DEPTH`;
     `Pattern` implements `Display` (and `to_text`), and

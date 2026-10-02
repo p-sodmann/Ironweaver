@@ -407,24 +407,33 @@ impl WalkPlan {
     /// number of attempts at `max_visited / max_length`; the walks made are
     /// the first ones [`run`](Self::run) would make with the same seed.
     /// `max_results` keeps the first walks (after duplicates are removed).
+    /// `max_edges` likewise caps them at `max_edges / (max_length - 1)`
+    /// (a step along an edge counts as one edge).
     /// In [`OnLimit::Error`] mode, attempts that
     /// don't fit fail before any walking. `visited` counts the nodes the
-    /// walks passed through (walks shorter than `min_length` included).
+    /// walks passed through and `edges` their steps (walks shorter than
+    /// `min_length` included).
     pub fn run_limited(&self, budget: Budget) -> Result<Limited<Vec<Walk>>, GraphError> {
         let mut meter = Meter::new(budget);
         let mut attempts = self.opts.num_attempts;
-        if let Some(max) = budget.max_visited {
-            let fit = max / self.opts.max_length;
-            if fit < attempts {
-                attempts = fit;
-                meter.stopped();
-                if budget.on_limit == OnLimit::Error {
-                    return meter.finish(Vec::new());
+        let steps = self.opts.max_length - 1;
+        let fits = [(budget.max_visited, self.opts.max_length), (budget.max_edges, steps)];
+        for (max, per_walk) in fits {
+            if let (Some(max), true) = (max, per_walk > 0) {
+                let fit = max / per_walk;
+                if fit < attempts {
+                    attempts = fit;
+                    meter.stopped();
                 }
             }
         }
+        if attempts < self.opts.num_attempts && budget.on_limit == OnLimit::Error {
+            return meter.finish(Vec::new());
+        }
         let (mut walks, visited) = self.run_attempts(attempts);
         meter.add_visited(visited);
+        // Every attempt walks through its start node, then one node per step
+        meter.add_edges(visited.saturating_sub(attempts));
         let mut kept = 0;
         while kept < walks.len() && meter.produce() {
             kept += 1;
