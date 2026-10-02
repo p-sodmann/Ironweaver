@@ -285,3 +285,51 @@ fn value_serde_depth_limit_matches_the_file_format() {
         assert!(postcard::from_bytes::<Value>(&deeper[if dict { 4 } else { 2 }..]).is_ok());
     }
 }
+
+/// `Value`'s serde writes NaN and the infinities like the file format, so a
+/// custom codec that writes attribute maps with `value::serialize_sorted`
+/// saves JSON that loads again, and JSON `Op`s carry them too.
+#[test]
+fn value_serde_non_finite_floats_match_the_file_format() {
+    use format::{Codec, GraphWriter};
+    use ironweaver_core::value::serialize_sorted;
+    use serde::Serializer;
+
+    struct Plain;
+    impl Codec<Record, Record> for Plain {
+        fn node_attr<S: Serializer>(&self, n: &Record, s: S) -> Result<S::Ok, S::Error> {
+            serialize_sorted(&n.attr, s)
+        }
+        fn node_meta<S: Serializer>(&self, n: &Record, s: S) -> Result<S::Ok, S::Error> {
+            serialize_sorted(&n.meta, s)
+        }
+        fn edge_attr<S: Serializer>(&self, e: &Record, s: S) -> Result<S::Ok, S::Error> {
+            serialize_sorted(&e.attr, s)
+        }
+        fn edge_meta<S: Serializer>(&self, e: &Record, s: S) -> Result<S::Ok, S::Error> {
+            serialize_sorted(&e.meta, s)
+        }
+        fn graph_meta<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            serialize_sorted(&Attrs::new(), s)
+        }
+    }
+
+    let floats = [("nan", f64::NAN), ("inf", f64::INFINITY), ("ninf", f64::NEG_INFINITY), ("one", 1.5)];
+    let mut g = G::new();
+    g.add_node("a", Record::with_attr(floats.map(|(k, f)| (k, Value::Float(f))))).unwrap();
+    let json = GraphWriter::new(&g, &Plain).with_timestamp(None).to_json(false).unwrap();
+    let (loaded, _) = format::from_json(&json).unwrap();
+    let attr = &loaded.node_by_id("a").unwrap().data.attr;
+    for (k, f) in floats {
+        match attr[k] {
+            Value::Float(v) => assert_eq!(v.to_bits(), f.to_bits(), "{k}"),
+            ref other => panic!("{k}: {other:?}"),
+        }
+    }
+
+    type O = ironweaver_core::Op<Record, Record>;
+    let op = O::SetNodeAttr { id: "a".into(), key: "k".into(), value: Some(Value::Float(f64::NEG_INFINITY)) };
+    let text = sonic_rs::to_string(&op).unwrap();
+    assert!(text.contains(r#"{"Float":"-Infinity"}"#), "{text}");
+    assert_eq!(sonic_rs::from_str::<O>(&text).unwrap(), op);
+}

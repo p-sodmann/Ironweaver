@@ -9,8 +9,10 @@ use crate::temporal::{self, Date, DateTime};
 
 /// An attribute value, as stored in graph documents.
 ///
-/// Serialized externally tagged (`{"Float": 1.5}`, `"None"`, ...). The
-/// variant order is part of the binary format (bincode writes the variant
+/// Serialized externally tagged (`{"Float": 1.5}`, `"None"`, ...), like the
+/// file format: in human-readable formats (JSON), a NaN or infinite `Float`
+/// is written as the string `"NaN"`, `"Infinity"` or `"-Infinity"` and read
+/// back from it. The variant order is part of the binary format (bincode writes the variant
 /// index), so never reorder the variants. Serde (de)serialization fails for
 /// values nested more than [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels
 /// instead of overflowing the stack, counted like the file format: a value
@@ -20,7 +22,7 @@ use crate::temporal::{self, Date, DateTime};
 pub enum Value {
     String(String),
     Int(i64),
-    Float(f64),
+    Float(#[serde(with = "non_finite")] f64),
     /// A float stored at half precision (`save_to_binary_f16`).
     Half(f16),
     Bool(bool),
@@ -36,6 +38,60 @@ pub enum Value {
     Date(Date),
     /// A date-time, with or without UTC offset (ISO 8601 in JSON).
     DateTime(DateTime),
+}
+
+/// Serde helpers for `Value::Float`: JSON has no literals for NaN and the
+/// infinities, so human-readable formats write them as the strings `"NaN"`,
+/// `"Infinity"` and `"-Infinity"` (as the file format does, see
+/// `format::tagged::float`) and accept those strings as well as numbers.
+/// Binary formats store the float itself.
+mod non_finite {
+    use serde::de::{self, Visitor};
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+        if v.is_finite() || !s.is_human_readable() {
+            s.serialize_f64(*v)
+        } else if v.is_nan() {
+            s.serialize_str("NaN")
+        } else if *v > 0.0 {
+            s.serialize_str("Infinity")
+        } else {
+            s.serialize_str("-Infinity")
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+        if !d.is_human_readable() {
+            return f64::deserialize(d);
+        }
+        struct Float;
+        impl Visitor<'_> for Float {
+            type Value = f64;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a number, \"NaN\", \"Infinity\" or \"-Infinity\"")
+            }
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<f64, E> {
+                Ok(v)
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<f64, E> {
+                Ok(v as f64)
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<f64, E> {
+                Ok(v as f64)
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<f64, E> {
+                match v {
+                    "NaN" => Ok(f64::NAN),
+                    "Infinity" => Ok(f64::INFINITY),
+                    "-Infinity" => Ok(f64::NEG_INFINITY),
+                    _ => Err(E::invalid_value(de::Unexpected::Str(v), &self)),
+                }
+            }
+        }
+        d.deserialize_any(Float)
+    }
 }
 
 /// Serde helpers for the contents of a list / dict value: count the nesting
@@ -441,5 +497,28 @@ mod tests {
         assert_eq!(sonic_rs::from_str::<Value>(&json).unwrap(), v);
         let bin = postcard::to_allocvec(&v).unwrap();
         assert_eq!(postcard::from_bytes::<Value>(&bin).unwrap(), v);
+    }
+
+    #[test]
+    fn serde_non_finite_floats() {
+        fn float(v: Value) -> f64 {
+            match v {
+                Value::Float(f) => f,
+                other => panic!("not a Float: {other:?}"),
+            }
+        }
+        for (f, text) in [(f64::NAN, "NaN"), (f64::INFINITY, "Infinity"), (f64::NEG_INFINITY, "-Infinity")] {
+            let json = sonic_rs::to_string(&Value::Float(f)).unwrap();
+            assert_eq!(json, format!(r#"{{"Float":"{text}"}}"#));
+            let back = float(sonic_rs::from_str(&json).unwrap());
+            assert_eq!(back.to_bits(), f.to_bits());
+            let bin = postcard::to_allocvec(&Value::Float(f)).unwrap();
+            assert_eq!(float(postcard::from_bytes(&bin).unwrap()).to_bits(), f.to_bits());
+        }
+        assert_eq!(sonic_rs::to_string(&Value::Float(1.5)).unwrap(), r#"{"Float":1.5}"#);
+        assert_eq!(sonic_rs::from_str::<Value>(r#"{"Float":2}"#).unwrap(), Value::Float(2.0));
+        assert_eq!(sonic_rs::from_str::<Value>(r#"{"Float":-3}"#).unwrap(), Value::Float(-3.0));
+        assert!(sonic_rs::from_str::<Value>(r#"{"Float":"nan"}"#).is_err());
+        assert!(sonic_rs::from_str::<Value>(r#"{"Float":null}"#).is_err());
     }
 }
