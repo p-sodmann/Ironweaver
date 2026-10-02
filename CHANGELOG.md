@@ -176,6 +176,9 @@ a query layer and database foundations.
 - JSON files keep `-0.0` (it loaded as `0.0`), and NaN and ±infinity
   attribute values are saved as `"NaN"`, `"Infinity"` and `"-Infinity"`
   (they were written as `null`, and the file then failed to load).
+  `Value`'s own serde does the same in JSON (and accepts those strings), so
+  custom codecs that write attributes with `value::serialize_sorted`, and
+  JSON `Op`s and `Value`s, keep them too.
 - `Value`'s serde counts depth like the file format (a value is depth 1,
   a container's items one deeper), so an empty list or dict at depth 100
   that a file can hold can also be encoded with serde (and in `Op`s); it
