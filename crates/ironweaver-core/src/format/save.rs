@@ -34,12 +34,23 @@ pub mod tagged {
         s.serialize_newtype_variant(ENUM, INT, "Int", &v)
     }
 
-    /// A float; at half precision if `half`.
+    /// A float; at half precision if `half`. In JSON (human-readable
+    /// formats), NaN and the infinities are written as the strings `"NaN"`,
+    /// `"Infinity"` and `"-Infinity"`; halves are stored as their bits.
     pub fn float<S: Serializer>(s: S, v: f64, half: bool) -> Result<S::Ok, S::Error> {
         if half {
             s.serialize_newtype_variant(ENUM, HALF, "Half", &f16::from_f64(v))
-        } else {
+        } else if v.is_finite() || !s.is_human_readable() {
             s.serialize_newtype_variant(ENUM, FLOAT, "Float", &v)
+        } else {
+            let text = if v.is_nan() {
+                "NaN"
+            } else if v > 0.0 {
+                "Infinity"
+            } else {
+                "-Infinity"
+            };
+            s.serialize_newtype_variant(ENUM, FLOAT, "Float", text)
         }
     }
 

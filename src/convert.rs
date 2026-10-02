@@ -61,7 +61,13 @@ impl Serialize for PlainPy<'_, '_> {
                 Err(_) => s.serialize_f64(i.extract::<f64>().map_err(py_err)?),
             }
         } else if let Ok(f) = v.cast::<PyFloat>() {
-            s.serialize_f64(f.value())
+            match f.value() {
+                // As saved: JSON has no NaN or infinities
+                f if f.is_nan() => s.serialize_str("NaN"),
+                f if f == f64::INFINITY => s.serialize_str("Infinity"),
+                f if f == f64::NEG_INFINITY => s.serialize_str("-Infinity"),
+                f => s.serialize_f64(f),
+            }
         } else if let Ok(st) = v.cast::<PyString>() {
             s.serialize_str(st.to_str().map_err(py_err)?)
         } else if let Ok(dict) = v.cast::<PyDict>() {

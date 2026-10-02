@@ -41,6 +41,8 @@ Both encodings hold the same document:
   - dates (`datetime.date`): `{"Date": "2024-05-01"}`;
   - date-times (`datetime.datetime`): `{"DateTime": "2024-05-01T12:30:00.250000+02:00"}`, microsecond precision. An aware datetime keeps its UTC offset but not its zone name (it loads with a fixed-offset `timezone`); a naive one loads naive.
 
+  - floats exactly, `-0.0` included. JSON has no literals for NaN and the infinities, so they are written as strings: `{"Float": "NaN"}`, `{"Float": "Infinity"}`, `{"Float": "-Infinity"}` (a NaN loads as the standard NaN).
+
   In binary files dates are day counts, date-times microseconds plus offset, bytes raw. Files saved before 0.2 stored datetimes as strings (and bytes as lists of ints); they load as they were saved.
 - `indexes` lists the indexed attribute paths (each a list of strings), and is only written when there are indexes. Loading recreates them from the nodes; the index contents aren't stored. Files without it load with no indexes, and readers that don't know it ignore it.
 - Values may nest at most 100 levels deep; deeper files are rejected when loading, so a crafted file can't exhaust the stack.

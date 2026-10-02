@@ -106,7 +106,7 @@ impl<'de, K: Deserialize<'de>, V: Deserialize<'de>> Deserialize<'de> for Entries
 enum RawValue<'a> {
     String(#[serde(borrow)] Str<'a>),
     Int(i64),
-    Float(f64),
+    Float(#[serde(deserialize_with = "float")] f64),
     Half(f16),
     Bool(bool),
     None,
@@ -115,6 +115,39 @@ enum RawValue<'a> {
     Bytes(#[serde(with = "crate::temporal::bytes")] Vec<u8>),
     Date(Date),
     DateTime(DateTime),
+}
+
+/// A `Float` value. JSON has no literals for NaN and the infinities, so
+/// they are written as the strings `"NaN"`, `"Infinity"` and `"-Infinity"`
+/// (see `tagged::float`). Numbers are parsed from their JSON text, because
+/// sonic-rs (sonic-number 0.1.3) reads `-0`, `-0.0` and `-0e0` as positive
+/// zero. Binary formats store the float itself.
+fn float<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    if !d.is_human_readable() {
+        return f64::deserialize(d);
+    }
+    let raw = sonic_rs::LazyValue::deserialize(d)?;
+    parse_json_float(raw.as_raw_str()).ok_or_else(|| {
+        super::de_error(format_args!(
+            "invalid Float {}: expected a finite number, \"NaN\", \"Infinity\" or \"-Infinity\"",
+            raw.as_raw_str()
+        ))
+    })
+}
+
+/// The float written as `text` (a JSON number or one of the strings for
+/// non-finite floats); `None` for anything else, also for numbers out of
+/// `f64` range.
+fn parse_json_float(text: &str) -> Option<f64> {
+    match text {
+        "\"NaN\"" => Some(f64::NAN),
+        "\"Infinity\"" => Some(f64::INFINITY),
+        "\"-Infinity\"" => Some(f64::NEG_INFINITY),
+        _ if text.starts_with(['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) => {
+            text.parse::<f64>().ok().filter(|f| f.is_finite())
+        }
+        _ => None,
+    }
 }
 
 /// A value from the input document; strings borrow from the input buffer.

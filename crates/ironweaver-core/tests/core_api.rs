@@ -233,6 +233,84 @@ fn format_round_trips() {
     assert!(matches!(w.data.attr["weight"], Value::Half(_)));
 }
 
+/// Floats that need care in JSON: signed zeros, NaN, the infinities,
+/// subnormals and extremes, at full and half precision.
+fn special_floats() -> Vec<Value> {
+    use half::f16;
+    let floats = [
+        0.0,
+        -0.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::MIN_POSITIVE / 4.0,
+        -f64::MIN_POSITIVE / 4.0,
+        f64::MAX,
+        f64::MIN,
+        5e-324,
+    ];
+    let halves = [0.0, -0.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1e-7, 65504.0];
+    let floats = floats.into_iter().map(Value::Float);
+    floats.chain(halves.into_iter().map(|h| Value::Half(f16::from_f32(h)))).collect()
+}
+
+/// `v` as bits, so -0.0 differs from 0.0 and NaN equals NaN.
+fn float_bits(v: &Value) -> (bool, u64) {
+    match v {
+        Value::Float(f) if f.is_nan() => (false, f64::NAN.to_bits()),
+        Value::Float(f) => (false, f.to_bits()),
+        Value::Half(h) => (true, u64::from(h.to_bits())),
+        other => panic!("not a float: {other:?}"),
+    }
+}
+
+#[test]
+fn special_floats_round_trip() {
+    let values = special_floats();
+    let mut g = G::new();
+    let list = Value::List(values.clone());
+    g.add_node("a", Record::with_attr([("list", list)])).unwrap();
+    for (i, v) in values.iter().enumerate() {
+        g.add_node(format!("n{i}"), Record::with_attr([("x", v.clone())])).unwrap();
+    }
+    let meta = HashMap::new();
+    let check = |loaded: &G, how: &str| {
+        let Value::List(items) = &loaded.node_by_id("a").unwrap().data.attr["list"] else { panic!() };
+        let want: Vec<_> = values.iter().map(float_bits).collect();
+        assert_eq!(items.iter().map(float_bits).collect::<Vec<_>>(), want, "{how}");
+        for (i, v) in values.iter().enumerate() {
+            let x = &loaded.node_by_id(&format!("n{i}")).unwrap().data.attr["x"];
+            assert_eq!(float_bits(x), float_bits(v), "{how}: {v:?}");
+        }
+    };
+    for pretty in [false, true] {
+        let json = format::to_json(&g, &meta, pretty).unwrap();
+        check(&format::from_json(&json).unwrap().0, "json");
+    }
+    let bin = format::to_binary(&g, &meta, false).unwrap();
+    check(&format::from_binary(&bin).unwrap().0, "binary");
+    check(&format::from_binary_reader(&bin[..]).unwrap().0, "binary stream");
+}
+
+#[test]
+fn json_floats_keep_their_sign() {
+    let mut g = G::new();
+    g.add_node("a", Record::with_attr([("x", Value::Float(12345.5))])).unwrap();
+    let json = String::from_utf8(format::to_json(&g, &HashMap::new(), false).unwrap()).unwrap();
+    assert!(json.contains(r#"{"Float":12345.5}"#), "unexpected document: {json}");
+    let with_x = |x: &str| json.replace("12345.5", x);
+    for (text, want) in [("-0", -0.0), ("-0.0", -0.0), ("-0e0", -0.0), ("-0.000E+12", -0.0), ("0", 0.0), ("-1.5", -1.5)]
+    {
+        let (g, _) = format::from_json(with_x(text).as_bytes()).unwrap();
+        let Value::Float(f) = g.node_by_id("a").unwrap().data.attr["x"] else { panic!() };
+        assert_eq!(f.to_bits(), f64::to_bits(want), "{text}");
+    }
+    for bad in ["1e400", r#""nan""#, r#""1.5""#, "null", "true"] {
+        let err = format::from_json(with_x(bad).as_bytes()).err().unwrap_or_else(|| panic!("{bad} loaded"));
+        assert!(err.to_string().contains("Float"), "{bad}: {err}");
+    }
+}
+
 fn assert_same(a: &G, b: &G) {
     assert_eq!(a.node_count(), b.node_count());
     assert_eq!(a.edge_count(), b.edge_count());
