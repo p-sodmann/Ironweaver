@@ -232,3 +232,56 @@ fn equal_graphs_save_to_equal_bytes() {
     let r2 = sonic_rs::to_string(&g2.node_by_id("a").unwrap().data).unwrap();
     assert_eq!(r1, r2);
 }
+
+/// `depth - 1` nested lists (or dicts) around an empty one: `depth` levels.
+fn empty_nested(depth: usize, dict: bool) -> Value {
+    let wrap = |v: Value| if dict { Value::Dict([("k".to_string(), v)].into()) } else { Value::List(vec![v]) };
+    let innermost = if dict { Value::Dict(Default::default()) } else { Value::List(vec![]) };
+    (1..depth).fold(innermost, |v, _| wrap(v))
+}
+
+/// The file format and `Value`'s serde (JSON, postcard, and through it
+/// `Op`) agree on the depth limit, also when the innermost container is
+/// empty: whatever loads can be logged and saved again.
+#[test]
+fn value_serde_depth_limit_matches_the_file_format() {
+    type O = ironweaver_core::Op<Record, Record>;
+    let op = |v: &Value| O::SetNodeAttr { id: "a".into(), key: "k".into(), value: Some(v.clone()) };
+    for dict in [false, true] {
+        for (depth, ok) in [(MAX_DEPTH, true), (MAX_DEPTH + 1, false)] {
+            let v = empty_nested(depth, dict);
+            let mut g = G::new();
+            g.add_node("a", Record::with_attr([("k", v.clone())])).unwrap();
+            let meta = Attrs::new();
+            assert_eq!(format::to_binary(&g, &meta, false).is_ok(), ok, "file, depth {depth}, dict {dict}");
+            assert_eq!(format::to_json(&g, &meta, false).is_ok(), ok, "file, depth {depth}, dict {dict}");
+
+            let json = sonic_rs::to_string(&v);
+            let bytes = postcard::to_stdvec(&v);
+            let op_json = sonic_rs::to_string(&op(&v));
+            let op_bytes = postcard::to_stdvec(&op(&v));
+            if ok {
+                assert_eq!(sonic_rs::from_str::<Value>(&json.unwrap()).unwrap(), v);
+                assert_eq!(postcard::from_bytes::<Value>(&bytes.unwrap()).unwrap(), v);
+                assert_eq!(sonic_rs::from_str::<O>(&op_json.unwrap()).unwrap(), op(&v));
+                assert_eq!(postcard::from_bytes::<O>(&op_bytes.unwrap()).unwrap(), op(&v));
+            } else {
+                let err = json.unwrap_err().to_string();
+                assert!(err.contains("nested more than"), "{err}");
+                assert!(op_json.unwrap_err().to_string().contains("nested more than"));
+                assert!(bytes.is_err() && op_bytes.is_err());
+            }
+        }
+        // Encoded input one level too deep is rejected when decoding
+        let ok = sonic_rs::to_string(&empty_nested(MAX_DEPTH, dict)).unwrap();
+        let deeper = if dict { format!(r#"{{"Dict":{{"k":{ok}}}}}"#) } else { format!(r#"{{"List":[{ok}]}}"#) };
+        let err = sonic_rs::from_str::<Value>(&deeper).unwrap_err().to_string();
+        assert!(err.contains("nested more than"), "{err}");
+        let bytes = postcard::to_stdvec(&empty_nested(MAX_DEPTH, dict)).unwrap();
+        let mut deeper = if dict { vec![7u8, 1, 1, b'k'] } else { vec![6u8, 1] };
+        deeper.extend(&bytes);
+        assert!(postcard::from_bytes::<Value>(&deeper).is_err());
+        // A list one level shallower decodes
+        assert!(postcard::from_bytes::<Value>(&deeper[if dict { 4 } else { 2 }..]).is_ok());
+    }
+}
