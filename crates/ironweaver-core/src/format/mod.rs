@@ -17,6 +17,9 @@
 // contents are rebuilt from the nodes). Readers that don't know it ignore
 // it, and files without it load with no indexes. Every
 // attribute value is an externally tagged `Value` (e.g. `{"Float": 1.5}`).
+// JSON has no NaN or infinities: such a `Float` is written as one of the
+// strings "NaN", "Infinity" and "-Infinity" (`Half`s are stored as their
+// bits in both formats).
 //
 // Binary files are framed:
 //

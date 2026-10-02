@@ -154,6 +154,9 @@ a query layer and database foundations.
 - A reference cycle that kept graphs alive after use.
 - `attr("type")` / `attr("labels")` in expressions read the edge type and
   node labels, like the rest of the API.
+- JSON files keep `-0.0` (it loaded as `0.0`), and NaN and ±infinity
+  attribute values are saved as `"NaN"`, `"Infinity"` and `"-Infinity"`
+  (they were written as `null`, and the file then failed to load).
 
 ## 0.1.0
 

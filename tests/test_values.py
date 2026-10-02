@@ -112,3 +112,40 @@ def test_expressions_compare_dates_and_bytes():
     assert ids(iw.attr("b") == b"b") == ["b"]
     assert ids(iw.attr("b").is_in([b"a", b"z"])) == ["a"]
     assert repr(iw.attr("d") == dt.date(2024, 1, 1)) == '(attr("d") == date(2024-01-01))'
+
+
+def test_special_floats_survive_saving(tmp_path):
+    import math
+
+    floats = [0.0, -0.0, math.nan, math.inf, -math.inf, 5e-324, 1.7976931348623157e308]
+    for name, save, load in [
+        ("g.json", "save_to_json", iw.Vertex.load_from_json),
+        ("g.bin", "save_to_binary", iw.Vertex.load_from_binary),
+    ]:
+        g = iw.Vertex()
+        g.add_node("n", {"floats": floats, "neg_zero": -0.0})
+        path = str(tmp_path / name)
+        getattr(g, save)(path)
+        attr = load(path)["n"].attr
+        for got, want in zip(attr["floats"], floats):
+            assert got == want or (math.isnan(got) and math.isnan(want)), (name, want)
+            assert math.copysign(1, got) == math.copysign(1, want) or math.isnan(want), (name, want)
+        assert math.copysign(1, attr["neg_zero"]) == -1, name
+
+
+def test_non_finite_floats_in_json(tmp_path):
+    g = iw.Vertex()
+    g.add_node("n", {"nan": float("nan"), "inf": float("inf"), "ninf": float("-inf"), "zero": -0.0})
+    path = tmp_path / "g.json"
+    g.save_to_json(str(path))
+    text = path.read_text()
+    assert '{"Float":"NaN"}' in text and '{"Float":"-Infinity"}' in text and '{"Float":-0.0}' in text
+    attr = json.loads(text)["nodes"]["n"]["attr"]
+    assert attr["inf"] == {"Float": "Infinity"}
+    # Graph dicts load the same, also with the floats themselves in the tags
+    for doc in (attr, {k: {"Float": float(v["Float"])} if isinstance(v["Float"], str) else v for k, v in attr.items()}):
+        loaded = json.loads(text)
+        loaded["nodes"]["n"]["attr"] = doc
+        back = iw.Vertex.load_from_json(loaded)["n"].attr
+        assert back["inf"] == float("inf") and back["ninf"] == float("-inf") and back["nan"] != back["nan"]
+        assert str(back["zero"]) == "-0.0"
