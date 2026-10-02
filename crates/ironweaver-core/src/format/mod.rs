@@ -24,7 +24,8 @@
 // Binary files are framed:
 //
 //   header  (16 bytes): b"IRONWEAV", u16 format version, u16 flags (0),
-//                       u32 reserved (0)
+//                       u32 reserved (0); readers refuse unknown flags
+//                       and a non-zero reserved field
 //   payload:            the document, postcard-encoded
 //   trailer (16 bytes): u64 payload length, u32 CRC32 of the payload,
 //                       b"IWND"
@@ -122,7 +123,11 @@ fn bad_binary(what: &str) -> GraphError {
     GraphError::Format(format!("invalid ironweaver binary file: {}", what))
 }
 
-/// Check the version in a binary file's header.
+/// Header flags this reader understands (none so far). A flag changes how a
+/// file is read, so a file with an unknown one is refused, not misread.
+const KNOWN_FLAGS: u16 = 0;
+
+/// Check the version, flags and reserved field in a binary file's header.
 fn check_version(header: &[u8]) -> Result<(), GraphError> {
     let version = u16::from_le_bytes([header[8], header[9]]);
     if version != 2 {
@@ -130,6 +135,16 @@ fn check_version(header: &[u8]) -> Result<(), GraphError> {
             "binary format version {} is not supported (written by a newer ironweaver?)",
             version
         )));
+    }
+    let flags = u16::from_le_bytes([header[10], header[11]]);
+    if flags & !KNOWN_FLAGS != 0 {
+        return Err(GraphError::Format(format!(
+            "binary header flags {:#06x} are not supported (written by a newer ironweaver?)",
+            flags
+        )));
+    }
+    if header[12..16] != [0; 4] {
+        return Err(bad_binary("reserved header bytes are not zero (corrupted)"));
     }
     Ok(())
 }
