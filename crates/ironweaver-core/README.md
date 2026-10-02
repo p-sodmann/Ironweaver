@@ -106,6 +106,14 @@ assert_eq!((some.value.len(), some.edges, some.truncated), (101, 100, true));
 
 For wall-clock limits, run the search under a cancellation token.
 
+## Features
+
+- `format-v1` (default): read binary files saved in format version 1
+  (ironweaver 0.1). It is the only user of bincode 1.x, which is
+  unmaintained (RUSTSEC-2025-0141); with `default-features = false`,
+  version 1 binary files are a `GraphError::Format` and bincode is not a
+  dependency. Version 1 JSON files load either way.
+
 ## Minimum supported Rust version
 
 Rust 1.85. Raising it is a minor-version change.

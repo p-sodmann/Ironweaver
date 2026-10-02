@@ -30,7 +30,8 @@
 // a truncated or corrupted file is detected before parsing.
 //
 // Version 1 files still load: JSON with `metadata.version` "1.x" (or none)
-// and bincode files without the header. Their edge ids (strings like
+// and bincode files without the header (those only with the `format-v1`
+// feature, on by default). Their edge ids (strings like
 // `edge_0_a_to_b`) are replaced by new `EdgeId`s (loaders can read the old
 // one with `LoadEdge::id`), and the old conventions are migrated: a node
 // attribute `labels` holding a list of strings becomes the node's labels, an
@@ -146,7 +147,7 @@ fn check_trailer(trailer: &[u8], len: u64, crc: u32) -> Result<(), GraphError> {
 
 /// The postcard payload of a framed binary file (after checking header,
 /// length and checksum), or `None` if `bytes` is not framed (a version 1
-/// bincode file).
+/// bincode file, or not a graph file).
 fn binary_payload(bytes: &[u8]) -> Result<Option<&[u8]>, GraphError> {
     if !bytes.starts_with(MAGIC) {
         return Ok(None);
@@ -176,8 +177,9 @@ pub fn to_json(graph: &Graph<Record, Record>, meta: &Attrs, pretty: bool) -> Res
     GraphWriter::new(graph, &RecordCodec { meta, half: false }).to_json(pretty)
 }
 
-/// Encode a `Graph<Record, Record>` with bincode; `half` stores floats at
-/// half precision.
+/// Encode a `Graph<Record, Record>` (with graph-level `meta`) as a binary
+/// file of format version 2: header, postcard payload and a trailer with
+/// length and CRC32. `half` stores floats at half precision.
 pub fn to_binary(graph: &Graph<Record, Record>, meta: &Attrs, half: bool) -> Result<Vec<u8>, GraphError> {
     let mut out = Vec::new();
     GraphWriter::new(graph, &RecordCodec { meta, half }).write_binary(&mut out)?;
@@ -189,7 +191,9 @@ pub fn from_json(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphEr
     records(&LoadGraph::from_json_slice(bytes)?)
 }
 
-/// Decode a bincode document into a `Graph<Record, Record>` and its graph-level meta.
+/// Decode a binary document into a `Graph<Record, Record>` and its
+/// graph-level meta: a framed postcard file (format version 2), or a
+/// version 1 bincode file with the `format-v1` feature (on by default).
 pub fn from_binary(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
     records(&LoadGraph::from_binary_slice(bytes)?)
 }

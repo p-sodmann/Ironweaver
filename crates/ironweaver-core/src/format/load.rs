@@ -1,5 +1,6 @@
 // format/load.rs
 
+#[cfg(feature = "format-v1")]
 use bincode::Options;
 use half::f16;
 use serde::de::{Deserializer, MapAccess, Visitor};
@@ -363,6 +364,8 @@ pub struct LoadGraph<'a> {
 }
 
 // Version 1 binary documents (bincode, positional): no labels / types.
+// Only read with the `format-v1` feature.
+#[cfg(feature = "format-v1")]
 #[derive(Deserialize)]
 struct V1Node<'a> {
     #[serde(borrow)]
@@ -377,6 +380,7 @@ struct V1Node<'a> {
     inverse_edge_ids: Vec<Str<'a>>,
 }
 
+#[cfg(feature = "format-v1")]
 #[derive(Deserialize)]
 struct V1Edge<'a> {
     #[serde(borrow)]
@@ -391,6 +395,7 @@ struct V1Edge<'a> {
     meta: LoadAttrs<'a>,
 }
 
+#[cfg(feature = "format-v1")]
 #[derive(Deserialize)]
 struct V1Graph<'a> {
     #[serde(borrow)]
@@ -403,6 +408,7 @@ struct V1Graph<'a> {
     metadata: LoadAttrs<'a>,
 }
 
+#[cfg(feature = "format-v1")]
 impl<'a> From<V1Graph<'a>> for LoadGraph<'a> {
     fn from(g: V1Graph<'a>) -> Self {
         let nodes = g
@@ -450,9 +456,9 @@ impl<'a> LoadGraph<'a> {
     }
 
     /// Parse a binary document: a framed postcard file (version 2) or a
-    /// version 1 bincode file.
+    /// version 1 bincode file (with the `format-v1` feature, on by default;
+    /// without it, version 1 files are a [`GraphError::Format`]).
     pub fn from_binary_slice(bytes: &'a [u8]) -> Result<Self, GraphError> {
-        let format = |e: &dyn fmt::Display| GraphError::Format(e.to_string());
         match super::binary_payload(bytes)? {
             Some(payload) => {
                 super::take_error();
@@ -460,16 +466,27 @@ impl<'a> LoadGraph<'a> {
                 doc.version = 2;
                 Ok(doc)
             }
-            None => {
-                // No size limit needed: every length is checked against the
-                // input slice before anything is allocated.
-                let options = bincode::DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes();
-                let v1: V1Graph<'a> = options.deserialize(bytes).map_err(|e| format(&e))?;
-                let mut doc = LoadGraph::from(v1);
-                doc.migrate_v1();
-                Ok(doc)
-            }
+            None => Self::from_v1_binary(bytes),
         }
+    }
+
+    #[cfg(feature = "format-v1")]
+    fn from_v1_binary(bytes: &'a [u8]) -> Result<Self, GraphError> {
+        // No size limit needed: every length is checked against the input
+        // slice before anything is allocated.
+        let options = bincode::DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes();
+        let v1: V1Graph<'a> = options.deserialize(bytes).map_err(|e| GraphError::Format(e.to_string()))?;
+        let mut doc = LoadGraph::from(v1);
+        doc.migrate_v1();
+        Ok(doc)
+    }
+
+    #[cfg(not(feature = "format-v1"))]
+    fn from_v1_binary(_bytes: &'a [u8]) -> Result<Self, GraphError> {
+        Err(GraphError::Format(
+            "not a version 2 binary graph file (reading version 1 binary files needs the `format-v1` feature of ironweaver-core)"
+                .into(),
+        ))
     }
 
     /// Version 1 conventions -> fields: node attribute `labels` (a list of

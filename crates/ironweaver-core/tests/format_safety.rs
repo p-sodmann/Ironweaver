@@ -82,17 +82,20 @@ fn loading_crafted_deep_binary_fails_without_overflowing_the_stack() {
 
     // Version 1 (bincode): wrap the 3-item list at byte 171 of the legacy
     // file in many one-item lists (variant 6 as u32, length 1 as u64)
-    let legacy = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/legacy_graph.bin")).unwrap();
-    assert_eq!(legacy[171..175], 6u32.to_le_bytes());
-    let mut v1_level = 6u32.to_le_bytes().to_vec();
-    v1_level.extend(1u64.to_le_bytes());
-    let mut crafted = legacy[..171].to_vec();
-    for _ in 0..100_000 {
-        crafted.extend(&v1_level);
+    #[cfg(feature = "format-v1")]
+    {
+        let legacy = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/legacy_graph.bin")).unwrap();
+        assert_eq!(legacy[171..175], 6u32.to_le_bytes());
+        let mut v1_level = 6u32.to_le_bytes().to_vec();
+        v1_level.extend(1u64.to_le_bytes());
+        let mut crafted = legacy[..171].to_vec();
+        for _ in 0..100_000 {
+            crafted.extend(&v1_level);
+        }
+        crafted.extend(&legacy[171..]);
+        let err = format::from_binary(&crafted).err().unwrap();
+        assert!(err.to_string().contains("nested more than"), "{err}");
     }
-    crafted.extend(&legacy[171..]);
-    let err = format::from_binary(&crafted).err().unwrap();
-    assert!(err.to_string().contains("nested more than"), "{err}");
 }
 
 #[test]

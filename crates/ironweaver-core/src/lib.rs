@@ -41,6 +41,6 @@ pub use expr::{CmpOp, Expr};
 pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
 pub use ops::{AttrPatch, Op};
 pub use projection::Projection;
-pub use record::{Attributes, Attrs, Lookup, Record};
+pub use record::{lookup, Attributes, Attrs, Lookup, Record};
 pub use temporal::{Date, DateTime};
 pub use value::{Key, Value};
