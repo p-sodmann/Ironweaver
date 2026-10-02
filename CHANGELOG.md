@@ -161,6 +161,9 @@ a query layer and database foundations.
 
 ### Fixed
 
+- `Expr` serde keeps its depth-limit message ("expression nested more than
+  100 levels deep") under the binary encoding: postcard drops custom
+  messages, and `format::take_error` (now public) returns it after a failure.
 - Binary files with a non-zero `flags` or `reserved` header field are
   refused (they loaded as if intact): an unknown flag as "not supported
   (written by a newer ironweaver?)", a non-zero reserved field as damage.
