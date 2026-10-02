@@ -13,7 +13,9 @@ use crate::temporal::{self, Date, DateTime};
 /// variant order is part of the binary format (bincode writes the variant
 /// index), so never reorder the variants. Serde (de)serialization fails for
 /// values nested more than [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels
-/// instead of overflowing the stack.
+/// instead of overflowing the stack, counted like the file format: a value
+/// is depth 1 and a container's items are one deeper (an empty container
+/// counts like a scalar).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Value {
     String(String),
@@ -23,9 +25,9 @@ pub enum Value {
     Half(f16),
     Bool(bool),
     None,
-    List(#[serde(with = "nested")] Vec<Value>),
+    List(#[serde(serialize_with = "nested::serialize_list", deserialize_with = "nested::deserialize_list")] Vec<Value>),
     Dict(
-        #[serde(serialize_with = "nested::serialize_dict", deserialize_with = "nested::deserialize")]
+        #[serde(serialize_with = "nested::serialize_dict", deserialize_with = "nested::deserialize_dict")]
         HashMap<String, Value>,
     ),
     /// A byte string (base64 in JSON).
@@ -37,20 +39,22 @@ pub enum Value {
 }
 
 /// Serde helpers for the contents of a list / dict value: count the nesting
-/// depth (per thread) and refuse to go deeper than `MAX_DEPTH`.
+/// depth (per thread) and refuse values deeper than `MAX_DEPTH`, counted
+/// like the file format: the outermost value is depth 1 and a container's
+/// items are one deeper, so an empty container counts like a scalar.
 pub(crate) mod nested {
+    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::cell::Cell;
+    use std::collections::HashMap;
+    use std::fmt;
 
+    use super::Value;
     use crate::format::MAX_DEPTH;
 
     thread_local! {
         // Containers entered on this thread
         static DEPTH: Cell<usize> = const { Cell::new(0) };
-    }
-
-    fn enter<T, E>(err: impl FnOnce() -> E, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
-        enter_level(&DEPTH, MAX_DEPTH, err, f)
     }
 
     /// Run `f` one level deeper on the per-thread counter `depth`: the
@@ -83,20 +87,75 @@ pub(crate) mod nested {
         format!("attribute values nested more than {MAX_DEPTH} levels deep")
     }
 
-    pub fn serialize<S: Serializer, T: Serialize>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-        enter(|| crate::format::ser_error::<S::Error>(message()), || v.serialize(s))
+    /// A container's item: entered one level deeper than the container, so
+    /// only containers that have items count towards the limit.
+    struct Item<'a>(&'a Value);
+
+    impl Serialize for Item<'_> {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            enter_level(&DEPTH, MAX_DEPTH, || crate::format::ser_error::<S::Error>(message()), || self.0.serialize(s))
+        }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<T, D::Error> {
-        enter(|| crate::format::de_error::<D::Error>(message()), || T::deserialize(d))
+    struct ItemSeed;
+
+    impl<'de> DeserializeSeed<'de> for ItemSeed {
+        type Value = Value;
+
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+            enter_level(&DEPTH, MAX_DEPTH, || crate::format::de_error::<D::Error>(message()), || Value::deserialize(d))
+        }
+    }
+
+    /// Preallocate at most this many items from an untrusted size hint.
+    fn cautious(hint: Option<usize>) -> usize {
+        hint.unwrap_or(0).min(4096)
+    }
+
+    pub fn serialize_list<S: Serializer>(v: &[Value], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(v.iter().map(Item))
     }
 
     /// A dict's entries, sorted by key.
-    pub fn serialize_dict<S: Serializer>(
-        v: &std::collections::HashMap<String, super::Value>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        enter(|| crate::format::ser_error::<S::Error>(message()), || super::serialize_sorted(v, s))
+    pub fn serialize_dict<S: Serializer>(v: &HashMap<String, Value>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_map(super::sorted_entries(v).into_iter().map(|(k, v)| (k, Item(v))))
+    }
+
+    pub fn deserialize_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Value>, D::Error> {
+        struct List;
+        impl<'de> Visitor<'de> for List {
+            type Value = Vec<Value>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a list of values")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<Value>, A::Error> {
+                let mut items = Vec::with_capacity(cautious(seq.size_hint()));
+                while let Some(item) = seq.next_element_seed(ItemSeed)? {
+                    items.push(item);
+                }
+                Ok(items)
+            }
+        }
+        d.deserialize_seq(List)
+    }
+
+    pub fn deserialize_dict<'de, D: Deserializer<'de>>(d: D) -> Result<HashMap<String, Value>, D::Error> {
+        struct Dict;
+        impl<'de> Visitor<'de> for Dict {
+            type Value = HashMap<String, Value>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a map of values")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<HashMap<String, Value>, A::Error> {
+                let mut items = HashMap::with_capacity(cautious(map.size_hint()));
+                while let Some(key) = map.next_key::<String>()? {
+                    let value = map.next_value_seed(ItemSeed)?;
+                    items.insert(key, value);
+                }
+                Ok(items)
+            }
+        }
+        d.deserialize_map(Dict)
     }
 }
 
