@@ -57,7 +57,7 @@ payload             the document, postcard-encoded
 trailer  16 bytes   u64 payload length, u32 CRC32 of the payload, b"IWND"
 ```
 
-All integers are little-endian. `save_to_binary_f16` stores floats (and lists of floats) at half precision, for embeddings where the saving matters more than the precision.
+All integers are little-endian. No flags are defined yet: a reader refuses a file with a flag it doesn't know (a newer writer may use one to change how the file is read) and a file whose reserved field isn't 0, since the checksum covers only the payload. `save_to_binary_f16` stores floats (and lists of floats) at half precision, for embeddings where the saving matters more than the precision.
 
 Every save writes to a temporary file, flushes it to disk and then renames it over the target, so a crash mid-save never leaves a half-written file behind.
 

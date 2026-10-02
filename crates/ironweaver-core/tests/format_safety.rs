@@ -117,6 +117,22 @@ fn damaged_binary_files_are_rejected() {
     let mut newer = file.clone();
     newer[8] = 3;
     check(&newer, "version 3 is not supported");
+    // The header's flags and reserved bytes, for both loaders
+    let header = |at: usize, byte: u8| {
+        let mut bytes = file.clone();
+        bytes[at] = byte;
+        bytes
+    };
+    for (bytes, want) in [
+        (header(10, 0x01), "flags 0x0001 are not supported"),
+        (header(11, 0x80), "flags 0x8000 are not supported"),
+        (header(12, 0xde), "reserved header bytes are not zero"),
+        (header(15, 0x01), "reserved header bytes are not zero"),
+    ] {
+        check(&bytes, want);
+        let err = format::from_binary_reader(&bytes[..]).err().unwrap().to_string();
+        assert!(err.contains(want), "{want}: {err}");
+    }
     // A valid frame around garbage: a parse error, not a panic
     check(&reframe(&file, &[0xff; 40]), "");
 }

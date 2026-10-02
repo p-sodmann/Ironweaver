@@ -151,6 +151,10 @@ a query layer and database foundations.
 
 ### Fixed
 
+- Binary files with a non-zero `flags` or `reserved` header field are
+  refused (they loaded as if intact): an unknown flag as "not supported
+  (written by a newer ironweaver?)", a non-zero reserved field as damage.
+  Both loaders check it; files written by ironweaver always have zeros there.
 - A reference cycle that kept graphs alive after use.
 - `attr("type")` / `attr("labels")` in expressions read the edge type and
   node labels, like the rest of the API.
