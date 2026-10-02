@@ -571,9 +571,9 @@ impl<N, E> Graph<N, E> {
 
     /// Add a label to a node; returns whether it was new.
     pub fn add_label(&mut self, ix: NodeIx, label: &str) -> Result<bool, GraphError> {
-        self.node(ix).ok_or(GraphError::Stale)?;
+        let node = self.nodes.get_mut(ix.slot, ix.generation).ok_or(GraphError::Stale)?;
         let sym = self.symbols.intern(label);
-        let labels = &mut self.node_ref_mut(ix).labels;
+        let labels = &mut node.labels;
         match labels.binary_search(&sym) {
             Ok(_) => Ok(false),
             Err(at) => {
@@ -592,9 +592,9 @@ impl<N, E> Graph<N, E> {
 
     /// Remove a label from a node; returns whether it had it.
     pub fn remove_label(&mut self, ix: NodeIx, label: &str) -> Result<bool, GraphError> {
-        self.node(ix).ok_or(GraphError::Stale)?;
+        let node = self.nodes.get_mut(ix.slot, ix.generation).ok_or(GraphError::Stale)?;
         let Some(sym) = self.symbols.get(label) else { return Ok(false) };
-        let labels = &mut self.node_ref_mut(ix).labels;
+        let labels = &mut node.labels;
         match labels.binary_search(&sym) {
             Err(_) => Ok(false),
             Ok(at) => {
@@ -706,19 +706,38 @@ impl<N, E> Graph<N, E> {
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateNode(id));
         }
-        let (old_key, _) = self.index.remove_entry(&old).expect("live nodes are indexed");
+        if self.index.get(&old) != Some(&ix) {
+            return Err(not_indexed());
+        }
+        let (old_key, _) = self.index.remove_entry(&old).ok_or_else(not_indexed)?;
         let key = id.clone();
         self.heap = self.heap + key.capacity() + id.capacity() - old_key.capacity();
         self.index.insert(key, ix);
-        let old_id = std::mem::replace(&mut self.node_ref_mut(ix).id, id);
+        let node = self.nodes.get_mut(ix.slot, ix.generation).ok_or_else(|| internal("a renamed node is gone"))?;
+        let old_id = std::mem::replace(&mut node.id, id);
         self.heap -= old_id.capacity();
         Ok(())
     }
 
     /// Remove a node and every edge attached to it; returns its id and payload.
+    ///
+    /// # Panics
+    ///
+    /// Only if the graph's invariants are broken (a bug); [`Graph::apply`]
+    /// reports that as [`GraphError::Internal`] instead.
     pub fn remove_node(&mut self, ix: NodeIx) -> Option<(String, N)> {
-        let node = self.nodes.remove(ix.slot, ix.generation)?;
-        let (key, _) = self.index.remove_entry(&node.id).expect("live nodes are indexed");
+        self.try_remove_node(ix).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// [`Graph::remove_node`], with a broken invariant as
+    /// [`GraphError::Internal`]. Everything is checked before anything
+    /// changes, so on error the graph is unchanged.
+    pub(crate) fn try_remove_node(&mut self, ix: NodeIx) -> Result<Option<(String, N)>, GraphError> {
+        let Some(node) = self.node(ix) else { return Ok(None) };
+        self.check_node(ix, node)?;
+        let node =
+            self.nodes.remove(ix.slot, ix.generation).ok_or_else(|| internal("a node just looked up is gone"))?;
+        let (key, _) = self.index.remove_entry(&node.id).ok_or_else(not_indexed)?;
         self.heap -= key.capacity() + node_heap(&node);
         self.indexes.remove(ix);
         for &label in &node.labels {
@@ -728,29 +747,64 @@ impl<N, E> Graph<N, E> {
             // Self loops appear in both lists; the second visit finds nothing.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
-                if edge.to != ix {
-                    self.node_ref_mut(edge.to).inc.retain(|&x| x != e);
+                if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
+                    to.inc.retain(|&x| x != e);
                 }
             }
         }
         for &e in &node.inc {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
-                if edge.from != ix {
-                    self.node_ref_mut(edge.from).out.retain(|&x| x != e);
+                if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
+                    from.out.retain(|&x| x != e);
                 }
             }
         }
-        Some((node.id, node.data))
+        Ok(Some((node.id, node.data)))
+    }
+
+    /// Check the invariants removing a live node relies on: it is in the id
+    /// index, and its edges and their endpoints are live.
+    pub(crate) fn check_node(&self, ix: NodeIx, node: &Node<N>) -> Result<(), GraphError> {
+        if self.index.get(&node.id) != Some(&ix) {
+            return Err(not_indexed());
+        }
+        for &e in node.out.iter().chain(&node.inc) {
+            let edge = self.edge(e).ok_or_else(|| internal("an adjacency list holds a removed edge"))?;
+            if self.node(edge.from).is_none() || self.node(edge.to).is_none() {
+                return Err(internal("an edge's endpoint is gone"));
+            }
+        }
+        Ok(())
     }
 
     /// Remove one edge; returns it.
+    ///
+    /// # Panics
+    ///
+    /// Only if the graph's invariants are broken (a bug); [`Graph::apply`]
+    /// reports that as [`GraphError::Internal`] instead.
     pub fn remove_edge(&mut self, ix: EdgeIx) -> Option<Edge<E>> {
-        let edge = self.edges.remove(ix.slot, ix.generation)?;
+        self.try_remove_edge(ix).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// [`Graph::remove_edge`], with a broken invariant as
+    /// [`GraphError::Internal`]; on error the graph is unchanged.
+    pub(crate) fn try_remove_edge(&mut self, ix: EdgeIx) -> Result<Option<Edge<E>>, GraphError> {
+        let Some(edge) = self.edge(ix) else { return Ok(None) };
+        if self.node(edge.from).is_none() || self.node(edge.to).is_none() {
+            return Err(internal("an edge's endpoint is gone"));
+        }
+        let edge =
+            self.edges.remove(ix.slot, ix.generation).ok_or_else(|| internal("an edge just looked up is gone"))?;
         self.edge_index.remove(edge.id);
-        self.node_ref_mut(edge.from).out.retain(|&x| x != ix);
-        self.node_ref_mut(edge.to).inc.retain(|&x| x != ix);
-        Some(edge)
+        if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
+            from.out.retain(|&x| x != ix);
+        }
+        if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
+            to.inc.retain(|&x| x != ix);
+        }
+        Ok(Some(edge))
     }
 
     /// Edges from `from` to `to` (optionally only of type `ty`), in `from`'s
@@ -928,6 +982,14 @@ impl<N, E> Graph<N, E> {
     }
 }
 
+fn internal(msg: &str) -> GraphError {
+    GraphError::Internal(msg.to_owned())
+}
+
+fn not_indexed() -> GraphError {
+    internal("a live node is missing from the id index")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -972,6 +1034,50 @@ mod tests {
         assert!(g.node(b).is_none());
         assert!(g.remove_node(b).is_none());
         assert_eq!(g.add_edge(a, b, 0), Err(GraphError::Stale));
+    }
+
+    /// A graph whose node "a" is listed in the id index but carries
+    /// another id: the invariant `apply` must not panic on.
+    fn corrupted() -> Graph<crate::Record, crate::Record> {
+        let mut g = Graph::new();
+        let a = g.add_node("a", crate::Record::default()).unwrap();
+        let b = g.add_node("b", crate::Record::default()).unwrap();
+        g.add_edge(a, b, crate::Record::default()).unwrap();
+        g.nodes.get_mut(a.slot, a.generation).unwrap().id = "x".into();
+        g
+    }
+
+    #[test]
+    fn apply_reports_a_broken_id_index_instead_of_panicking() {
+        use crate::Op;
+        let mut g = corrupted();
+        let r = g.apply(Op::RenameNode { id: "a".into(), new_id: "c".into() });
+        assert!(matches!(r, Err(GraphError::Internal(_))));
+        assert!(g.contains_node("a") && !g.contains_node("c")); // unchanged
+        let r = g.apply(Op::RemoveNode { id: "a".into() });
+        assert!(matches!(r, Err(GraphError::Internal(_))));
+        let ix = g.node_ix("a").unwrap();
+        assert!(g.node(ix).is_some()); // unchanged, edge included
+        assert_eq!(g.edge_count(), 1);
+        assert!(matches!(g.try_remove_node(ix), Err(GraphError::Internal(_))));
+        assert_eq!(g.node_count(), 2);
+    }
+
+    #[test]
+    fn apply_reports_a_dangling_edge_instead_of_panicking() {
+        use crate::{Op, Record};
+        let mut g: Graph<Record, Record> = Graph::new();
+        let a = g.add_node("a", Record::default()).unwrap();
+        let b = g.add_node("b", Record::default()).unwrap();
+        let e = g.add_edge(a, b, Record::default()).unwrap();
+        // Point the edge at a handle that never resolves
+        g.edges.get_mut(e.slot, e.generation).unwrap().to = NodeIx { slot: 7, generation: 3 };
+        let id = g.edge(e).unwrap().id();
+        assert!(matches!(g.apply(Op::RemoveEdge { id }), Err(GraphError::Internal(_))));
+        assert!(g.edge(e).is_some()); // unchanged
+        assert!(matches!(g.apply(Op::RemoveNode { id: "a".into() }), Err(GraphError::Internal(_))));
+        assert!(g.node(a).is_some());
+        assert!(matches!(g.try_remove_node(a), Err(GraphError::Internal(_))));
     }
 
     #[test]
@@ -1071,6 +1177,7 @@ mod tests {
         let a = g.add_node("a", ()).unwrap();
         g.nodes.slots[a.slot()].generation = u32::MAX - 1;
         let a = NodeIx { slot: 0, generation: u32::MAX - 1 };
+        g.index.insert("a".into(), a);
         g.remove_node(a).unwrap();
         let b = g.add_node("b", ()).unwrap();
         assert_eq!((b.slot(), b.generation), (0, u32::MAX));
