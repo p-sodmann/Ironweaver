@@ -97,7 +97,8 @@ Below is a quick guide to notable functions and where to find them.
   set) or call `recount`; a randomized test checks it against a recount.
 - **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
   Posting>` + each node's key): `create_index` / `create_index_with_keys`,
-  `find_nodes`, `find_nodes_in_range`, `index_candidates(Expr)` (used by
+  `find_nodes`, `find_nodes_in_range`, `index_stats` (O(1) sizes),
+  `index_candidates(Expr)` (used by
   the matcher and `filter`), `set_index_keys` / `reindex_node` /
   `flush_indexes`. `add_node`, `node_mut`, `nodes_mut` mark nodes dirty;
   lookups re-read dirty nodes, so they are exact before a flush.

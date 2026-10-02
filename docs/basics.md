@@ -92,11 +92,15 @@ assert [n.id for n in g.find_range("age", 30, 40, inclusive="left")] == ["ann"]
 g["bob"].attr_set("city", "Oslo")                       # indexes follow every change
 assert [n.id for n in g.find("city", "Oslo")] == ["ann", "bob", "cat"]
 assert sorted(g.filter(where=attr("age") > 30).nodes) == ["ann", "cat"]   # uses the index
+stats = g.index_stats("city")                          # None if not indexed
+assert (stats["entries"], stats["distinct_keys"], stats["dirty"]) == (3, 1, 0)
+assert stats["memory_bytes"] <= g.memory_usage()
 g.drop_index("city")
 ```
 
 - Results are in graph order. Numbers compare across int and float (`find("age", 31.0)` finds 31).
 - `find_range` takes `low` and/or `high` (None: open) of one kind (numbers, strings, bools, bytes, dates or datetimes); values of other kinds are never in range. `inclusive` is `"both"` (default), `"left"`, `"right"` or `"neither"`.
+- `index_stats(name)` gives an index's size in O(1): `entries` (indexed nodes), `distinct_keys`, `memory_bytes` (its share of `memory_usage()`) and `dirty` (nodes whose entries may be stale; 0 after changes made through the graph).
 - Only scalar values are indexed; lists, dicts, None and NaN never match, as in filter expressions.
 - `filter(where=...)` and `match` use indexes on the attributes they compare (equality, ranges, `is_in`), and `match` starts from the pattern node with the fewest candidates.
 - Indexes follow changes made through the graph (`add_node(s)`, `attr_set`, assigning `attr`, `remove_node`). Changing a list or dict *inside* an attribute value in place doesn't count, but such values aren't indexed anyway.

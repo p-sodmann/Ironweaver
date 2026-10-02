@@ -778,6 +778,17 @@ class Vertex:
     def indexes(self) -> list[str]:
         """Names of the indexed node attributes, in creation order."""
         ...
+    def index_stats(self, name: str) -> dict[str, int] | None:
+        """Size of the index on *name*, or None if *name* isn't indexed. O(1).
+
+        ``entries`` is the number of indexed nodes (those with a scalar value),
+        ``distinct_keys`` the number of distinct values (1 and 1.0 are one),
+        ``memory_bytes`` the approximate bytes the index uses (part of
+        :meth:`memory_usage`), and ``dirty`` the number of nodes whose entries
+        may be stale; the counts are exact when it is 0, as after changes
+        made through the graph's methods.
+        """
+        ...
     def find(self, name: str, value: Any) -> list[Node]:
         """Nodes whose attribute *name* equals *value* (1 == 1.0), in graph order.
 

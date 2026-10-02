@@ -142,11 +142,37 @@ impl PropertyIndex {
         }
     }
 
+    /// Approximate bytes used. O(1).
+    fn memory_usage(&self) -> usize {
+        use std::mem::size_of;
+        // B-tree nodes hold up to 11 entries; assume two thirds full
+        self.map.len() * (size_of::<Key>() + size_of::<Posting>()) * 3 / 2
+            + self.heap
+            + hash_table_bytes(self.keys.capacity(), size_of::<(NodeIx, Key)>())
+    }
+
     /// The heap bytes, recomputed.
     fn count_heap(&self) -> usize {
         let map: usize = self.map.iter().map(|(k, p)| key_heap(k) + posting_heap(p)).sum();
         map + self.keys.values().map(key_heap).sum::<usize>()
     }
+}
+
+/// Size of one property index ([`Graph::index_stats`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IndexStats {
+    /// Nodes in the index (those with a scalar value at the path, as of
+    /// their last reindex).
+    pub entries: usize,
+    /// Distinct keys.
+    pub distinct_keys: usize,
+    /// Approximate bytes the index uses (its share of
+    /// [`Graph::memory_usage`]).
+    pub memory_bytes: usize,
+    /// Nodes whose entries may be stale until a flush (shared by all
+    /// indexes): `entries` and `distinct_keys` count them as last indexed.
+    pub dirty: usize,
 }
 
 /// The property indexes of a graph, and which nodes they may be stale for.
@@ -180,14 +206,8 @@ impl Indexes {
     /// counted as they change.
     pub(crate) fn memory_usage(&self) -> usize {
         use std::mem::size_of;
-        let mut total = hash_table_bytes(self.dirty.capacity(), size_of::<NodeIx>());
-        for index in &self.list {
-            // B-tree nodes hold up to 11 entries; assume two thirds full
-            total += index.map.len() * (size_of::<Key>() + size_of::<Posting>()) * 3 / 2;
-            total += index.heap;
-            total += hash_table_bytes(index.keys.capacity(), size_of::<(NodeIx, Key)>());
-        }
-        total
+        let dirty = hash_table_bytes(self.dirty.capacity(), size_of::<NodeIx>());
+        dirty + self.list.iter().map(PropertyIndex::memory_usage).sum::<usize>()
     }
 
     #[cfg(test)]
@@ -297,6 +317,20 @@ impl<N, E> Graph<N, E> {
     /// Paths of the node property indexes, in creation order.
     pub fn index_paths(&self) -> Vec<&[String]> {
         self.indexes.list.iter().map(|i| i.path.as_slice()).collect()
+    }
+
+    /// Entry count and memory of the index on `path` (`None` if there is
+    /// none). O(1); with dirty nodes the counts are as of their last
+    /// reindex (`flush_indexes` first for exact numbers).
+    pub fn index_stats(&self, path: &[String]) -> Option<IndexStats> {
+        let index = &self.indexes.list[self.indexes.position(path)?];
+        let dirty = if self.indexes.all_dirty { self.node_count() } else { self.indexes.dirty.len() };
+        Some(IndexStats {
+            entries: index.keys.len(),
+            distinct_keys: index.map.len(),
+            memory_bytes: index.memory_usage(),
+            dirty,
+        })
     }
 
     /// Whether there is an index on `path`.
@@ -751,8 +785,53 @@ mod tests {
                 g.flush_indexes().unwrap();
                 assert!(!g.indexes_dirty());
                 check(&g);
+                check_stats(&g);
             }
         }
+    }
+
+    /// `index_stats` against a recount (after a flush).
+    fn check_stats(g: &G) {
+        let keys: Vec<Key> = g.nodes().filter_map(|(_, n)| n.data.attr.get("x").and_then(Key::of)).collect();
+        let distinct: std::collections::BTreeSet<&Key> = keys.iter().collect();
+        let stats = g.index_stats(&p("x")).unwrap();
+        assert_eq!((stats.entries, stats.distinct_keys, stats.dirty), (keys.len(), distinct.len(), 0));
+        assert!(stats.memory_bytes > 0 && stats.memory_bytes <= g.memory_usage());
+    }
+
+    #[test]
+    fn index_stats() {
+        let mut g = G::new();
+        assert_eq!(g.index_stats(&p("x")), None);
+        for (i, v) in
+            [Value::Int(1), Value::Float(1.0), Value::from("a"), Value::None, Value::Int(2)].into_iter().enumerate()
+        {
+            g.add_node(format!("n{i}"), Record::with_attr([("x", v)])).unwrap();
+        }
+        g.add_node("empty", Record::default()).unwrap();
+        g.create_index::<GraphError>(&p("x")).unwrap();
+        g.create_index::<GraphError>(&p("y")).unwrap();
+        // 1 and 1.0 are one key; none and a missing value aren't indexed
+        let stats = g.index_stats(&p("x")).unwrap();
+        assert_eq!((stats.entries, stats.distinct_keys, stats.dirty), (4, 3, 0));
+        let empty = g.index_stats(&p("y")).unwrap();
+        assert_eq!((empty.entries, empty.distinct_keys), (0, 0));
+        assert!(empty.memory_bytes < stats.memory_bytes);
+        let total = g.memory_usage();
+        g.drop_index(&p("x"));
+        assert_eq!(total - g.memory_usage(), stats.memory_bytes);
+
+        // Dirty nodes are counted as last indexed until a flush
+        g.create_index::<GraphError>(&p("x")).unwrap();
+        let ix = g.node_ix("n3").unwrap();
+        g.node_mut(ix).unwrap().data.attr.insert("x".into(), Value::from("b"));
+        let stats = g.index_stats(&p("x")).unwrap();
+        assert_eq!((stats.entries, stats.distinct_keys, stats.dirty), (4, 3, 1));
+        g.flush_indexes().unwrap();
+        let stats = g.index_stats(&p("x")).unwrap();
+        assert_eq!((stats.entries, stats.distinct_keys, stats.dirty), (5, 4, 0));
+        let _ = g.nodes_mut();
+        assert_eq!(g.index_stats(&p("x")).unwrap().dirty, g.node_count());
     }
 
     #[test]

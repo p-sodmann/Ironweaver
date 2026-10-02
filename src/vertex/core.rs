@@ -409,6 +409,19 @@ impl Vertex {
         self.graph.drop_index(&[name])
     }
 
+    /// Size of the index on ``name`` as a dict (``entries``,
+    /// ``distinct_keys``, ``memory_bytes``, ``dirty``), or None if there is
+    /// no index on ``name``. O(1).
+    fn index_stats<'py>(&self, py: Python<'py>, name: String) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let Some(stats) = self.graph.index_stats(&[name]) else { return Ok(None) };
+        let d = PyDict::new(py);
+        d.set_item("entries", stats.entries)?;
+        d.set_item("distinct_keys", stats.distinct_keys)?;
+        d.set_item("memory_bytes", stats.memory_bytes)?;
+        d.set_item("dirty", stats.dirty)?;
+        Ok(Some(d))
+    }
+
     /// Names of the indexed node attributes, in creation order.
     #[getter]
     fn indexes(&self) -> Vec<String> {
