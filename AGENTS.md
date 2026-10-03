@@ -219,12 +219,12 @@ Below is a quick guide to notable functions and where to find them.
   convenience.
 - **format/** – on-disk format version 2 (JSON via sonic-rs; binary:
   header + postcard payload + trailer with length and CRC32; layout in the
-  comment at the top of `mod.rs`). Version 1 files (JSON "1.x", headerless
-  bincode, only with the default `format-v1` feature; CI also tests
-  without it) keep loading: `load.rs` `V1*` structs, `migrate_v1` (attr
-  "labels" / "type" -> fields), new edge ids (Python keeps the old one in
-  `meta["legacy_id"]`); `tests/data/legacy_*` (v1) and
-  `tests/data/v2_*` (v2 golden files) must keep loading. The
+  comment at the top of `mod.rs`). Version 1 JSON files ("1.x") keep
+  loading: `migrate_v1` in `load.rs` (attr "labels" / "type" -> fields),
+  new edge ids (Python keeps the old one in `meta["legacy_id"]`);
+  `tests/data/legacy_graph.json` (v1) and `tests/data/v2_*` (v2 golden
+  files) must keep loading. Version 1 binary files (headerless bincode,
+  `tests/data/legacy_*.bin`) are refused with a clear error (`unframed`). The
   binary field order is positional: save.rs and load.rs structs must match.
   postcard drops custom error messages, so raise them with `ser_error` /
   `de_error`.

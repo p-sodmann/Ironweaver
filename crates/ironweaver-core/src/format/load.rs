@@ -1,7 +1,5 @@
 // format/load.rs
 
-#[cfg(feature = "format-v1")]
-use bincode::Options;
 use half::f16;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
@@ -396,76 +394,6 @@ pub struct LoadGraph<'a> {
     version: u32,
 }
 
-// Version 1 binary documents (bincode, positional): no labels / types.
-// Only read with the `format-v1` feature.
-#[cfg(feature = "format-v1")]
-#[derive(Deserialize)]
-struct V1Node<'a> {
-    #[serde(borrow)]
-    id: Str<'a>,
-    #[serde(borrow)]
-    attr: LoadAttrs<'a>,
-    #[serde(borrow)]
-    meta: LoadAttrs<'a>,
-    #[serde(borrow)]
-    edge_ids: Vec<Str<'a>>,
-    #[serde(borrow)]
-    inverse_edge_ids: Vec<Str<'a>>,
-}
-
-#[cfg(feature = "format-v1")]
-#[derive(Deserialize)]
-struct V1Edge<'a> {
-    #[serde(borrow)]
-    id: Str<'a>,
-    #[serde(borrow)]
-    from_id: Str<'a>,
-    #[serde(borrow)]
-    to_id: Str<'a>,
-    #[serde(borrow)]
-    attr: LoadAttrs<'a>,
-    #[serde(borrow)]
-    meta: LoadAttrs<'a>,
-}
-
-#[cfg(feature = "format-v1")]
-#[derive(Deserialize)]
-struct V1Graph<'a> {
-    #[serde(borrow)]
-    nodes: Entries<Str<'a>, V1Node<'a>>,
-    #[serde(borrow)]
-    edges: Entries<Str<'a>, V1Edge<'a>>,
-    #[serde(borrow)]
-    meta: LoadAttrs<'a>,
-    #[serde(borrow)]
-    metadata: LoadAttrs<'a>,
-}
-
-#[cfg(feature = "format-v1")]
-impl<'a> From<V1Graph<'a>> for LoadGraph<'a> {
-    fn from(g: V1Graph<'a>) -> Self {
-        let nodes = g
-            .nodes
-            .0
-            .into_iter()
-            .map(|(k, n)| {
-                let V1Node { id, attr, meta, edge_ids, inverse_edge_ids } = n;
-                (k, LoadNode { id, labels: Vec::new(), attr, meta, edge_ids, inverse_edge_ids })
-            })
-            .collect();
-        let edges = g
-            .edges
-            .0
-            .into_iter()
-            .map(|(k, e)| {
-                let V1Edge { id, from_id, to_id, attr, meta } = e;
-                (k, LoadEdge { id, from_id, to_id, ty: None, attr, meta })
-            })
-            .collect();
-        LoadGraph { nodes: Entries(nodes), edges: Entries(edges), meta: g.meta, metadata: g.metadata, version: 1 }
-    }
-}
-
 impl<'a> LoadGraph<'a> {
     /// Parse a JSON document (any version).
     pub fn from_json_slice(bytes: &'a [u8]) -> Result<Self, GraphError> {
@@ -488,38 +416,15 @@ impl<'a> LoadGraph<'a> {
         Ok(doc)
     }
 
-    /// Parse a binary document: a framed postcard file (version 2) or a
-    /// version 1 bincode file (with the `format-v1` feature, on by default;
-    /// without it, version 1 files are a [`GraphError::Format`]).
+    /// Parse a binary document: a framed postcard file (version 2). Files
+    /// without the header, version 1 binary files (ironweaver 0.1) among
+    /// them, are a [`GraphError::Format`].
     pub fn from_binary_slice(bytes: &'a [u8]) -> Result<Self, GraphError> {
-        match super::binary_payload(bytes)? {
-            Some(payload) => {
-                super::take_error();
-                let mut doc: LoadGraph<'a> = postcard::from_bytes(payload).map_err(super::postcard_error)?;
-                doc.version = 2;
-                Ok(doc)
-            }
-            None => Self::from_v1_binary(bytes),
-        }
-    }
-
-    #[cfg(feature = "format-v1")]
-    fn from_v1_binary(bytes: &'a [u8]) -> Result<Self, GraphError> {
-        // No size limit needed: every length is checked against the input
-        // slice before anything is allocated.
-        let options = bincode::DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes();
-        let v1: V1Graph<'a> = options.deserialize(bytes).map_err(|e| GraphError::Format(e.to_string()))?;
-        let mut doc = LoadGraph::from(v1);
-        doc.migrate_v1();
+        let payload = super::binary_payload(bytes)?;
+        super::take_error();
+        let mut doc: LoadGraph<'a> = postcard::from_bytes(payload).map_err(super::postcard_error)?;
+        doc.version = 2;
         Ok(doc)
-    }
-
-    #[cfg(not(feature = "format-v1"))]
-    fn from_v1_binary(_bytes: &'a [u8]) -> Result<Self, GraphError> {
-        Err(GraphError::Format(
-            "not a version 2 binary graph file (reading version 1 binary files needs the `format-v1` feature of ironweaver-core)"
-                .into(),
-        ))
     }
 
     /// Version 1 conventions -> fields: node attribute `labels` (a list of
@@ -562,10 +467,6 @@ impl<'a> LoadGraph<'a> {
     /// The graph-level `meta` map.
     pub fn meta(&self) -> &LoadAttrs<'a> {
         &self.meta
-    }
-
-    pub(super) fn into_meta(self) -> LoadAttrs<'a> {
-        self.meta
     }
 
     pub fn node_count(&self) -> usize {

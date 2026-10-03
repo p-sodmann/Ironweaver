@@ -1,4 +1,4 @@
-"""Lock down the on-disk graph format (JSON and bincode) and its options."""
+"""Lock down the on-disk graph format (JSON and binary) and its options."""
 
 import json
 import os
@@ -124,10 +124,8 @@ def check_loaded(v):
     assert a.vertex is v
 
 
-@pytest.mark.parametrize("name", ["legacy_graph.json", "legacy_graph.bin", "legacy_graph_f16.bin"])
-def test_legacy_files_still_load(name):
-    path = os.path.join(DATA, name)
-    v = Vertex.load_from_json(path) if name.endswith(".json") else Vertex.load_from_binary(path)
+def test_legacy_json_still_loads():
+    v = Vertex.load_from_json(os.path.join(DATA, "legacy_graph.json"))
     check_loaded(v)
     # Version 1 files: old string edge ids are kept in meta, edges get new
     # integer ids, and attr "type" became the edge type
@@ -136,6 +134,22 @@ def test_legacy_files_still_load(name):
     for e in a.edges:  # new ids are handed out in the file's edge order
         assert v.get_edge(e.id) == e
 
+
+
+@pytest.mark.parametrize("name", ["legacy_graph.bin", "legacy_graph_f16.bin"])
+def test_legacy_binary_files_are_refused(name):
+    with pytest.raises(RuntimeError, match="unsupported ironweaver binary format version 1") as e:
+        Vertex.load_from_binary(os.path.join(DATA, name))
+    assert "save_to_json" in str(e.value)
+
+
+def test_files_without_header_are_not_taken_for_legacy(tmp_path):
+    for data in [b"{}", b"\xff" * 64, open(os.path.join(DATA, "legacy_graph.json"), "rb").read()]:
+        path = tmp_path / "g.bin"
+        path.write_bytes(data)
+        with pytest.raises(RuntimeError, match="invalid ironweaver binary file") as e:
+            Vertex.load_from_binary(str(path))
+        assert "version 1" not in str(e.value)
 
 def test_round_trips(tmp_path):
     g = sample_graph()

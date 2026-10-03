@@ -66,14 +66,6 @@ def test_crafted_deep_binary_file_raises(tmp_path):
     with pytest.raises(RuntimeError, match="nested more than"):
         Vertex.load_from_binary(str(path))
 
-    # Version 1 (bincode) files: wrap the list at byte 171 of the legacy file
-    legacy = open(os.path.join(os.path.dirname(__file__), "data", "legacy_graph.bin"), "rb").read()
-    v1_level = struct.pack("<IQ", 6, 1)
-    assert legacy[171:175] == struct.pack("<I", 6)
-    path.write_bytes(legacy[:171] + v1_level * 100_000 + legacy[171:])
-    with pytest.raises(RuntimeError, match="nested more than"):
-        Vertex.load_from_binary(str(path))
-
 
 def test_damaged_binary_files_raise(tmp_path):
     path = tmp_path / "g.bin"

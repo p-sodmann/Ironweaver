@@ -33,11 +33,12 @@
 // (little-endian). The trailer is written last, so the payload streams, and
 // a truncated or corrupted file is detected before parsing.
 //
-// Version 1 files still load: JSON with `metadata.version` "1.x" (or none)
-// and bincode files without the header (those only with the `format-v1`
-// feature, on by default). Their edge ids (strings like
-// `edge_0_a_to_b`) are replaced by new `EdgeId`s (loaders can read the old
-// one with `LoadEdge::id`), and the old conventions are migrated: a node
+// Version 1 JSON files (`metadata.version` "1.x", or none) still load.
+// Version 1 binary files (headerless bincode) do not: they are recognised
+// and refused with a message saying how to convert them (`unframed`). In
+// version 1 JSON files, edge ids (strings like `edge_0_a_to_b`) are
+// replaced by new `EdgeId`s (loaders can read the old one with
+// `LoadEdge::id`), and the old conventions are migrated: a node
 // attribute `labels` holding a list of strings becomes the node's labels, an
 // edge attribute `type` holding a string becomes the edge's type.
 //
@@ -170,11 +171,10 @@ fn check_trailer(trailer: &[u8], len: u64, crc: u32) -> Result<(), GraphError> {
 }
 
 /// The postcard payload of a framed binary file (after checking header,
-/// length and checksum), or `None` if `bytes` is not framed (a version 1
-/// bincode file, or not a graph file).
-fn binary_payload(bytes: &[u8]) -> Result<Option<&[u8]>, GraphError> {
+/// length and checksum).
+fn binary_payload(bytes: &[u8]) -> Result<&[u8], GraphError> {
     if !bytes.starts_with(MAGIC) {
-        return Ok(None);
+        return Err(unframed(bytes));
     }
     if bytes.len() < HEADER_LEN + TRAILER_LEN {
         return Err(bad_binary("truncated"));
@@ -182,7 +182,30 @@ fn binary_payload(bytes: &[u8]) -> Result<Option<&[u8]>, GraphError> {
     check_version(&bytes[..HEADER_LEN])?;
     let (body, trailer) = bytes[HEADER_LEN..].split_at(bytes.len() - HEADER_LEN - TRAILER_LEN);
     check_trailer(trailer, body.len() as u64, crc32fast::hash(body))?;
-    Ok(Some(body))
+    Ok(body)
+}
+
+/// The error for a file that doesn't start with the binary header, given
+/// its first bytes (at least `HEADER_LEN` of them if the file has that
+/// many). A version 1 binary file (headerless bincode, ironweaver 0.1)
+/// gets its own message: it starts with the node count and then the first
+/// node id's length (or the edge count) as little-endian u64s, which
+/// leaves the high halves of both zero.
+fn unframed(start: &[u8]) -> GraphError {
+    if MAGIC.starts_with(start) {
+        return bad_binary("truncated");
+    }
+    let v1 = start.len() >= HEADER_LEN && start[4..8] == [0; 4] && start[12..16] == [0; 4];
+    if v1 {
+        GraphError::Format(
+            "unsupported ironweaver binary format version 1 (saved by ironweaver 0.1): this version reads \
+             binary format version 2 and newer. To convert the file, load it with ironweaver 0.1, save it \
+             with save_to_json, and load that JSON file with this version"
+                .into(),
+        )
+    } else {
+        bad_binary("no IRONWEAV header (not an ironweaver binary graph file)")
+    }
 }
 
 pub use load::{LoadAttrs, LoadEdge, LoadGraph, LoadKind, LoadNode, LoadValue, MAX_DEPTH};
@@ -216,8 +239,8 @@ pub fn from_json(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphEr
 }
 
 /// Decode a binary document into a `Graph<Record, Record>` and its
-/// graph-level meta: a framed postcard file (format version 2), or a
-/// version 1 bincode file with the `format-v1` feature (on by default).
+/// graph-level meta: a framed postcard file (format version 2). Version 1
+/// binary files are a [`GraphError::Format`] saying how to convert them.
 pub fn from_binary(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
     records(&LoadGraph::from_binary_slice(bytes)?)
 }

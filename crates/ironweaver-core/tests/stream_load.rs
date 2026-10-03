@@ -137,10 +137,9 @@ fn reader_loads_what_the_slice_loader_loads() {
 }
 
 #[test]
-fn old_and_golden_files_load_from_a_reader() {
+fn golden_files_load_from_a_reader() {
     let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/");
-    let legacy = if cfg!(feature = "format-v1") { &["legacy_graph.bin", "legacy_graph_f16.bin"][..] } else { &[] };
-    for &name in legacy.iter().chain(&["v2_graph.bin", "v2_graph_f16.bin"]) {
+    for name in ["v2_graph.bin", "v2_graph_f16.bin"] {
         let bytes = std::fs::read(format!("{data}{name}")).unwrap();
         let (want, want_meta) = format::from_binary(&bytes).unwrap();
         let file = std::fs::File::open(format!("{data}{name}")).unwrap();

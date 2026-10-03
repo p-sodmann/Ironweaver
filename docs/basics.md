@@ -121,7 +121,7 @@ v2 = Vertex.load_from_binary("graph.bin")
 v.save_to_binary_f16("graph_f16.bin")
 ```
 
-Files are written in format version 2: node labels, edge types and edge ids are saved; binary files carry a header and a checksum (truncated or corrupted files are rejected). Files from older versions still load. There, edges get new ids, the old string id is kept in `edge.meta["legacy_id"]`, and `attr["labels"]` / `attr["type"]` become labels and types.
+Files are written in format version 2: node labels, edge types and edge ids are saved; binary files carry a header and a checksum (truncated or corrupted files are rejected). JSON files from older versions still load (binary files saved by 0.1 don't; see [the file format docs](format.md#format-1-ironweaver-01) to convert them). There, edges get new ids, the old string id is kept in `edge.meta["legacy_id"]`, and `attr["labels"]` / `attr["type"]` become labels and types.
 
 Attribute values can be None, bools, ints, floats, strings, bytes, `datetime.date` / `datetime.datetime` (aware ones keep their UTC offset), and lists / dicts of those; they load back with the same types. numpy arrays and scalars are saved as lists / numbers, anything else as its `str()`.
 

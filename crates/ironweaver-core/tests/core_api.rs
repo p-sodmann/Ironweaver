@@ -332,24 +332,34 @@ fn assert_same(a: &G, b: &G) {
 }
 
 #[test]
-fn legacy_files_load() {
+fn legacy_json_loads_and_legacy_binary_is_refused() {
     let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/");
     let json = std::fs::read(format!("{data}legacy_graph.json")).unwrap();
     let bin = std::fs::read(format!("{data}legacy_graph.bin")).unwrap();
     let half = std::fs::read(format!("{data}legacy_graph_f16.bin")).unwrap();
-    let mut loaded = vec![format::from_json(&json).unwrap()];
-    if cfg!(feature = "format-v1") {
-        loaded.extend([format::from_binary(&bin).unwrap(), format::from_binary(&half).unwrap()]);
-    } else {
-        // Without the feature, version 1 binary files are a clear error
-        for bytes in [&bin, &half] {
-            let err = format::from_binary(bytes).err().unwrap().to_string();
-            assert!(err.contains("`format-v1` feature"), "{err}");
-            let err = format::from_binary_reader(&bytes[..]).err().unwrap().to_string();
-            assert!(err.contains("`format-v1` feature"), "{err}");
+    // Version 1 binary files are no longer read: a clear error that says
+    // how to convert them
+    for bytes in [&bin, &half] {
+        for err in [format::from_binary(bytes).err().unwrap(), format::from_binary_reader(&bytes[..]).err().unwrap()] {
+            assert!(matches!(err, GraphError::Format(_)), "{err}");
+            let err = err.to_string();
+            assert!(err.contains("unsupported ironweaver binary format version 1"), "{err}");
+            assert!(err.contains("save_to_json"), "{err}");
         }
     }
-    for (g, meta) in loaded {
+    // Other files without the header are not taken for version 1 files
+    let mut v2 = format::to_binary(&Graph::<Record, Record>::new(), &HashMap::new(), false).unwrap();
+    v2[0] = b'X';
+    for bytes in [&json, &v2, &b"IRONWEAV"[..5].to_vec(), &vec![0xff; 64]] {
+        for err in [format::from_binary(bytes).err().unwrap(), format::from_binary_reader(&bytes[..]).err().unwrap()] {
+            let err = err.to_string();
+            assert!(err.starts_with("invalid ironweaver binary file"), "{err}");
+            assert!(!err.contains("version 1"), "{err}");
+        }
+    }
+    // Version 1 JSON files still load
+    let (g, meta) = format::from_json(&json).unwrap();
+    {
         assert_eq!(meta["title"], Value::from("legacy"));
         let mut ids: Vec<&str> = g.nodes().map(|(_, n)| n.id()).collect();
         ids.sort();
