@@ -14,9 +14,17 @@
 // check) and single edges over variable-length ones. Disconnected parts of
 // a pattern start again from their own most selective node (a cartesian
 // product). Matches come out in a deterministic order for a given graph.
+//
+// Everything is streamed: candidates and steps are read one at a time and
+// a variable-length edge binds each path as it is found, so work and
+// memory between two matches are bounded by a `Budget`
+// (`for_each_match_limited`): every node checked against a node variable
+// counts as visited (as does every step of a variable-length edge), every
+// edge looked at from a bound node as examined, every match as a result.
 
-use super::paths::{expand_paths, steps, Uniqueness};
+use super::paths::{Steps, Uniqueness};
 use super::pattern::Pattern;
+use crate::budget::{Budget, Limited, Meter};
 use crate::graph::IxSet;
 use crate::{Attributes, Direction, EdgeIx, Graph, GraphError, NodeIx, Symbol};
 
@@ -151,6 +159,7 @@ struct Matcher<'a, N, E, V> {
     used: Vec<EdgeIx>,
     visit: V,
     stop: crate::cancel::Stop,
+    meter: Meter,
 }
 
 impl<N, E, X, V> Matcher<'_, N, E, V>
@@ -193,6 +202,9 @@ where
             Some(bound) if bound == ix => self.go(i + 1),
             Some(_) => Ok(true),
             None => {
+                if !self.meter.enter() {
+                    return Ok(false);
+                }
                 if !self.node_ok(v, ix)? {
                     return Ok(true);
                 }
@@ -214,7 +226,7 @@ where
                 nodes: self.nodes.iter().map(|n| n.expect("every node variable is bound")).collect(),
                 edges: self.edges.iter().map(|e| e.clone().expect("every edge variable is bound")).collect(),
             };
-            return (self.visit)(&m);
+            return Ok(self.meter.produce() && (self.visit)(&m)?);
         };
         match step {
             Step::Scan(v) => {
@@ -236,7 +248,16 @@ where
                         let rarest = self.pattern.nodes[v].labels.iter().min_by_key(|l| self.g.label_count(l));
                         self.g.nodes_with_label(rarest.expect("has a label"))
                     }
-                    (None, None) => self.g.node_indices().collect(),
+                    (None, None) => {
+                        // Every node: read lazily, not copied
+                        let g = self.g;
+                        for ix in g.node_indices() {
+                            if !self.with_node(v, ix, i)? {
+                                return Ok(false);
+                            }
+                        }
+                        return Ok(true);
+                    }
                 };
                 for ix in candidates {
                     if !self.with_node(v, ix, i)? {
@@ -254,57 +275,88 @@ where
                     (true, true) => Direction::Out,
                     (true, false) => Direction::In,
                 };
-                match pe.hops {
-                    None => {
-                        let next: Vec<(EdgeIx, NodeIx)> = steps(self.g, u, direction).collect();
-                        for (e, n) in next {
-                            if self.used.contains(&e) || !self.edge_ok(k, e)? {
-                                continue;
-                            }
-                            self.used.push(e);
-                            self.edges[k] = Some(Bound::Edge(e));
-                            let more = self.with_node(far, n, i)?;
-                            self.edges[k] = None;
-                            self.used.pop();
-                            if !more {
-                                return Ok(false);
-                            }
+                let g = self.g;
+                let both = direction == Direction::Both;
+                let Some(hops) = pe.hops else {
+                    let mut next = Steps::new(g, u, direction);
+                    while let Some((e, n)) = next.next(g, both) {
+                        if self.stop.poll() || !self.meter.examine() {
+                            return Ok(false);
                         }
-                        Ok(true)
+                        if self.used.contains(&e) || !self.edge_ok(k, e)? {
+                            continue;
+                        }
+                        self.used.push(e);
+                        self.edges[k] = Some(Bound::Edge(e));
+                        let more = self.with_node(far, n, i)?;
+                        self.edges[k] = None;
+                        self.used.pop();
+                        if !more {
+                            return Ok(false);
+                        }
                     }
-                    Some(hops) => {
-                        let mut paths: Vec<(Vec<EdgeIx>, NodeIx)> = Vec::new();
-                        expand_paths(
-                            self.g,
-                            u,
-                            direction,
-                            hops,
-                            Uniqueness::Trail,
-                            |e, _| Ok(!self.used.contains(&e) && self.edge_ok(k, e)?),
-                            |edges: &[EdgeIx], nodes: &[NodeIx]| {
-                                paths.push((edges.to_vec(), *nodes.last().expect("a path has its start")));
-                                Ok::<bool, X>(true)
-                            },
-                        )?;
-                        for (mut edges, n) in paths {
-                            let before = self.used.len();
-                            self.used.extend_from_slice(&edges);
-                            if !forward {
-                                edges.reverse();
-                            }
-                            self.edges[k] = Some(Bound::Path(edges));
-                            let more = self.with_node(far, n, i)?;
-                            self.edges[k] = None;
-                            self.used.truncate(before);
-                            if !more {
-                                return Ok(false);
-                            }
+                    return Ok(true);
+                };
+                // A variable-length edge: trails from `u` enumerated
+                // depth-first (like `expand_paths`), each bound as it is
+                // found. The trail's edges sit on top of `used`, so they are
+                // neither repeated nor bound elsewhere.
+                let base = self.used.len();
+                if hops.min == 0 && !self.with_path(k, far, u, base, forward, i)? {
+                    return Ok(false);
+                }
+                if hops.max == Some(0) {
+                    return Ok(true);
+                }
+                let mut stack = vec![Steps::new(g, u, direction)];
+                while let Some(frame) = stack.last_mut() {
+                    if self.stop.poll() {
+                        return Ok(false);
+                    }
+                    let Some((e, n)) = frame.next(g, both) else {
+                        stack.pop();
+                        if !stack.is_empty() {
+                            self.used.pop();
                         }
-                        Ok(true)
+                        continue;
+                    };
+                    if !self.meter.examine() {
+                        return Ok(false);
+                    }
+                    if self.used.contains(&e) || !self.edge_ok(k, e)? {
+                        continue;
+                    }
+                    if !self.meter.enter() {
+                        return Ok(false);
+                    }
+                    self.used.push(e);
+                    let len = self.used.len() - base;
+                    if len >= hops.min && !self.with_path(k, far, n, base, forward, i)? {
+                        return Ok(false);
+                    }
+                    if hops.max.is_none_or(|max| len < max) {
+                        stack.push(Steps::new(g, n, direction));
+                    } else {
+                        self.used.pop();
                     }
                 }
+                Ok(true)
             }
         }
+    }
+
+    /// Bind pattern edge `k` to the trail `used[base..]` (from `u`, which
+    /// is turned round unless `forward`) and node variable `far` to its
+    /// end `n`; then go on.
+    fn with_path(&mut self, k: usize, far: usize, n: NodeIx, base: usize, forward: bool, i: usize) -> Result<bool, X> {
+        let mut edges = self.used[base..].to_vec();
+        if !forward {
+            edges.reverse();
+        }
+        self.edges[k] = Some(Bound::Path(edges));
+        let more = self.with_node(far, n, i)?;
+        self.edges[k] = None;
+        Ok(more)
     }
 }
 
@@ -320,6 +372,59 @@ where
     E: Attributes,
     X: From<GraphError> + From<N::Error> + From<E::Error>,
 {
+    match_metered(g, pattern, Meter::new(Budget::UNLIMITED), visit)?;
+    Ok(())
+}
+
+/// [`for_each_match`] under a [`Budget`] (see the module comment for what
+/// counts). `visit` returning false stops the search without marking it
+/// truncated.
+pub fn for_each_match_limited<N, E, X>(
+    g: &Graph<N, E>,
+    pattern: &Pattern,
+    budget: Budget,
+    visit: impl FnMut(&Match) -> Result<bool, X>,
+) -> Result<Limited<()>, X>
+where
+    N: Attributes,
+    E: Attributes,
+    X: From<GraphError> + From<N::Error> + From<E::Error>,
+{
+    let meter = match_metered(g, pattern, Meter::new(budget), visit)?;
+    Ok(meter.finish(())?)
+}
+
+/// Every match of `pattern` in `g` within `budget` (with `max_results`
+/// as the limit on matches).
+pub fn find_matches_limited<N, E, X>(
+    g: &Graph<N, E>,
+    pattern: &Pattern,
+    budget: Budget,
+) -> Result<Limited<Vec<Match>>, X>
+where
+    N: Attributes,
+    E: Attributes,
+    X: From<GraphError> + From<N::Error> + From<E::Error>,
+{
+    let mut out = Vec::new();
+    let meter = match_metered(g, pattern, Meter::new(budget), |m| {
+        out.push(m.clone());
+        Ok::<bool, X>(true)
+    })?;
+    Ok(meter.finish(out)?)
+}
+
+fn match_metered<N, E, X>(
+    g: &Graph<N, E>,
+    pattern: &Pattern,
+    meter: Meter,
+    visit: impl FnMut(&Match) -> Result<bool, X>,
+) -> Result<Meter, X>
+where
+    N: Attributes,
+    E: Attributes,
+    X: From<GraphError> + From<N::Error> + From<E::Error>,
+{
     for e in &pattern.edges {
         if e.from >= pattern.nodes.len() || e.to >= pattern.nodes.len() {
             return Err(GraphError::InvalidArgument("pattern edge refers to a missing node variable".into()).into());
@@ -328,13 +433,13 @@ where
             super::paths::check_hops(h, Uniqueness::Trail)?;
         }
     }
-    let Some(mut compiled) = compile(g, pattern) else { return Ok(()) };
+    let Some(mut compiled) = compile(g, pattern) else { return Ok(meter) };
     if !g.index_paths().is_empty() {
         for (i, n) in pattern.nodes.iter().enumerate() {
             if let Some(f) = &n.filter {
                 let found = g.index_candidates(f)?;
                 if found.as_ref().is_some_and(Vec::is_empty) {
-                    return Ok(());
+                    return Ok(meter);
                 }
                 compiled.indexed[i] = found;
             }
@@ -351,9 +456,10 @@ where
         used: Vec::new(),
         visit,
         stop: crate::cancel::stop(),
+        meter,
     };
     m.go(0)?;
-    Ok(())
+    Ok(m.meter)
 }
 
 /// Every match of `pattern` in `g`, at most `limit`.

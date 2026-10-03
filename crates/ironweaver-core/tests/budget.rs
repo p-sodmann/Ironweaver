@@ -294,3 +294,122 @@ fn cancel_stops_inside_a_nodes_edges() {
     assert_eq!(out, Err(GraphError::Interrupted));
     assert_eq!(hooks.get(), 1);
 }
+
+#[test]
+fn path_searches_count_against_the_budget() {
+    use ironweaver_core::pathfinding::{find_path, find_path_limited, Heuristic, PathQuery};
+    use ironweaver_core::traversal::bidirectional_bfs_limited;
+    // hub -> c_i -> g_i (with cross edges); find a path to the last grandchild
+    let (g, hub) = star(200);
+    let end = g.node_ix("g199").unwrap();
+    let queries: [fn() -> PathQuery<'static, Record, GraphError>; 3] =
+        [PathQuery::bfs, PathQuery::dijkstra, || PathQuery::astar(Heuristic::Zero)];
+    for query in queries {
+        let full = find_path::<_, _, GraphError>(&g, hub, end, &mut query()).unwrap().unwrap();
+        let limited = find_path_limited::<_, _, GraphError>(&g, hub, end, &mut query(), Budget::UNLIMITED).unwrap();
+        assert_eq!(limited.value.as_ref(), Some(&full));
+        assert!(!limited.truncated && limited.visited > 0 && limited.edges > 0);
+        let (visited, edges) = (limited.visited, limited.edges);
+        // Exactly enough is enough; one less stops it
+        let exact = Budget::default().max_visited(visited).max_edges(edges).max_results(1);
+        let r = find_path_limited::<_, _, GraphError>(&g, hub, end, &mut query(), exact).unwrap();
+        assert_eq!(r.value.as_ref(), Some(&full));
+        for budget in [
+            Budget::default().max_visited(visited - 1),
+            Budget::default().max_edges(edges - 1),
+            Budget::default().max_results(0),
+        ] {
+            let r = find_path_limited::<_, _, GraphError>(&g, hub, end, &mut query(), budget.truncate()).unwrap();
+            assert!(r.value.is_none() && r.truncated, "{budget:?}");
+            assert!(r.visited <= visited && r.edges <= edges);
+            let err = find_path_limited::<_, _, GraphError>(&g, hub, end, &mut query(), budget).unwrap_err();
+            assert!(matches!(err, GraphError::BudgetExceeded { .. }), "{err:?}");
+        }
+        // Unreachable within the budget's room: not truncated
+        let back =
+            find_path_limited::<_, _, GraphError>(&g, end, hub, &mut query(), Budget::default().max_edges(10_000));
+        assert_eq!(back.unwrap().value, None);
+    }
+
+    // Bidirectional BFS: both frontiers count, edges before the filter
+    let (g, hub, leaf) = parallel_hub(1000);
+    let r = bidirectional_bfs_limited(&g, hub, leaf, None, Direction::Out, Budget::UNLIMITED, all).unwrap();
+    assert_eq!((r.value, r.visited, r.truncated), (Some(vec![hub, leaf]), 1, false));
+    let budget = Budget::default().max_edges(0).truncate();
+    let r = bidirectional_bfs_limited(&g, leaf, hub, None, Direction::In, budget, all).unwrap();
+    assert_eq!((r.value, r.edges, r.truncated), (None, 0, true));
+    let r = bidirectional_bfs_limited(&g, hub, hub, None, Direction::Out, Budget::default().max_results(0), all);
+    assert!(r.is_err());
+}
+
+#[test]
+fn path_search_polls_cancellation_per_edge() {
+    use ironweaver_core::pathfinding::{find_path, Heuristic, PathQuery};
+    // A* from a hub with 2000 leaves: the heuristic cancels on its second
+    // call, and no further neighbour is estimated
+    let (g, hub, _) = parallel_hub(0);
+    let mut g = g;
+    for i in 0..2000 {
+        let leaf = g.add_node(format!("x{i}"), Record::default()).unwrap();
+        g.add_edge(hub, leaf, Record::default()).unwrap();
+    }
+    let end = g.add_node("end", Record::default()).unwrap();
+    let token = Token::new();
+    let calls = Cell::new(0);
+    let estimate = Box::new(|_: &ironweaver_core::Node<Record>| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 2 {
+            token.cancel();
+        }
+        Ok(0.0)
+    });
+    let mut q = PathQuery::astar(Heuristic::Custom(estimate));
+    let r = cancel::run(&token, || find_path::<_, _, GraphError>(&g, hub, end, &mut q));
+    assert_eq!(r, Err(GraphError::Interrupted));
+    assert_eq!(calls.get(), 2);
+}
+
+#[test]
+fn pattern_matching_counts_against_the_budget() {
+    use ironweaver_core::query::{find_matches, find_matches_limited, for_each_match_limited, Pattern};
+    let (g, _) = star(30);
+    for text in ["(a)-->(b)", "(h)-->(c)-->(d)", "(a)-[*1..3]->(b)", "(a)-[*0..2]-(b)", "(a), (b)"] {
+        let p = Pattern::parse(text).unwrap();
+        let full = find_matches::<_, _, GraphError>(&g, &p, None).unwrap();
+        let limited = find_matches_limited::<_, _, GraphError>(&g, &p, Budget::UNLIMITED).unwrap();
+        assert_eq!(limited.value, full, "{text}");
+        let (visited, edges) = (limited.visited, limited.edges);
+        assert!(visited > 0, "{text}");
+        // A prefix of the matches, whichever limit stops it
+        for budget in [
+            Budget::default().max_results(full.len() / 2),
+            Budget::default().max_visited(visited / 2),
+            Budget::default().max_edges(edges / 2),
+        ] {
+            let r = find_matches_limited::<_, _, GraphError>(&g, &p, budget.truncate()).unwrap();
+            assert!(r.truncated || edges == 0, "{text} {budget:?}");
+            assert_eq!(r.value, full[..r.value.len()], "{text} {budget:?}");
+            assert!(r.visited <= visited && r.edges <= edges);
+        }
+        let exact = Budget::default().max_visited(visited).max_edges(edges).max_results(full.len());
+        let r = find_matches_limited::<_, _, GraphError>(&g, &p, exact).unwrap();
+        assert_eq!((r.value.len(), r.truncated), (full.len(), false), "{text}");
+        // The visitor stopping is not a truncation
+        let mut seen = 0;
+        let r = for_each_match_limited::<_, _, GraphError>(&g, &p, Budget::default().max_results(1), |_| {
+            seen += 1;
+            Ok(false)
+        })
+        .unwrap();
+        assert_eq!((seen, r.truncated), (1, false));
+    }
+
+    // A variable-length edge through a hub is bounded by edges, not paths
+    let (g, _, _) = parallel_hub(100_000);
+    let p = Pattern::parse("(a)-[*1..5]-(b)").unwrap();
+    let budget = Budget::default().max_edges(1000).truncate();
+    let r = find_matches_limited::<_, _, GraphError>(&g, &p, budget).unwrap();
+    assert!(r.truncated && r.edges == 1000 && r.value.len() <= 1000);
+    let err = find_matches_limited::<_, _, GraphError>(&g, &p, Budget::default().max_visited(50)).unwrap_err();
+    assert!(matches!(err, GraphError::BudgetExceeded { visited: 50, .. }), "{err:?}");
+}

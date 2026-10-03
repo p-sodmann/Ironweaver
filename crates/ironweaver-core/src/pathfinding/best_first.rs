@@ -5,12 +5,17 @@
 // source and h the heuristic estimate to the target. A node can be reopened
 // when a cheaper route to it turns up, so the path is optimal for any
 // admissible heuristic (one that never overestimates), consistent or not.
+//
+// Work is counted on a `Meter`: each node settled is visited, each edge
+// relaxed examined (before its cost and the heuristic are computed), and
+// cancellation is polled per edge.
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::BinaryHeap;
 
 use super::{Heuristic, PathQuery, PathResult};
+use crate::budget::Meter;
 use crate::graph::IxMap;
 use crate::{Attributes, Graph, GraphError, NodeIx};
 
@@ -55,6 +60,7 @@ pub fn search<N, E, X>(
     target: NodeIx,
     q: &mut PathQuery<'_, N, X>,
     use_heuristic: bool,
+    meter: &mut Meter,
 ) -> Result<Option<PathResult>, X>
 where
     N: Attributes,
@@ -84,7 +90,13 @@ where
         if g > info[&current].g {
             continue; // stale entry: a cheaper route was found later
         }
+        if !meter.enter() {
+            return Ok(None);
+        }
         if current == target {
+            if !meter.produce() {
+                return Ok(None);
+            }
             let mut nodes = Vec::new();
             let mut k = Some(current);
             while let Some(c) = k {
@@ -97,6 +109,9 @@ where
         expanded += 1;
 
         for (e, next) in graph.neighbors(current, direction) {
+            if stop.poll() || !meter.examine() {
+                return Ok(None);
+            }
             let ng = g + cost.cost::<E, X>(&graph.edge_ref(e).data)?;
             let slot = match info.entry(next) {
                 Entry::Occupied(o) => {

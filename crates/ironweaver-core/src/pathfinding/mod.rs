@@ -27,6 +27,7 @@ mod heuristic;
 pub use cost::EdgeCost;
 pub use heuristic::{Coords, Heuristic, Metric};
 
+use crate::budget::{Budget, Limited, Meter};
 use crate::{Attributes, Direction, Graph, GraphError, NodeIx};
 
 /// Which algorithm a `PathMethod` runs.
@@ -187,14 +188,53 @@ where
     E: Attributes,
     X: From<GraphError> + From<N::Error> + From<E::Error>,
 {
+    find_metered(g, source, target, query, &mut Meter::new(Budget::UNLIMITED))
+}
+
+/// [`find_path`] under a [`Budget`]. Dijkstra and A* count each node they
+/// settle as visited and each edge they relax as examined (before its cost
+/// and the heuristic are computed); BFS counts the frontier nodes of both
+/// ends whose edges it lists as visited and those edges as examined. A path
+/// found is a result. Every method polls cancellation once per edge. With a
+/// truncated search the value is `None`: no path was found within the
+/// budget (`truncated` tells it from an unreachable target).
+pub fn find_path_limited<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    query: &mut PathQuery<'_, N, X>,
+    budget: Budget,
+) -> Result<Limited<Option<PathResult>>, X>
+where
+    N: Attributes,
+    E: Attributes,
+    X: From<GraphError> + From<N::Error> + From<E::Error>,
+{
+    let mut meter = Meter::new(budget);
+    let path = find_metered(g, source, target, query, &mut meter)?;
+    Ok(meter.finish(path)?)
+}
+
+fn find_metered<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    query: &mut PathQuery<'_, N, X>,
+    meter: &mut Meter,
+) -> Result<Option<PathResult>, X>
+where
+    N: Attributes,
+    E: Attributes,
+    X: From<GraphError> + From<N::Error> + From<E::Error>,
+{
     check_max_cost(query.max_cost)?;
     if g.node(source).is_none() || g.node(target).is_none() {
         return Err(GraphError::Stale.into());
     }
     match query.method.kind {
-        MethodKind::Bfs => bfs::find(g, source, target, query),
-        MethodKind::Dijkstra => dijkstra::find(g, source, target, query),
-        MethodKind::AStar => astar::find(g, source, target, query),
+        MethodKind::Bfs => bfs::find(g, source, target, query, meter),
+        MethodKind::Dijkstra => dijkstra::find(g, source, target, query, meter),
+        MethodKind::AStar => astar::find(g, source, target, query, meter),
     }
 }
 

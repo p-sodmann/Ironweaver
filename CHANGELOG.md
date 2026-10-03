@@ -108,7 +108,14 @@ a query layer and database foundations.
     edge examined, so a node with millions of edges can't run past the
     budget, and the traversals check for cancellation once per edge.
     `dfs_limited` / `bfs_limited` take a `Direction` (incoming edges, or
-    both ways), and `expand_limited` an edge filter;
+    both ways), and `expand_limited` an edge filter.
+    Shortest paths (`pathfinding::find_path_limited`, and
+    `traversal::bidirectional_bfs_limited`), pattern matching
+    (`query::for_each_match_limited` / `find_matches_limited`) and walk
+    planning (`random_walks::plan_limited`) take one too, and poll
+    cancellation per edge. The matcher streams the paths of a
+    variable-length edge instead of collecting them first, and walks from
+    a start node index only the part of the graph they can reach;
   - `Expr`, `CmpOp`, `Pattern` (and its parts) implement serde `Serialize`
     / `Deserialize`, with expression nesting capped at `MAX_EXPR_DEPTH`;
     `Pattern` implements `Display` (and `to_text`), and

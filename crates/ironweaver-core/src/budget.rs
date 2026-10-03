@@ -6,9 +6,12 @@
 // with a million neighbours visits a million nodes.
 //
 // The `*_limited` variants of the traversals (`traversal::dfs_limited`,
-// `bfs_limited`, `expand_limited`), of path expansion
-// (`query::expand_paths_limited`) and of random walks
-// (`WalkPlan::run_limited`) take a `Budget`. When a limit is reached they
+// `bfs_limited`, `expand_limited`, `bidirectional_bfs_limited`), of
+// shortest paths (`pathfinding::find_path_limited`), of path expansion
+// (`query::expand_paths_limited`), of pattern matching
+// (`query::for_each_match_limited`, `find_matches_limited`) and of random
+// walks (`random_walks::plan_limited`, `WalkPlan::run_limited`) take a
+// `Budget`. When a limit is reached they
 // either fail with `GraphError::BudgetExceeded` or return what they found
 // so far with `truncated` set; the budget says which. A check is a counter
 // comparison per node entered, edge examined or result produced.

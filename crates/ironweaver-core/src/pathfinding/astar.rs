@@ -1,6 +1,7 @@
 // pathfinding/astar.rs
 
 use super::{best_first, MethodKind, PathMethod, PathQuery, PathResult};
+use crate::budget::Meter;
 use crate::{Attributes, Graph, GraphError, NodeIx};
 
 pub const METHOD: PathMethod = PathMethod {
@@ -19,11 +20,12 @@ pub fn find<N, E, X>(
     source: NodeIx,
     target: NodeIx,
     q: &mut PathQuery<'_, N, X>,
+    meter: &mut Meter,
 ) -> Result<Option<PathResult>, X>
 where
     N: Attributes,
     E: Attributes,
     X: From<GraphError> + From<N::Error> + From<E::Error>,
 {
-    best_first::search(g, source, target, q, true)
+    best_first::search(g, source, target, q, true, meter)
 }

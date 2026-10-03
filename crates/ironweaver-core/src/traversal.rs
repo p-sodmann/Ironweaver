@@ -310,12 +310,46 @@ pub fn bidirectional_bfs<N, E, X>(
     target: NodeIx,
     max_depth: Option<usize>,
     direction: Direction,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Option<Vec<NodeIx>>, X> {
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    bidirectional_metered(g, source, target, max_depth, direction, &mut meter, edge_ok)
+}
+
+/// [`bidirectional_bfs`] under a [`Budget`]: frontier nodes whose edges are
+/// listed (from either end) count as visited, the edges listed as examined
+/// (before `edge_ok`), a path found as a result. With a truncated search
+/// the value is `None`: no path was found within the budget.
+#[allow(clippy::too_many_arguments)]
+pub fn bidirectional_bfs_limited<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    budget: Budget,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Limited<Option<Vec<NodeIx>>>, X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(budget);
+    let path = bidirectional_metered(g, source, target, max_depth, direction, &mut meter, edge_ok)?;
+    Ok(meter.finish(path)?)
+}
+
+pub(crate) fn bidirectional_metered<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Option<Vec<NodeIx>>, X> {
     if source == target {
-        return Ok(Some(vec![source]));
+        return Ok(meter.produce().then(|| vec![source]));
     }
-
     let mut fwd = Parents::default();
     fwd.insert(source, None);
     let mut bwd = Parents::default();
@@ -344,8 +378,11 @@ pub fn bidirectional_bfs<N, E, X>(
         let mut next = Vec::new();
         let mut meeting = None;
         'level: for &ix in frontier.iter() {
+            if !meter.enter() {
+                return Ok(None);
+            }
             for (e, neighbor) in g.neighbors(ix, dir) {
-                if stop.poll() {
+                if stop.poll() || !meter.examine() {
                     return Ok(None);
                 }
                 if this.contains_key(&neighbor) || !edge_ok(e, g.edge_ref(e))? {
@@ -361,7 +398,7 @@ pub fn bidirectional_bfs<N, E, X>(
         }
 
         if let Some(m) = meeting {
-            return Ok(Some(reconstruct(&fwd, &bwd, m)));
+            return Ok(meter.produce().then(|| reconstruct(&fwd, &bwd, m)));
         }
         *frontier = next;
         if forward {
