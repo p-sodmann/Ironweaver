@@ -31,7 +31,7 @@ A fast property graph library for Python, with its engine in Rust. Build and cha
 pip install ironweaver
 ```
 
-Wheels are available for Linux (x86_64, aarch64; glibc and musl), macOS (Intel and Apple Silicon) and Windows (x64), for Python 3.9–3.14. To build from source, you need a Rust toolchain (1.85 or newer):
+Wheels are available for Linux (x86_64, aarch64; glibc and musl), macOS (Intel and Apple Silicon) and Windows (x64), for Python 3.9–3.14. To build from source, you need a Rust toolchain (1.99 or newer; `rustup update` gets it):
 
 ```bash
 pip install maturin

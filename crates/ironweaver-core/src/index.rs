@@ -491,10 +491,11 @@ impl<N, E> Graph<N, E> {
                     |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
                 for open in [false, true] {
                     for item in items.iter().filter(|e| open_range(e) == open) {
-                        if let Expr::Compare { path, .. } = item {
-                            if open && combined.contains(&path.as_slice()) {
-                                continue;
-                            }
+                        if let Expr::Compare { path, .. } = item
+                            && open
+                            && combined.contains(&path.as_slice())
+                        {
+                            continue;
                         }
                         plans.extend(self.index_plan(item));
                     }
@@ -944,10 +945,10 @@ impl<N: Attributes, E> Graph<N, E> {
         if !self.indexes.dirty.is_empty() {
             out.retain(|ix| !self.indexes.dirty.contains(ix));
             for &ix in &self.indexes.dirty {
-                if let Some(node) = self.node(ix) {
-                    if key_of(&node.data, &index.path)?.is_some_and(|k| fits(&k)) {
-                        out.push(ix);
-                    }
+                if let Some(node) = self.node(ix)
+                    && key_of(&node.data, &index.path)?.is_some_and(|k| fits(&k))
+                {
+                    out.push(ix);
                 }
             }
         }

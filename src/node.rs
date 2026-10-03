@@ -147,10 +147,11 @@ impl Node {
         attr: Option<Bound<'_, PyDict>>,
         edges: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        if let Some(edges) = edges {
-            if !edges.is_none() && edges.len()? > 0 {
-                return Err(PyTypeError::new_err("Node edges are created with Vertex.add_edge(from_id, to_id, attr)"));
-            }
+        if let Some(edges) = edges
+            && !edges.is_none()
+            && edges.len()? > 0
+        {
+            return Err(PyTypeError::new_err("Node edges are created with Vertex.add_edge(from_id, to_id, attr)"));
         }
         let mut graph = PyGraph::new();
         let data = NodeData::new(PyAttrs::from_user(attr.as_ref())?, PyAttrs::default());

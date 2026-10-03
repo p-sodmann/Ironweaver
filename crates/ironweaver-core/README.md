@@ -119,7 +119,7 @@ file.
 
 ## Minimum supported Rust version
 
-Rust 1.85. Raising it is a minor-version change.
+Rust 1.99. It follows recent stable releases; raising it is a minor-version change.
 
 ## License
 

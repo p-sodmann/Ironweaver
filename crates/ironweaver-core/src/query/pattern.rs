@@ -188,8 +188,8 @@ impl TextWriter<'_> {
             .chain(p.edges.iter().filter_map(|e| e.name.as_deref()))
             .collect();
         names.sort_unstable();
-        if let Some(w) = names.windows(2).find(|w| w[0] == w[1]) {
-            let what = format!("the name '{}' is used twice", w[0]);
+        if let Some([name, _]) = names.array_windows().find(|[a, b]| a == b) {
+            let what = format!("the name '{}' is used twice", name);
             self.unwritable(&what)?;
         }
 

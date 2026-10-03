@@ -261,10 +261,10 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
         let mut first = Ok(());
         for inverse in undo.into_iter().rev() {
             for op in inverse {
-                if let Err(e) = self.apply(op) {
-                    if first.is_ok() {
-                        first = Err(e);
-                    }
+                if let Err(e) = self.apply(op)
+                    && first.is_ok()
+                {
+                    first = Err(e);
                 }
             }
         }

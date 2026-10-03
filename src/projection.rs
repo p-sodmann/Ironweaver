@@ -165,10 +165,10 @@ pub(crate) fn collect(
             if !nf.attrs_match(py, &node.data.attr, "labels", labels)? {
                 return Ok(false);
             }
-            if let Some(x) = &nf.expr {
-                if !x.matches_node(&vertex.graph, ix)? {
-                    return Ok(false);
-                }
+            if let Some(x) = &nf.expr
+                && !x.matches_node(&vertex.graph, ix)?
+            {
+                return Ok(false);
             }
             Ok(match handle {
                 Some(h) if nf.callable.is_some() => nf.call(Node::handle(py, h, ix)?.into_any())?,
@@ -183,10 +183,10 @@ pub(crate) fn collect(
             if !ef.attrs_match(py, &edge.data.attr, "type", ty)? {
                 return Ok(false);
             }
-            if let Some(x) = &ef.expr {
-                if !x.matches_edge(&vertex.graph, e)? {
-                    return Ok(false);
-                }
+            if let Some(x) = &ef.expr
+                && !x.matches_edge(&vertex.graph, e)?
+            {
+                return Ok(false);
             }
             Ok(match handle {
                 Some(h) if ef.callable.is_some() => ef.call(Edge::handle(py, h, e)?.into_any())?,

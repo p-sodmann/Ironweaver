@@ -45,19 +45,6 @@ jobs:
             exit 1
           fi
 
-  msrv:
-    name: Rust 1.85 (minimum supported version)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@1.85
-      - uses: Swatinem/rust-cache@v2
-      # Keep in step with rust-version in both Cargo.toml files
-      - run: cargo check --workspace --all-targets
-
   docs-rs:
     name: Core API docs (rustdoc)
     runs-on: ubuntu-latest

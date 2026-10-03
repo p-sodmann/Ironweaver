@@ -80,7 +80,7 @@ impl Stop {
             c.set(n);
             n
         });
-        if n % 256 == 0 {
+        if n.is_multiple_of(256) {
             let hook = POLL.with(|p| p.borrow().clone());
             if hook.is_some_and(|hook| hook()) {
                 flag.store(true, Ordering::Relaxed);

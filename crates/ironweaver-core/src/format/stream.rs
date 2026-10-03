@@ -269,29 +269,31 @@ where
     /// saved indexes.
     fn finish(mut self, metadata: &LoadAttrs<'_>) -> Result<Graph<N, E>, GraphError> {
         let g = &mut self.graph;
-        if let Some(LoadKind::String(next)) = metadata.get("next_edge_id").map(LoadValue::kind) {
-            if let Ok(next) = next.parse() {
-                g.reserve_edge_ids(EdgeId(next));
-            }
+        if let Some(LoadKind::String(next)) = metadata.get("next_edge_id").map(LoadValue::kind)
+            && let Ok(next) = next.parse()
+        {
+            g.reserve_edge_ids(EdgeId(next));
         }
         let mut out_done = vec![false; g.edge_bound()];
         let mut in_done = vec![false; g.edge_bound()];
         let (mut out_start, mut in_start) = (0, 0);
         for (k, &node) in self.nodes.iter().enumerate() {
             for &id in &self.out_ids[out_start..self.out_end[k]] {
-                if let Some(e) = g.edge_ix(EdgeId(id)) {
-                    if !out_done[e.slot()] && g.edge_ref(e).source() == node {
-                        g.attach_out(e);
-                        out_done[e.slot()] = true;
-                    }
+                if let Some(e) = g.edge_ix(EdgeId(id))
+                    && !out_done[e.slot()]
+                    && g.edge_ref(e).source() == node
+                {
+                    g.attach_out(e);
+                    out_done[e.slot()] = true;
                 }
             }
             for &id in &self.in_ids[in_start..self.in_end[k]] {
-                if let Some(e) = g.edge_ix(EdgeId(id)) {
-                    if !in_done[e.slot()] && g.edge_ref(e).target() == node {
-                        g.attach_in(e);
-                        in_done[e.slot()] = true;
-                    }
+                if let Some(e) = g.edge_ix(EdgeId(id))
+                    && !in_done[e.slot()]
+                    && g.edge_ref(e).target() == node
+                {
+                    g.attach_in(e);
+                    in_done[e.slot()] = true;
                 }
             }
             (out_start, in_start) = (self.out_end[k], self.in_end[k]);
