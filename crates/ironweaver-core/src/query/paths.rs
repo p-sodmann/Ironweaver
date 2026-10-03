@@ -38,6 +38,7 @@ impl std::str::FromStr for Uniqueness {
 
 /// Path length bounds, in edges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Hops {
     pub min: usize,
     /// No limit if `None` (not allowed for walks).

@@ -50,6 +50,24 @@ fn loading_too_deep_json_fails() {
     assert!(err.to_string().contains("nested more than"), "{err}");
 }
 
+#[test]
+fn loading_json_with_crafted_unknown_fields_fails_without_overflowing_the_stack() {
+    // Unknown fields are skipped, which recurses in the JSON parser
+    let json = String::from_utf8(format::to_json(&nested(MAX_DEPTH), &Attrs::new(), false).unwrap()).unwrap();
+    let junk = format!("{}1{}", "[".repeat(100_000), "]".repeat(100_000));
+    for (from, to) in
+        [(r#"{"nodes":"#, format!(r#"{{"junk":{junk},"nodes":"#)), (r#""attr":"#, format!(r#""junk":{junk},"attr":"#))]
+    {
+        let crafted = json.replacen(from, &to, 1);
+        assert_ne!(crafted, json);
+        let err = format::from_json(crafted.as_bytes()).err().unwrap();
+        assert!(err.to_string().contains("JSON nested more than 255 levels deep"), "{err}");
+    }
+    // Brackets inside strings don't count
+    let strings = json.replacen(r#"{"nodes":"#, &format!(r#"{{"junk":"\\\"{}","nodes":"#, "[{".repeat(1000)), 1);
+    format::from_json(strings.as_bytes()).unwrap();
+}
+
 /// Re-frame a binary file around a modified payload (fresh length and CRC).
 fn reframe(file: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut out = file[..16].to_vec();
