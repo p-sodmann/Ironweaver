@@ -2,7 +2,10 @@
 //
 // Random walks over a compact adjacency index built once per call; the walks
 // themselves never touch the graph (so callers may run them without holding
-// any lock on it, e.g. with the Python GIL released).
+// any lock on it, e.g. with the Python GIL released). From a start node the
+// index holds only what walks can reach (nodes within `max_length - 1`
+// steps, with their edges), so planning doesn't read the whole graph and
+// can run under a `Budget` (`plan_limited`).
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -10,7 +13,8 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::budget::{Budget, Limited, Meter, OnLimit};
-use crate::{Attributes, Graph, GraphError, Lookup};
+use crate::graph::IxMap;
+use crate::{Attributes, Edge, Graph, GraphError, Lookup, NodeIx};
 
 /// Number of walk attempts handled by one RNG stream in uniform mode. Chunks
 /// are processed in parallel; because the chunking (and each chunk's seed) is
@@ -67,7 +71,7 @@ pub struct Walk {
 
 /// Compact adjacency representation of the graph, built once per call.
 struct WalkIndex {
-    /// Node ids in graph order.
+    /// Node ids, by dense index.
     ids: Vec<String>,
     /// Number of nodes that may be sampled as a start (all of them).
     n_real: usize,
@@ -76,53 +80,105 @@ struct WalkIndex {
     types: Vec<String>,
 }
 
-impl WalkIndex {
-    fn build<N, E: Attributes>(g: &Graph<N, E>, include_edges: bool, type_field: &str) -> Result<Self, E::Error> {
-        let mut dense = vec![u32::MAX; g.node_bound()];
-        let mut ids = Vec::with_capacity(g.node_count());
-        for (i, (ix, node)) in g.nodes().enumerate() {
-            dense[ix.slot()] = i as u32;
-            ids.push(node.id().to_owned());
-        }
-        let mut types: Vec<String> = Vec::new();
-        let mut type_index: HashMap<String, u32> = HashMap::new();
-        let mut adj: Vec<Vec<(u32, u32)>> = Vec::with_capacity(ids.len());
+/// Edge type names, numbered by first appearance.
+struct TypeNames<'a> {
+    include: bool,
+    field: &'a str,
+    types: Vec<String>,
+    index: HashMap<String, u32>,
+}
 
-        for (_, node) in g.nodes() {
+impl TypeNames<'_> {
+    fn of<N, E: Attributes>(&mut self, g: &Graph<N, E>, edge: &Edge<E>) -> Result<u32, E::Error> {
+        if !self.include {
+            return Ok(0);
+        }
+        // "type" is the edge's type field (or, failing that, the attribute);
+        // other names are attributes
+        let field = (self.field == "type").then(|| edge.edge_type()).flatten();
+        let name = match field {
+            Some(t) => g.symbol_name(t).to_owned(),
+            None => match edge.data.text(self.field)? {
+                Lookup::Found(s) => s,
+                Lookup::Missing | Lookup::Invalid => "unknown".to_string(),
+            },
+        };
+        Ok(match self.index.get(&name) {
+            Some(&t) => t,
+            None => {
+                let t = self.types.len() as u32;
+                self.index.insert(name.clone(), t);
+                self.types.push(name);
+                t
+            }
+        })
+    }
+}
+
+impl WalkIndex {
+    /// Index the whole graph (`start` is `None`), or what walks of at most
+    /// `max_length` nodes from `start` can reach (the start is index 0).
+    /// Every node whose edges are read counts as visited, every edge read as
+    /// examined; `None` if the budget (or cancellation) stopped it.
+    fn build<N, E, X>(
+        g: &Graph<N, E>,
+        start: Option<NodeIx>,
+        max_length: usize,
+        names: &mut TypeNames<'_>,
+        meter: &mut Meter,
+    ) -> Result<Option<Self>, X>
+    where
+        E: Attributes,
+        X: From<E::Error>,
+    {
+        let stop = crate::cancel::stop();
+        let mut dense: IxMap<NodeIx, u32> = IxMap::default();
+        // Nodes by dense index, with their distance from the start (all 0
+        // for the whole graph, where every node is read)
+        let mut order: Vec<(NodeIx, usize)> = match start {
+            Some(s) => vec![(s, 0)],
+            None => g.node_indices().map(|ix| (ix, 0)).collect(),
+        };
+        for (i, &(ix, _)) in order.iter().enumerate() {
+            dense.insert(ix, i as u32);
+        }
+        let mut adj: Vec<Vec<(u32, u32)>> = Vec::with_capacity(order.len());
+        let mut i = 0;
+        while i < order.len() {
+            let (ix, d) = order[i];
+            i += 1;
+            // Walks never leave a node `max_length - 1` steps out (but pick
+            // their last step from its edges, so those are read)
+            let node = g.node(ix).expect("live nodes only");
+            if d >= max_length {
+                adj.push(Vec::new());
+                continue;
+            }
+            if !meter.enter() {
+                return Ok(None);
+            }
             let mut out = Vec::with_capacity(node.out_edges().len());
             for &e in node.out_edges() {
+                if stop.poll() || !meter.examine() {
+                    return Ok(None);
+                }
                 let edge = g.edge_ref(e);
-                let target = dense[edge.target().slot()];
-                let type_idx = if include_edges {
-                    // "type" is the edge's type field (or, failing that, the
-                    // attribute); other names are attributes
-                    let field = (type_field == "type").then(|| edge.edge_type()).flatten();
-                    let name = match field {
-                        Some(t) => g.symbol_name(t).to_owned(),
-                        None => match edge.data.text(type_field)? {
-                            Lookup::Found(s) => s,
-                            Lookup::Missing | Lookup::Invalid => "unknown".to_string(),
-                        },
-                    };
-                    match type_index.get(&name) {
-                        Some(&t) => t,
-                        None => {
-                            let t = types.len() as u32;
-                            type_index.insert(name.clone(), t);
-                            types.push(name);
-                            t
-                        }
+                let target = match dense.get(&edge.target()) {
+                    Some(&t) => t,
+                    None => {
+                        let t = order.len() as u32;
+                        dense.insert(edge.target(), t);
+                        order.push((edge.target(), d + 1));
+                        t
                     }
-                } else {
-                    0
                 };
-                out.push((target, type_idx));
+                out.push((target, names.of(g, edge)?));
             }
             adj.push(out);
         }
-
+        let ids: Vec<String> = order.iter().map(|&(ix, _)| g.node(ix).expect("live").id().to_owned()).collect();
         let n_real = ids.len();
-        Ok(WalkIndex { ids, n_real, adj, types })
+        Ok(Some(WalkIndex { ids, n_real, adj, types: std::mem::take(&mut names.types) }))
     }
 }
 
@@ -390,10 +446,60 @@ where
     E: Attributes,
     X: From<GraphError> + From<E::Error>,
 {
+    match plan_metered::<N, E, X>(g, start_node_id, opts, &mut Meter::new(Budget::UNLIMITED))? {
+        Some(plan) => Ok(plan),
+        // Only cancellation stops an unlimited build
+        None => Err(GraphError::Interrupted.into()),
+    }
+}
+
+/// [`plan`] under a [`Budget`]: indexing reads the nodes walks can reach
+/// from the start (within `max_length - 1` steps; with no start node, the
+/// whole graph), and each node whose edges are read counts as visited, each
+/// edge as examined. Cancellation is polled per edge. A plan is all or
+/// nothing: if a limit is reached, the value is `None` (with
+/// [`OnLimit::Truncate`]). Give [`WalkPlan::run_limited`] what is left of
+/// the budget.
+pub fn plan_limited<N, E, X>(
+    g: &Graph<N, E>,
+    start_node_id: Option<&str>,
+    opts: WalkOptions,
+    budget: Budget,
+) -> Result<Limited<Option<WalkPlan>>, X>
+where
+    E: Attributes,
+    X: From<GraphError> + From<E::Error>,
+{
+    let mut meter = Meter::new(budget);
+    let plan = plan_metered::<N, E, X>(g, start_node_id, opts, &mut meter)?;
+    if plan.is_none() {
+        meter.stopped();
+    }
+    Ok(meter.finish(plan)?)
+}
+
+fn plan_metered<N, E, X>(
+    g: &Graph<N, E>,
+    start_node_id: Option<&str>,
+    opts: WalkOptions,
+    meter: &mut Meter,
+) -> Result<Option<WalkPlan>, X>
+where
+    E: Attributes,
+    X: From<GraphError> + From<E::Error>,
+{
     validate_params(g, start_node_id, &opts)?;
-    let index = WalkIndex::build(g, opts.include_edge_types, &opts.edge_type_field)?;
-    let start = start_node_id.map(|id| index.ids.iter().position(|x| x == id).expect("validated") as u32);
-    Ok(WalkPlan { index, start, opts })
+    let start = start_node_id.map(|id| g.node_ix(id).expect("validated"));
+    let mut names = TypeNames {
+        include: opts.include_edge_types,
+        field: &opts.edge_type_field,
+        types: Vec::new(),
+        index: HashMap::new(),
+    };
+    let Some(index) = WalkIndex::build::<N, E, X>(g, start, opts.max_length, &mut names, meter)? else {
+        return Ok(None);
+    };
+    Ok(Some(WalkPlan { index, start: start.map(|_| 0), opts }))
 }
 
 impl WalkPlan {
@@ -545,4 +651,106 @@ where
 {
     let plan = plan::<N, E, X>(g, start_node_id, opts)?;
     Ok(plan.run().iter().map(|w| plan.items(w).map(str::to_owned).collect()).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Record, Value};
+
+    /// A random graph with typed edges, some isolated parts and self-loops.
+    fn graph(seed: u64) -> Graph<Record, Record> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut g = Graph::new();
+        let nodes: Vec<NodeIx> = (0..60).map(|i| g.add_node(format!("n{i}"), Record::default()).unwrap()).collect();
+        for _ in 0..150 {
+            let (a, b) = (nodes[rng.gen_range(0..60)], nodes[rng.gen_range(0..30)]);
+            let ty = ["x", "y", "z"][rng.gen_range(0..3)];
+            g.insert_edge(a, b, None, Some(ty), Record::with_attr([("kind", Value::from(ty))])).unwrap();
+        }
+        g
+    }
+
+    fn walks(plan: &WalkPlan) -> Vec<Vec<String>> {
+        plan.run().iter().map(|w| plan.items(w).map(str::to_owned).collect()).collect()
+    }
+
+    #[test]
+    fn walks_from_a_start_read_only_what_they_reach() {
+        for seed in 0..8 {
+            let g = graph(seed);
+            for (max_length, revisit, stratified, types, field) in [
+                (1, false, false, false, "type"),
+                (3, false, false, true, "type"),
+                (4, true, false, true, "kind"),
+                (5, false, true, false, "type"),
+                (6, true, true, true, "type"),
+            ] {
+                let mut opts = WalkOptions::new(max_length, 300);
+                opts.allow_revisit = revisit;
+                opts.stratified = stratified;
+                opts.include_edge_types = types;
+                opts.edge_type_field = field.into();
+                opts.seed = Some(seed);
+                let start = "n3";
+                let planned = plan::<_, _, GraphError>(&g, Some(start), opts.clone()).unwrap();
+                // The same walks as over an index of the whole graph
+                let mut names = TypeNames {
+                    include: types,
+                    field: &opts.edge_type_field,
+                    types: Vec::new(),
+                    index: HashMap::new(),
+                };
+                let mut meter = Meter::new(Budget::UNLIMITED);
+                let index = WalkIndex::build::<_, _, GraphError>(&g, None, max_length, &mut names, &mut meter)
+                    .unwrap()
+                    .unwrap();
+                let at = index.ids.iter().position(|id| id == start).unwrap() as u32;
+                let full = WalkPlan { index, start: Some(at), opts: opts.clone() };
+                assert_eq!(walks(&planned), walks(&full), "seed {seed}, {opts:?}");
+                assert!(planned.index.ids.len() <= full.index.ids.len());
+            }
+        }
+    }
+
+    #[test]
+    fn planning_counts_against_the_budget() {
+        // A chain a0 -> a1 -> ... -> a9, and a hub with 1000 leaves elsewhere
+        let mut g: Graph<Record, Record> = Graph::new();
+        let chain: Vec<NodeIx> = (0..10).map(|i| g.add_node(format!("a{i}"), Record::default()).unwrap()).collect();
+        for w in chain.windows(2) {
+            g.add_edge(w[0], w[1], Record::default()).unwrap();
+        }
+        let hub = g.add_node("hub", Record::default()).unwrap();
+        for i in 0..1000 {
+            let leaf = g.add_node(format!("l{i}"), Record::default()).unwrap();
+            g.add_edge(hub, leaf, Record::default()).unwrap();
+        }
+        let opts = WalkOptions::new(3, 5);
+        // From a0, walks of 3 nodes read a0, a1, a2 and their edges
+        let p = plan_limited::<_, _, GraphError>(&g, Some("a0"), opts.clone(), Budget::default()).unwrap();
+        assert_eq!((p.visited, p.edges, p.truncated), (3, 3, false));
+        assert_eq!(p.value.unwrap().index.ids, ["a0", "a1", "a2", "a3"]);
+        let p =
+            plan_limited::<_, _, GraphError>(&g, Some("a0"), opts.clone(), Budget::default().max_visited(3)).unwrap();
+        assert!(p.value.is_some());
+        let tight = Budget::default().max_visited(2);
+        let Err(err) = plan_limited::<_, _, GraphError>(&g, Some("a0"), opts.clone(), tight) else { panic!("over") };
+        assert!(matches!(err, GraphError::BudgetExceeded { visited: 2, .. }), "{err:?}");
+        let p = plan_limited::<_, _, GraphError>(&g, Some("a0"), opts.clone(), tight.truncate()).unwrap();
+        assert!(p.value.is_none() && p.truncated);
+        // The hub's edges are counted one by one
+        let p =
+            plan_limited::<_, _, GraphError>(&g, Some("hub"), opts.clone(), Budget::default().max_edges(10).truncate())
+                .unwrap();
+        assert_eq!((p.value.is_none(), p.edges, p.truncated), (true, 10, true));
+        // Without a start node, the whole graph is read
+        let mut strat = opts;
+        strat.stratified = true;
+        let p = plan_limited::<_, _, GraphError>(&g, None, strat.clone(), Budget::default()).unwrap();
+        assert_eq!((p.visited, p.edges), (g.node_count(), g.edge_count()));
+        let p =
+            plan_limited::<_, _, GraphError>(&g, None, strat, Budget::default().max_visited(100).truncate()).unwrap();
+        assert!(p.value.is_none() && p.truncated);
+    }
 }

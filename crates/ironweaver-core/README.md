@@ -79,7 +79,10 @@ Without a token the checks cost nothing measurable.
 
 Depth limits don't bound work: a depth-2 traversal from a node with a
 million neighbours visits a million nodes. The `*_limited` traversals,
-`query::expand_paths_limited` and `WalkPlan::run_limited` take a `Budget`
+shortest paths (`pathfinding::find_path_limited`), path expansion and
+pattern matching (`query::expand_paths_limited`,
+`for_each_match_limited`) and random walks (`random_walks::plan_limited`,
+`WalkPlan::run_limited`) take a `Budget`
 (`max_visited` nodes entered, `max_edges` edges examined, `max_results`)
 and stop at its limits, with `GraphError::BudgetExceeded` or, with
 `truncate()`, the first results and `truncated` set. Only `max_edges`

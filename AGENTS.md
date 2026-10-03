@@ -139,7 +139,8 @@ Below is a quick guide to notable functions and where to find them.
 - **pathfinding/** (everything behind `Vertex.shortest_path`)
   - `mod.rs`: `find_path` entry point, `PathMethod` + the `METHODS`
     registry, `resolve` / `check_options` / `edge_cost` / `check_max_cost`,
-    `PathQuery`, `PathResult`, `not_reachable`. The comment at its top is the
+    `PathQuery`, `PathResult`, `not_reachable`, `find_path_limited` (a
+  `Meter` is passed down to each method). The comment at its top is the
     recipe for adding an algorithm.
   - `bfs.rs`, `dijkstra.rs`, `astar.rs`: one `METHOD` each.
   - `best_first.rs`: best-first search shared by Dijkstra and A* (reopening
@@ -208,8 +209,10 @@ Below is a quick guide to notable functions and where to find them.
     round trip) and mark what text can't express in `<...>`.
   - `matcher.rs`: `for_each_match` / `find_matches` (backtracking; plan
     from the most selective node; edges distinct per match, nodes may
-    repeat), `Match`, `Bound`. Tests compare with brute force.
-- **random_walks.rs** – `WalkOptions`, `plan` → `WalkPlan::run` (no graph
+    repeat; variable-length edges streamed), their `*_limited` variants,
+    `Match`, `Bound`. Tests compare with brute force.
+- **random_walks.rs** – `WalkOptions`, `plan` / `plan_limited` (from a
+  start node, indexes only what walks reach) → `WalkPlan::run` (no graph
   access, so the bindings release the GIL) / `run_limited` (a `Budget`
   caps the attempts in advance) / `WalkPlan::items`, `random_walks`
   convenience.
