@@ -345,7 +345,7 @@ fn refine(g: &WGraph, comm: &[u32], gamma: f64, theta: f64, rng: &mut StdRng) ->
         // Random choice with probability ∝ exp(gain / θ)
         let top = options.iter().map(|o| o.1).fold(0.0, f64::max);
         let weights: Vec<f64> = options.iter().map(|o| ((o.1 - top) / theta).exp()).collect();
-        let mut r = rng.gen::<f64>() * weights.iter().sum::<f64>();
+        let mut r = rng.random::<f64>() * weights.iter().sum::<f64>();
         let mut pick = options[options.len() - 1].0;
         for (o, w) in options.iter().zip(&weights) {
             if r < *w {

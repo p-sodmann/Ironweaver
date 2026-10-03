@@ -277,7 +277,7 @@ impl Stratification {
 
     fn sample_start<R: Rng>(&self, rng: &mut R) -> u32 {
         let total = self.start_weights.total();
-        self.start_weights.find(rng.gen::<f64>() * total) as u32
+        self.start_weights.find(rng.random::<f64>() * total) as u32
     }
 }
 
@@ -302,7 +302,7 @@ fn weighted_pick_index<R: Rng>(weights: &[f64], rng: &mut R) -> usize {
     if total <= 0.0 {
         return 0;
     }
-    let mut target = rng.gen::<f64>() * total;
+    let mut target = rng.random::<f64>() * total;
     for (i, w) in weights.iter().enumerate() {
         target -= w;
         if target < 0.0 {
@@ -349,7 +349,7 @@ fn perform_walk<R: Rng>(
                 if edges.is_empty() {
                     break;
                 }
-                edges[rng.gen_range(0..edges.len())]
+                edges[rng.random_range(0..edges.len())]
             }
             _ => {
                 scratch.options.clear();
@@ -366,7 +366,7 @@ fn perform_walk<R: Rng>(
                         scratch.weights.extend(scratch.options.iter().map(|(t, _)| s.weight(*t)));
                         scratch.options[weighted_pick_index(&scratch.weights, rng)]
                     }
-                    None => scratch.options[rng.gen_range(0..scratch.options.len())],
+                    None => scratch.options[rng.random_range(0..scratch.options.len())],
                 }
             }
         };
@@ -664,8 +664,8 @@ mod tests {
         let mut g = Graph::new();
         let nodes: Vec<NodeIx> = (0..60).map(|i| g.add_node(format!("n{i}"), Record::default()).unwrap()).collect();
         for _ in 0..150 {
-            let (a, b) = (nodes[rng.gen_range(0..60)], nodes[rng.gen_range(0..30)]);
-            let ty = ["x", "y", "z"][rng.gen_range(0..3)];
+            let (a, b) = (nodes[rng.random_range(0..60)], nodes[rng.random_range(0..30)]);
+            let ty = ["x", "y", "z"][rng.random_range(0..3)];
             g.insert_edge(a, b, None, Some(ty), Record::with_attr([("kind", Value::from(ty))])).unwrap();
         }
         g

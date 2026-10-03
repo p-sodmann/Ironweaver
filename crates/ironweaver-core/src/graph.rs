@@ -1225,15 +1225,15 @@ mod tests {
         let mut ids: Vec<String> = Vec::new();
         for step in 0..4000 {
             let live: Vec<NodeIx> = g.node_indices().collect();
-            let pick = |rng: &mut rand::rngs::StdRng| live[rng.gen_range(0..live.len())];
-            match rng.gen_range(0..10) {
+            let pick = |rng: &mut rand::rngs::StdRng| live[rng.random_range(0..live.len())];
+            match rng.random_range(0..10) {
                 0..=2 => {
-                    let id = format!("node-{step}-{}", "x".repeat(rng.gen_range(0..20)));
-                    let mut id_with_room = String::with_capacity(id.len() + rng.gen_range(0..8));
+                    let id = format!("node-{step}-{}", "x".repeat(rng.random_range(0..20)));
+                    let mut id_with_room = String::with_capacity(id.len() + rng.random_range(0..8));
                     id_with_room.push_str(&id);
-                    let value = match rng.gen_range(0..3) {
-                        0 => Value::from(rng.gen_range(0..5)),
-                        1 => Value::from(format!("text{}", rng.gen_range(0..5))),
+                    let value = match rng.random_range(0..3) {
+                        0 => Value::from(rng.random_range(0..5)),
+                        1 => Value::from(format!("text{}", rng.random_range(0..5))),
                         _ => Value::None,
                     };
                     g.add_node(id_with_room, Record::with_attr([("k", value)])).unwrap();
@@ -1245,8 +1245,8 @@ mod tests {
                 }
                 5 if !live.is_empty() => {
                     let a = pick(&mut rng);
-                    let label = ["A", "B", "C", "D"][rng.gen_range(0..4)];
-                    if rng.gen_bool(0.6) {
+                    let label = ["A", "B", "C", "D"][rng.random_range(0..4)];
+                    if rng.random_bool(0.6) {
                         g.add_label(a, label).unwrap();
                     } else {
                         g.remove_label(a, label).unwrap();
@@ -1258,7 +1258,7 @@ mod tests {
                 }
                 7 if g.edge_count() > 0 => {
                     let edges: Vec<EdgeIx> = g.edges().map(|(e, _)| e).collect();
-                    g.remove_edge(edges[rng.gen_range(0..edges.len())]).unwrap();
+                    g.remove_edge(edges[rng.random_range(0..edges.len())]).unwrap();
                 }
                 8 if !live.is_empty() => {
                     let a = pick(&mut rng);
