@@ -98,8 +98,9 @@ Below is a quick guide to notable functions and where to find them.
 - **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
   Posting>` + each node's key): `create_index` / `create_index_with_keys`,
   `find_nodes`, `find_nodes_in_range`, `index_stats` (O(1) sizes),
-  `index_candidates(Expr)` (used by
-  the matcher and `filter`), `set_index_keys` / `reindex_node` /
+  `index_candidates(Expr)` (used by the matcher and `filter`) =
+  `index_plan` (`IndexPlan`, picked by `index_plan_estimate`, no postings
+  read) + `execute_index_plan`, `set_index_keys` / `reindex_node` /
   `flush_indexes`. `add_node`, `node_mut`, `nodes_mut` mark nodes dirty;
   lookups re-read dirty nodes, so they are exact before a flush.
   `begin_index_build` -> `IndexBuild` (filled through `&Graph`) ->
