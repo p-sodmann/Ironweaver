@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 
 use crate::budget::{Budget, Limited, Meter};
 use crate::graph::{IxMap, IxSet};
+use crate::query::paths::Steps;
 use crate::{Direction, Edge, EdgeIx, Graph, GraphError, NodeIx};
 
 /// Depth-first (pre-order) traversal from `start` along outgoing edges for
@@ -30,15 +31,19 @@ pub fn dfs<N, E, X>(
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
     let mut meter = Meter::new(Budget::UNLIMITED);
-    dfs_metered(g, start, depth, &mut meter, edge_ok)
+    dfs_metered(g, start, depth, Direction::Out, &mut meter, edge_ok)
 }
 
-/// [`dfs`] under a [`Budget`]: nodes whose edges are followed count as
-/// visited, edges passed to `edge_ok` as examined, nodes returned as results.
+/// [`dfs`] following edges in `direction`, under a [`Budget`]: nodes whose
+/// edges are followed count as visited, edges passed to `edge_ok` as
+/// examined, nodes returned as results. With [`Direction::Both`] a node's
+/// outgoing edges come before its incoming ones, and a self-loop is
+/// examined once.
 pub fn dfs_limited<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    direction: Direction,
     budget: Budget,
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Limited<Vec<NodeIx>>, X>
@@ -46,7 +51,7 @@ where
     X: From<GraphError>,
 {
     let mut meter = Meter::new(budget);
-    let order = dfs_metered(g, start, depth, &mut meter, edge_ok)?;
+    let order = dfs_metered(g, start, depth, direction, &mut meter, edge_ok)?;
     Ok(meter.finish(order)?)
 }
 
@@ -54,16 +59,18 @@ fn dfs_metered<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    direction: Direction,
     meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
-    // Frame: (outgoing edges of the node, index of the next edge, node depth)
-    type Frame<'g> = (&'g [EdgeIx], usize, usize);
+    // Frame: (the node's remaining steps, node depth)
+    type Frame<'g> = (Steps<'g>, usize);
     struct Walk<'g, 'm> {
         order: Vec<NodeIx>,
         visited: IxSet<NodeIx>,
         stack: Vec<Frame<'g>>,
         meter: &'m mut Meter,
+        direction: Direction,
     }
     /// Visit `ix` (if new); false if the budget stops the walk.
     fn enter<'g, N, E>(g: &'g Graph<N, E>, w: &mut Walk<'g, '_>, ix: NodeIx, d: usize, depth: Option<usize>) -> bool {
@@ -75,38 +82,34 @@ fn dfs_metered<N, E, X>(
         }
         w.visited.insert(ix);
         w.order.push(ix);
-        if depth.is_none_or(|max| d < max) {
-            if let Some(n) = g.node(ix) {
-                if !w.meter.enter() {
-                    return false;
-                }
-                w.stack.push((n.out_edges(), 0, d));
+        if depth.is_none_or(|max| d < max) && g.node(ix).is_some() {
+            if !w.meter.enter() {
+                return false;
             }
+            w.stack.push((Steps::new(g, ix, w.direction), d));
         }
         true
     }
 
-    let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new(), meter };
+    let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new(), meter, direction };
     if !enter(g, &mut w, start, 0, depth) {
         return Ok(w.order);
     }
+    let both = direction == Direction::Both;
     let stop = crate::cancel::stop();
     while let Some(frame) = w.stack.last_mut() {
         if stop.poll() {
             break;
         }
-        if frame.1 >= frame.0.len() {
+        let Some((e, neighbor)) = frame.0.next(g, both) else {
             w.stack.pop();
             continue;
-        }
+        };
         if !w.meter.examine() {
             break;
         }
-        let e = frame.0[frame.1];
-        frame.1 += 1;
-        let next_depth = frame.2 + 1;
-        let edge = g.edge_ref(e);
-        if edge_ok(e, edge)? && !enter(g, &mut w, edge.target(), next_depth, depth) {
+        let next_depth = frame.1 + 1;
+        if edge_ok(e, g.edge_ref(e))? && !enter(g, &mut w, neighbor, next_depth, depth) {
             break;
         }
     }
@@ -123,15 +126,19 @@ pub fn bfs<N, E, X>(
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
     let mut meter = Meter::new(Budget::UNLIMITED);
-    bfs_metered(g, start, depth, &mut meter, edge_ok)
+    bfs_metered(g, start, depth, Direction::Out, &mut meter, edge_ok)
 }
 
-/// [`bfs`] under a [`Budget`]: nodes whose edges are followed count as
-/// visited, edges passed to `edge_ok` as examined, nodes returned as results.
+/// [`bfs`] following edges in `direction`, under a [`Budget`]: nodes whose
+/// edges are followed count as visited, edges passed to `edge_ok` as
+/// examined, nodes returned as results. With [`Direction::Both`] a node's
+/// outgoing edges come before its incoming ones, and a self-loop is
+/// examined once.
 pub fn bfs_limited<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    direction: Direction,
     budget: Budget,
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Limited<Vec<NodeIx>>, X>
@@ -139,7 +146,7 @@ where
     X: From<GraphError>,
 {
     let mut meter = Meter::new(budget);
-    let order = bfs_metered(g, start, depth, &mut meter, edge_ok)?;
+    let order = bfs_metered(g, start, depth, direction, &mut meter, edge_ok)?;
     Ok(meter.finish(order)?)
 }
 
@@ -147,6 +154,7 @@ fn bfs_metered<N, E, X>(
     g: &Graph<N, E>,
     start: NodeIx,
     depth: Option<usize>,
+    direction: Direction,
     meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Vec<NodeIx>, X> {
@@ -158,6 +166,7 @@ fn bfs_metered<N, E, X>(
     visited.insert(start);
     let mut queue = VecDeque::from([(start, 0usize)]);
 
+    let both = direction == Direction::Both;
     let stop = crate::cancel::stop();
     'search: while let Some((ix, d)) = queue.pop_front() {
         if stop.poll() {
@@ -166,25 +175,24 @@ fn bfs_metered<N, E, X>(
         if depth.is_some_and(|max| d >= max) {
             continue;
         }
-        let node = match g.node(ix) {
-            Some(n) => n,
-            None => continue,
-        };
+        if g.node(ix).is_none() {
+            continue;
+        }
         if !meter.enter() {
             break;
         }
-        for &e in node.out_edges() {
+        let mut steps = Steps::new(g, ix, direction);
+        while let Some((e, neighbor)) = steps.next(g, both) {
             if stop.poll() || !meter.examine() {
                 break 'search;
             }
-            let edge = g.edge_ref(e);
-            if edge_ok(e, edge)? && !visited.contains(&edge.target()) {
+            if edge_ok(e, g.edge_ref(e))? && !visited.contains(&neighbor) {
                 if !meter.produce() {
                     break 'search;
                 }
-                visited.insert(edge.target());
-                order.push(edge.target());
-                queue.push_back((edge.target(), d + 1));
+                visited.insert(neighbor);
+                order.push(neighbor);
+                queue.push_back((neighbor, d + 1));
             }
         }
     }
@@ -200,45 +208,57 @@ pub fn expand<N, E>(
     depth: usize,
     direction: Direction,
 ) -> Vec<NodeIx> {
-    expand_metered(g, seeds, depth, direction, &mut Meter::new(Budget::UNLIMITED))
+    let all = |_: EdgeIx, _: &Edge<E>| Ok::<_, std::convert::Infallible>(true);
+    match expand_metered(g, seeds, depth, direction, &mut Meter::new(Budget::UNLIMITED), all) {
+        Ok(order) => order,
+        Err(never) => match never {},
+    }
 }
 
-/// [`expand`] under a [`Budget`]: nodes whose neighbours are listed count
-/// as visited, the edges they are listed through as examined (with
-/// [`Direction::Both`], an edge is examined from both ends), nodes returned
-/// (seeds included) as results.
-pub fn expand_limited<N, E>(
+/// [`expand`] along the edges for which `edge_ok` returns true, under a
+/// [`Budget`]: nodes whose neighbours are listed count as visited, the edges
+/// they are listed through as examined (before `edge_ok`; with
+/// [`Direction::Both`], an edge is examined from both ends, a self-loop
+/// once), nodes returned (seeds included) as results. `edge_ok` is only
+/// asked about edges to nodes not discovered yet.
+pub fn expand_limited<N, E, X>(
     g: &Graph<N, E>,
     seeds: impl IntoIterator<Item = NodeIx>,
     depth: usize,
     direction: Direction,
     budget: Budget,
-) -> Result<Limited<Vec<NodeIx>>, GraphError> {
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Limited<Vec<NodeIx>>, X>
+where
+    X: From<GraphError>,
+{
     let mut meter = Meter::new(budget);
-    let order = expand_metered(g, seeds, depth, direction, &mut meter);
-    meter.finish(order)
+    let order = expand_metered(g, seeds, depth, direction, &mut meter, edge_ok)?;
+    Ok(meter.finish(order)?)
 }
 
-fn expand_metered<N, E>(
+fn expand_metered<N, E, X>(
     g: &Graph<N, E>,
     seeds: impl IntoIterator<Item = NodeIx>,
     depth: usize,
     direction: Direction,
     meter: &mut Meter,
-) -> Vec<NodeIx> {
+    mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Vec<NodeIx>, X> {
     let mut order = Vec::new();
     let mut discovered = IxSet::default();
     let mut queue = VecDeque::new();
     for seed in seeds {
         if g.node(seed).is_some() && !discovered.contains(&seed) {
             if !meter.produce() {
-                return order;
+                return Ok(order);
             }
             discovered.insert(seed);
             order.push(seed);
             queue.push_back((seed, 0usize));
         }
     }
+    let both = direction == Direction::Both;
     let stop = crate::cancel::stop();
     'search: while let Some((ix, d)) = queue.pop_front() {
         if stop.poll() {
@@ -250,11 +270,12 @@ fn expand_metered<N, E>(
         if !meter.enter() {
             break;
         }
-        for (_, neighbor) in g.neighbors(ix, direction) {
+        let mut steps = Steps::new(g, ix, direction);
+        while let Some((e, neighbor)) = steps.next(g, both) {
             if stop.poll() || !meter.examine() {
                 break 'search;
             }
-            if !discovered.contains(&neighbor) {
+            if !discovered.contains(&neighbor) && edge_ok(e, g.edge_ref(e))? {
                 if !meter.produce() {
                     break 'search;
                 }
@@ -266,7 +287,7 @@ fn expand_metered<N, E>(
             }
         }
     }
-    order
+    Ok(order)
 }
 
 /// Parent links of one side of a bidirectional search (`None` for the side's
@@ -473,6 +494,80 @@ mod tests {
         let mut got = ids(&g, &expand(&g, [ix["d"]], 1, Direction::Both));
         got.sort();
         assert_eq!(got, ["b", "c", "d", "e"]);
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Never;
+    impl From<GraphError> for Never {
+        fn from(e: GraphError) -> Self {
+            panic!("{e}")
+        }
+    }
+
+    fn sorted(g: &Graph<(), &str>, nodes: &[NodeIx]) -> Vec<String> {
+        let mut got = ids(g, nodes);
+        got.sort();
+        got
+    }
+
+    #[test]
+    fn limited_traversals_follow_a_direction() {
+        let (g, ix) = diamond();
+        let any = |_: EdgeIx, _: &Edge<&str>| Ok::<_, Never>(true);
+        let unlimited = Budget::UNLIMITED;
+        for (dir, want) in [
+            (Direction::Out, vec!["d", "e"]),
+            (Direction::In, vec!["a", "b", "c", "d"]),
+            (Direction::Both, vec!["a", "b", "c", "d", "e"]),
+        ] {
+            let b = bfs_limited(&g, ix["d"], None, dir, unlimited, any).unwrap();
+            assert_eq!(sorted(&g, &b.value), want, "bfs {dir:?}");
+            let d = dfs_limited(&g, ix["d"], None, dir, unlimited, any).unwrap();
+            assert_eq!(sorted(&g, &d.value), want, "dfs {dir:?}");
+        }
+        // Incoming edges in order, depth counted the same way
+        let b = bfs_limited(&g, ix["e"], Some(2), Direction::In, unlimited, any).unwrap();
+        assert_eq!(ids(&g, &b.value), ["e", "d", "b", "c"]);
+        let d = dfs_limited(&g, ix["e"], None, Direction::In, unlimited, any).unwrap();
+        assert_eq!(ids(&g, &d.value), ["e", "d", "b", "a", "c"]);
+        // Out matches the unlimited traversals
+        let b = bfs_limited(&g, ix["a"], None, Direction::Out, unlimited, any).unwrap();
+        assert_eq!(b.value, bfs(&g, ix["a"], None, all).unwrap());
+        let d = dfs_limited(&g, ix["a"], None, Direction::Out, unlimited, any).unwrap();
+        assert_eq!(d.value, dfs(&g, ix["a"], None, all).unwrap());
+    }
+
+    #[test]
+    fn both_examines_a_self_loop_once() {
+        let mut g: Graph<(), ()> = Graph::new();
+        let a = g.add_node("a", ()).unwrap();
+        g.add_edge(a, a, ()).unwrap();
+        let any = |_: EdgeIx, _: &Edge<()>| Ok::<_, Never>(true);
+        for dir in [Direction::Out, Direction::In, Direction::Both] {
+            let b = bfs_limited(&g, a, None, dir, Budget::UNLIMITED, any).unwrap();
+            assert_eq!((b.value.len(), b.edges), (1, 1), "bfs {dir:?}");
+            let d = dfs_limited(&g, a, None, dir, Budget::UNLIMITED, any).unwrap();
+            assert_eq!((d.value.len(), d.edges), (1, 1), "dfs {dir:?}");
+            let x = expand_limited(&g, [a], 2, dir, Budget::UNLIMITED, any).unwrap();
+            assert_eq!((x.value.len(), x.edges), (1, 1), "expand {dir:?}");
+        }
+    }
+
+    #[test]
+    fn expand_filters_edges() {
+        let (g, ix) = diamond();
+        let only_x = |_: EdgeIx, e: &Edge<&str>| Ok::<_, Never>(e.data == "x");
+        let x = expand_limited(&g, [ix["a"]], 5, Direction::Out, Budget::UNLIMITED, only_x).unwrap();
+        assert_eq!(ids(&g, &x.value), ["a", "b", "d", "e"]);
+        // Edges are examined before the filter
+        assert_eq!(x.edges, 4);
+        let x = expand_limited(&g, [ix["d"]], 1, Direction::Both, Budget::UNLIMITED, only_x).unwrap();
+        assert_eq!(sorted(&g, &x.value), ["b", "d", "e"]);
+        let any = |_: EdgeIx, _: &Edge<&str>| Ok::<_, Never>(true);
+        let x = expand_limited(&g, [ix["d"]], 1, Direction::Both, Budget::UNLIMITED, any).unwrap();
+        assert_eq!(x.value, expand(&g, [ix["d"]], 1, Direction::Both));
+        let failing = |_: EdgeIx, _: &Edge<&str>| Err::<bool, _>(Never);
+        assert_eq!(expand_limited(&g, [ix["a"]], 1, Direction::Out, Budget::UNLIMITED, failing), Err(Never));
     }
 
     #[test]

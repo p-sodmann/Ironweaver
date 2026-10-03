@@ -107,6 +107,8 @@ a query layer and database foundations.
     return the first results with `truncated` set. `max_edges` counts every
     edge examined, so a node with millions of edges can't run past the
     budget, and the traversals check for cancellation once per edge.
+    `dfs_limited` / `bfs_limited` take a `Direction` (incoming edges, or
+    both ways), and `expand_limited` an edge filter.
     Shortest paths (`pathfinding::find_path_limited`, and
     `traversal::bidirectional_bfs_limited`), pattern matching
     (`query::for_each_match_limited` / `find_matches_limited`) and walk
@@ -135,6 +137,13 @@ a query layer and database foundations.
   networkit (`benchmarks/compare_libraries.py`).
 - `Graph::index_stats(path)` / `Vertex.index_stats(name)`: an index's
   entry count, distinct keys, memory and dirty node count, in O(1).
+- `Graph::index_plan(expr)` (core): how `index_candidates` would find a
+  filter's candidates (`IndexPlan`: a label, a point, `In` or range lookup
+  on an index, a union, or nothing), without reading postings, with
+  `index_plan_estimate` for its size and `execute_index_plan` to run it.
+  `index_candidates` is the two in a row, so an `explain` can't disagree
+  with it. In an `And`, the part with the smallest estimate is now used
+  (it used to look up every part and keep the smallest result).
 
 ### Changed
 

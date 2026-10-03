@@ -45,17 +45,17 @@ fn traversals_return_a_prefix() {
         let full_expand = expand(&g, [hub], depth.unwrap_or(10), Direction::Out);
         for k in [0, 1, 7, 51, full_bfs.len() - 1, full_bfs.len(), full_bfs.len() + 5] {
             let budget = Budget::default().max_results(k).truncate();
-            let b = bfs_limited(&g, hub, depth, budget, all).unwrap();
+            let b = bfs_limited(&g, hub, depth, Direction::Out, budget, all).unwrap();
             assert_eq!(b.value, full_bfs[..k.min(full_bfs.len())]);
             assert_eq!(b.truncated, k < full_bfs.len());
-            let d = dfs_limited(&g, hub, depth, budget, all).unwrap();
+            let d = dfs_limited(&g, hub, depth, Direction::Out, budget, all).unwrap();
             assert_eq!(d.value, full_dfs[..k.min(full_dfs.len())]);
             assert_eq!(d.truncated, k < full_dfs.len());
-            let x = expand_limited(&g, [hub], depth.unwrap_or(10), Direction::Out, budget).unwrap();
+            let x = expand_limited(&g, [hub], depth.unwrap_or(10), Direction::Out, budget, all).unwrap();
             assert_eq!(x.value, full_expand[..k.min(full_expand.len())]);
             assert_eq!(x.truncated, k < full_expand.len());
         }
-        let unlimited = bfs_limited(&g, hub, depth, Budget::UNLIMITED, all).unwrap();
+        let unlimited = bfs_limited(&g, hub, depth, Direction::Out, Budget::UNLIMITED, all).unwrap();
         assert_eq!((unlimited.value, unlimited.truncated), (full_bfs, false));
     }
 }
@@ -64,26 +64,29 @@ fn traversals_return_a_prefix() {
 fn visits_are_bounded() {
     let (g, hub) = star(1000);
     // Only the hub is expanded: it and its children come back
-    let b = bfs_limited(&g, hub, None, Budget::default().max_visited(1).truncate(), all).unwrap();
+    let b = bfs_limited(&g, hub, None, Direction::Out, Budget::default().max_visited(1).truncate(), all).unwrap();
     assert_eq!((b.value.len(), b.truncated, b.visited), (1001, true, 1));
-    let b = bfs_limited(&g, hub, Some(1), Budget::default().max_visited(1).truncate(), all).unwrap();
+    let b = bfs_limited(&g, hub, Some(1), Direction::Out, Budget::default().max_visited(1).truncate(), all).unwrap();
     assert_eq!((b.value.len(), b.truncated), (1001, false));
-    let d = dfs_limited(&g, hub, None, Budget::default().max_visited(10).truncate(), all).unwrap();
+    let d = dfs_limited(&g, hub, None, Direction::Out, Budget::default().max_visited(10).truncate(), all).unwrap();
     assert!(d.truncated && d.visited == 10);
-    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_visited(5).truncate()).unwrap();
+    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_visited(5).truncate(), all).unwrap();
     assert!(x.truncated && x.visited == 5);
 
     // Error mode reports where it stopped
-    let err = bfs_limited(&g, hub, None, Budget::default().max_visited(3), all).unwrap_err();
+    let err = bfs_limited(&g, hub, None, Direction::Out, Budget::default().max_visited(3), all).unwrap_err();
     assert!(matches!(err, GraphError::BudgetExceeded { visited: 3, .. }), "{err:?}");
-    let err = dfs_limited(&g, hub, None, Budget::default().max_results(5), all).unwrap_err();
+    let err = dfs_limited(&g, hub, None, Direction::Out, Budget::default().max_results(5), all).unwrap_err();
     assert_eq!(err, GraphError::BudgetExceeded { visited: 5, edges: 6, results: 5 });
     assert!(err.to_string().contains("budget exceeded"));
-    let err = expand_limited(&g, [hub], 2, Direction::Out, Budget::default().max_results(2)).unwrap_err();
+    let err = expand_limited(&g, [hub], 2, Direction::Out, Budget::default().max_results(2), all).unwrap_err();
     assert!(matches!(err, GraphError::BudgetExceeded { results: 2, .. }));
     // Filter errors still come first
     let failing = |_: EdgeIx, _: &Edge<Record>| Err::<bool, _>(GraphError::InvalidArgument("boom".into()));
-    assert!(matches!(bfs_limited(&g, hub, None, Budget::default(), failing), Err(GraphError::InvalidArgument(_))));
+    assert!(matches!(
+        bfs_limited(&g, hub, None, Direction::Out, Budget::default(), failing),
+        Err(GraphError::InvalidArgument(_))
+    ));
 }
 
 #[test]
@@ -174,7 +177,7 @@ fn plan_walks(g: &G, opts: WalkOptions) -> Vec<Vec<String>> {
 fn unlimited_budget_changes_nothing() {
     let (g, hub) = star(10);
     let a = dfs(&g, hub, None, |_, _| Ok::<_, Infallible>(true)).unwrap();
-    let b = dfs_limited(&g, hub, None, Budget::UNLIMITED, all).unwrap();
+    let b = dfs_limited(&g, hub, None, Direction::Out, Budget::UNLIMITED, all).unwrap();
     assert_eq!(a, b.value);
     assert_eq!(b.visited, a.len());
 }
@@ -202,11 +205,12 @@ fn edges_are_bounded() {
             Ok::<_, GraphError>(true)
         };
 
-        let b = bfs_limited(&g, hub, None, budget, counting).unwrap();
+        let b = bfs_limited(&g, hub, None, Direction::Out, budget, counting).unwrap();
         assert_eq!((calls.replace(0), b.edges, b.truncated, b.value.len()), (k, k, true, 1 + usize::from(k > 0)));
-        let d = dfs_limited(&g, hub, None, Budget::default().max_edges(k).truncate(), counting).unwrap();
+        let d =
+            dfs_limited(&g, hub, None, Direction::Out, Budget::default().max_edges(k).truncate(), counting).unwrap();
         assert_eq!((calls.replace(0), d.edges, d.truncated), (k, k, true));
-        let x = expand_limited(&g, [hub], 1, Direction::Out, budget).unwrap();
+        let x = expand_limited(&g, [hub], 1, Direction::Out, budget, all).unwrap();
         assert_eq!((x.edges, x.truncated, x.value.len()), (k, true, 1 + usize::from(k > 0)));
         let budget = Budget::default().max_edges(k).truncate();
         let p = expand_paths_limited(&g, hub, Direction::Out, hops, Uniqueness::Trail, budget, counting, |_, _| {
@@ -216,20 +220,20 @@ fn edges_are_bounded() {
         assert_eq!((calls.replace(0), p.edges, p.truncated), (k, k, true));
 
         // Error mode reports the edges examined
-        let err = bfs_limited(&g, hub, None, Budget::default().max_edges(k), counting).unwrap_err();
+        let err = bfs_limited(&g, hub, None, Direction::Out, Budget::default().max_edges(k), counting).unwrap_err();
         assert_eq!(err, GraphError::BudgetExceeded { visited: 1, edges: k, results: 1 + usize::from(k > 0) });
         assert!(err.to_string().contains(&format!("examining {k} edges")), "{err}");
-        let err = expand_limited(&g, [hub], 1, Direction::Both, Budget::default().max_edges(k)).unwrap_err();
+        let err = expand_limited(&g, [hub], 1, Direction::Both, Budget::default().max_edges(k), all).unwrap_err();
         assert!(matches!(err, GraphError::BudgetExceeded { edges, .. } if edges == k));
     }
 
     // Exactly enough edges: not truncated
     let (g, hub, leaf) = parallel_hub(100);
-    let b = bfs_limited(&g, hub, None, Budget::default().max_edges(100).truncate(), all).unwrap();
+    let b = bfs_limited(&g, hub, None, Direction::Out, Budget::default().max_edges(100).truncate(), all).unwrap();
     assert_eq!((b.value, b.truncated, b.edges), (vec![hub, leaf], false, 100));
-    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_edges(200).truncate()).unwrap();
+    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_edges(200).truncate(), all).unwrap();
     assert_eq!((x.truncated, x.edges), (false, 200)); // each edge from both ends
-    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_edges(199).truncate()).unwrap();
+    let x = expand_limited(&g, [hub], 3, Direction::Both, Budget::default().max_edges(199).truncate(), all).unwrap();
     assert_eq!((x.truncated, x.edges), (true, 199));
 }
 

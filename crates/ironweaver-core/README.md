@@ -90,7 +90,7 @@ bounds the work at a single node with many edges:
 
 ```rust
 use ironweaver_core::traversal::bfs_limited;
-use ironweaver_core::{Budget, Graph, GraphError, Record};
+use ironweaver_core::{Budget, Direction, Graph, GraphError, Record};
 
 let mut g: Graph<Record, Record> = Graph::new();
 let hub = g.add_node("hub", Record::default())?;
@@ -99,10 +99,10 @@ for i in 0..1000 {
     g.add_edge(hub, leaf, Record::default())?;
 }
 let all = |_, _: &_| Ok::<_, GraphError>(true);
-let first = bfs_limited(&g, hub, Some(2), Budget::default().max_results(10).truncate(), all)?;
+let first = bfs_limited(&g, hub, Some(2), Direction::Out, Budget::default().max_results(10).truncate(), all)?;
 assert_eq!((first.value.len(), first.truncated), (10, true));
-assert!(bfs_limited(&g, hub, Some(2), Budget::default().max_results(10), all).is_err());
-let some = bfs_limited(&g, hub, None, Budget::default().max_edges(100).truncate(), all)?;
+assert!(bfs_limited(&g, hub, Some(2), Direction::Out, Budget::default().max_results(10), all).is_err());
+let some = bfs_limited(&g, hub, None, Direction::Out, Budget::default().max_edges(100).truncate(), all)?;
 assert_eq!((some.value.len(), some.edges, some.truncated), (101, 100, true));
 # Ok::<(), GraphError>(())
 ```
