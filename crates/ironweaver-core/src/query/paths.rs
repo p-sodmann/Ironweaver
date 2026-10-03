@@ -185,7 +185,7 @@ where
 
 /// The steps of [`steps`] as a cursor: one per node on the current path,
 /// so a node's edges are neither copied nor read ahead of the budget.
-struct Steps<'g> {
+pub(crate) struct Steps<'g> {
     node: NodeIx,
     out: &'g [EdgeIx],
     inc: &'g [EdgeIx],
@@ -193,7 +193,7 @@ struct Steps<'g> {
 }
 
 impl<'g> Steps<'g> {
-    fn new<N, E>(g: &'g Graph<N, E>, ix: NodeIx, direction: Direction) -> Self {
+    pub(crate) fn new<N, E>(g: &'g Graph<N, E>, ix: NodeIx, direction: Direction) -> Self {
         let node = g.node(ix);
         let out = match node {
             Some(n) if direction != Direction::In => n.out_edges(),
@@ -207,7 +207,7 @@ impl<'g> Steps<'g> {
     }
 
     /// The next `(edge, neighbour)`, in the order of [`steps`].
-    fn next<N, E>(&mut self, g: &Graph<N, E>, both: bool) -> Option<(EdgeIx, NodeIx)> {
+    pub(crate) fn next<N, E>(&mut self, g: &Graph<N, E>, both: bool) -> Option<(EdgeIx, NodeIx)> {
         loop {
             let i = self.next;
             self.next += 1;

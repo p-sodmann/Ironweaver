@@ -106,7 +106,9 @@ a query layer and database foundations.
     `max_results`) and either fail with `GraphError::BudgetExceeded` or
     return the first results with `truncated` set. `max_edges` counts every
     edge examined, so a node with millions of edges can't run past the
-    budget, and the traversals check for cancellation once per edge;
+    budget, and the traversals check for cancellation once per edge.
+    `dfs_limited` / `bfs_limited` take a `Direction` (incoming edges, or
+    both ways), and `expand_limited` an edge filter;
   - `Expr`, `CmpOp`, `Pattern` (and its parts) implement serde `Serialize`
     / `Deserialize`, with expression nesting capped at `MAX_EXPR_DEPTH`;
     `Pattern` implements `Display` (and `to_text`), and
