@@ -16,8 +16,10 @@
 //
 // Expressions serialize with serde (externally tagged, like `Value` and
 // `Op`), so they can travel over the network or be stored. Nesting of
-// `And` / `Or` / `Not` is limited to `MAX_EXPR_DEPTH` levels both ways, so a
-// crafted document can't overflow the stack.
+// `And` / `Or` / `Not` is limited to `MAX_EXPR_DEPTH` levels both ways, and
+// unknown fields are refused rather than skipped (skipping recurses without
+// the depth counters), so a crafted document can't overflow the stack.
+// `Expr::from_json_str` reads JSON relying on that alone.
 
 use std::cmp::Ordering;
 
@@ -45,6 +47,7 @@ pub enum CmpOp {
 /// Serialized externally tagged, e.g. `{"Compare": {"path": ["age"], "op":
 /// "Ge", "value": {"Int": 18}}}` or `{"Label": "Person"}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Expr {
     /// Always true / false.
     Const(bool),
@@ -124,6 +127,14 @@ impl CmpOp {
 }
 
 impl Expr {
+    /// Read an expression from its serde form in JSON, up to
+    /// [`MAX_EXPR_DEPTH`] levels of `And` / `Or` / `Not` (and values up to
+    /// [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels deep). Prefer it to
+    /// `serde_json::from_str`, which stops at 64 levels.
+    pub fn from_json_str(json: &str) -> Result<Expr, crate::GraphError> {
+        crate::value::from_json_str(json)
+    }
+
     /// Whether the node matches.
     pub fn matches_node<N: Attributes, E>(&self, g: &Graph<N, E>, ix: NodeIx) -> Result<bool, N::Error> {
         let Some(node) = g.node(ix) else { return Ok(false) };

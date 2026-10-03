@@ -208,6 +208,19 @@ a query layer and database foundations.
   a container's items one deeper), so an empty list or dict at depth 100
   that a file can hold can also be encoded with serde (and in `Op`s); it
   was rejected one level early.
+- A JSON graph file with a deeply nested unknown field (thousands of
+  levels) crashed the process with a stack overflow, in Python too: the JSON
+  parser skips unknown fields recursively. `format::from_json` and
+  `load_from_json` now refuse documents nested more than 255 levels deep
+  (the deepest valid file needs 204).
+- The serde form of `Value`, `Expr` and `Pattern` can be read from JSON up
+  to the documented depth limit: `Value::from_json_str`,
+  `Expr::from_json_str` and `Pattern::from_json_str` lift the JSON parser's
+  own recursion limit (`serde_json` stops at 64 levels of `List` / `Dict` /
+  `And` / `Or`) and rely on the core's depth counters. `Expr`'s struct
+  variants, `NodePattern`, `EdgePattern`, `Pattern` and `Hops` refuse
+  unknown fields instead of skipping them (skipping recursed past the
+  depth counters, so a crafted filter could overflow the stack).
 
 ## 0.1.0
 

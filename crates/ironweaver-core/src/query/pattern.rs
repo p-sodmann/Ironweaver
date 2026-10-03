@@ -22,7 +22,7 @@
 // `to_text` accepts. Patterns the text can't express (filters other than
 // property equality, bound ids, ...) are written with those parts in
 // `<...>`, which `parse` rejects. Patterns also (de)serialize with serde,
-// with nothing lost.
+// with nothing lost (unknown fields are refused; `Pattern::from_json_str`).
 
 use std::collections::HashMap;
 use std::fmt::{self, Write as _};
@@ -34,6 +34,7 @@ use crate::{CmpOp, Expr, GraphError, Value};
 
 /// A node variable of a [`Pattern`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodePattern {
     /// `None` for anonymous nodes (not reported in matches).
     pub name: Option<String>,
@@ -46,6 +47,7 @@ pub struct NodePattern {
 
 /// An edge between two node variables of a [`Pattern`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EdgePattern {
     pub name: Option<String>,
     /// Node variables (indices into `Pattern::nodes`). A directed pattern
@@ -64,6 +66,7 @@ pub struct EdgePattern {
 
 /// A pattern to match against a graph; see the module comment.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Pattern {
     pub nodes: Vec<NodePattern>,
     pub edges: Vec<EdgePattern>,
@@ -84,6 +87,12 @@ fn and(a: Option<Expr>, b: Expr) -> Expr {
 }
 
 impl Pattern {
+    /// Read a pattern from its serde form in JSON, with filters as deep as
+    /// [`Expr::from_json_str`] reads them.
+    pub fn from_json_str(json: &str) -> Result<Pattern, GraphError> {
+        crate::value::from_json_str(json)
+    }
+
     /// Parse the text form (see the module comment).
     pub fn parse(text: &str) -> Result<Pattern, GraphError> {
         Parser { chars: text.chars().collect(), i: 0, pattern: Pattern::default(), names: HashMap::new() }.parse()

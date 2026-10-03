@@ -120,7 +120,10 @@ Below is a quick guide to notable functions and where to find them.
   on attribute paths, `Label`, `Type`, and / or / not), `matches_node` /
   `matches_edge`, read through `Attributes::with_value`. Missing values make
   comparisons false. Serde (externally tagged), with `And` / `Or` / `Not`
-  nesting capped at `MAX_EXPR_DEPTH` both ways (the bindings use it too).
+  nesting capped at `MAX_EXPR_DEPTH` both ways (the bindings use it too)
+  and unknown fields refused (skipping one recurses past the depth
+  counters), like the pattern structs; `Expr` / `Value` / `Pattern`
+  `from_json_str` read JSON with no parser recursion limit, relying on that.
 - **error.rs** – `GraphError` (`#[non_exhaustive]`; its `Display` text is
   the user-facing message; `BudgetExceeded`, `Internal` for broken
   invariants).
@@ -249,7 +252,9 @@ Below is a quick guide to notable functions and where to find them.
     file + fsync + rename, used by every file save).
   - Values nest at most `MAX_DEPTH` (100) levels: `LoadValue` rejects deeper
     input (so crafted files cannot overflow the stack) and savers check with
-    `tagged::check_depth`. Any new recursive (de)serializer must do the same.
+    `tagged::check_depth`. JSON graph documents nested more than 255 levels
+    (sonic-rs skips unknown fields recursively) are refused up front by
+    `check_json_nesting`. Any new recursive (de)serializer must do the same.
 
 ### Bindings (`src/`)
 

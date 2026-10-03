@@ -394,9 +394,51 @@ pub struct LoadGraph<'a> {
     version: u32,
 }
 
+/// Deepest JSON nesting of arrays and objects a document may have: sonic-rs
+/// refuses deeper input where it parses, but skips unknown fields
+/// recursively with no limit, so a crafted field would overflow the stack.
+/// The deepest valid document (a node attribute `MAX_DEPTH` levels deep)
+/// needs `2 * MAX_DEPTH + 4`.
+const MAX_JSON_NESTING: usize = 255;
+
+/// Refuse a document nested deeper than `MAX_JSON_NESTING`, in one pass
+/// over the bytes (strings skipped; malformed input is left to the parser).
+fn check_json_nesting(bytes: &[u8]) -> Result<(), GraphError> {
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > MAX_JSON_NESTING {
+                    return Err(GraphError::Format(format!("JSON nested more than {MAX_JSON_NESTING} levels deep")));
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            b'"' => {
+                // To the closing quote, past escaped characters
+                i += 1;
+                loop {
+                    let rest = bytes.get(i..).unwrap_or_default();
+                    let Some(n) = rest.iter().position(|&b| b == b'"' || b == b'\\') else { return Ok(()) };
+                    i += n;
+                    if bytes[i] == b'"' {
+                        break;
+                    }
+                    i += 2;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Ok(())
+}
+
 impl<'a> LoadGraph<'a> {
     /// Parse a JSON document (any version).
     pub fn from_json_slice(bytes: &'a [u8]) -> Result<Self, GraphError> {
+        check_json_nesting(bytes)?;
         let mut doc: LoadGraph<'a> = sonic_rs::from_slice(bytes).map_err(|e| GraphError::Format(e.to_string()))?;
         doc.version = match doc.metadata.get("version").map(LoadValue::kind) {
             None => 1,
