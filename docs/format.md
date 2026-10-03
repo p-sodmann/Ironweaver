@@ -19,10 +19,11 @@ assert h.add_edge("b", "a").id == 1        # edge ids continue where they left o
 
 ## Compatibility promise
 
-- **ironweaver reads every format version it has written.** Files saved by 0.1 (format 1) load in 0.2 and later.
+- **ironweaver reads the JSON files of every format version it has written.** JSON files saved by 0.1 (format 1) load in 0.2 and later.
+- **Binary files from 0.1 (format 1) are not supported.** Loading one raises an error saying so; convert it as described [below](#format-1-ironweaver-01). Binary files of format 2 and later keep loading.
 - **A new format version only comes with a minor release** (0.2 → 0.3, or 1.x → 1.y), and the changelog says so. Patch releases never change what is written.
 - **Older releases can't read newer files.** 0.1 can't read format 2. Keep the old version around (or save to JSON with it) if you need to go back.
-- The test suite loads saved files from every format version (`tests/data/legacy_*` for format 1, `tests/data/v2_*` for format 2), so these guarantees are checked on every change.
+- The test suite loads saved files from every format version (`tests/data/legacy_graph.json` for format 1, `tests/data/v2_*` for format 2) and checks that format 1 binary files are refused with a clear error, so these guarantees are checked on every change.
 
 ## Format 2 (ironweaver 0.2)
 
@@ -67,9 +68,18 @@ Rust programs can also load a binary file from a reader (`format::from_binary_re
 
 ## Format 1 (ironweaver 0.1)
 
-Format 1 files (JSON with `metadata.version` "1.x", or binary files without the `IRONWEAV` header) are converted while loading:
+Format 1 JSON files (`metadata.version` "1.x", or none) are converted while loading:
 
 - a node attribute `labels` holding a list of strings becomes the node's labels, and an edge attribute `type` holding a string becomes the edge's type;
 - edges get new integer ids; the old string id (like `edge_0_a_to_b`) is kept in `edge.meta["legacy_id"]`.
 
 Saving the loaded graph again writes format 2.
+
+Format 1 binary files (no `IRONWEAV` header) are no longer read: `load_from_binary` raises an error saying the file is format 1. To convert one, use ironweaver 0.1, which reads it, and save it as JSON there:
+
+```text
+pip install "ironweaver<0.2"        # in a separate environment
+python -c "from ironweaver import Vertex; Vertex.load_from_binary('old.bin').save_to_json('old.json')"
+```
+
+Then load `old.json` with the current version (`Vertex.load_from_json`) and save it again (`save_to_binary` writes format 2).

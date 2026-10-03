@@ -13,15 +13,15 @@
 // loader does) rather than as whatever the damage made the decoder trip
 // over.
 //
-// Version 1 (headerless bincode) files are read into memory and loaded by
-// the slice-based loader.
+// Files without the header (version 1 binary files among them) are refused
+// after reading the header's 16 bytes, with the slice loader's message.
 
 use std::io::{self, Read};
 
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
 use super::load::{owned_strings, LoadAttrs, LoadEdge, LoadGraph, LoadKind, LoadNode, LoadValue, Str};
-use super::{bad_binary, check_trailer, check_version, HEADER_LEN, MAGIC, TRAILER_LEN};
+use super::{bad_binary, check_trailer, check_version, unframed, HEADER_LEN, MAGIC, TRAILER_LEN};
 use crate::{EdgeId, EdgeIx, Graph, GraphError, NodeIx};
 
 /// Read buffer size.
@@ -418,8 +418,9 @@ impl LoadGraph<'_> {
     /// Peak memory is the graph plus a small buffer, instead of the graph
     /// plus the whole file. The checksum is checked at the end: if it (or
     /// the length) doesn't match, the partly built graph is dropped and
-    /// the error returned. Version 1 files are read into memory and loaded
-    /// with [`from_binary_slice`](Self::from_binary_slice). Reads in large
+    /// the error returned. Files without the header (version 1 binary
+    /// files among them) are a [`GraphError::Format`], as with
+    /// [`from_binary_slice`](Self::from_binary_slice). Reads in large
     /// chunks, so `reader` needs no buffering.
     pub fn build_from_reader<R, N, E, X>(
         mut reader: R,
@@ -433,13 +434,11 @@ impl LoadGraph<'_> {
         let io = |e: io::Error| GraphError::Format(e.to_string());
         let mut header = [0u8; HEADER_LEN];
         let n = read_full(&mut reader, &mut header).map_err(io)?;
-        if n < HEADER_LEN || !header.starts_with(MAGIC) {
-            // Version 1, or too short to tell: the slice loader decides
-            let mut bytes = header[..n].to_vec();
-            reader.read_to_end(&mut bytes).map_err(io)?;
-            let doc = LoadGraph::from_binary_slice(&bytes)?;
-            let graph = doc.build(make_node, make_edge)?;
-            return Ok((graph, doc.into_meta().into_owned()));
+        if !header.starts_with(MAGIC) {
+            return Err(unframed(&header[..n]).into());
+        }
+        if n < HEADER_LEN {
+            return Err(bad_binary("truncated").into());
         }
         check_version(&header)?;
 

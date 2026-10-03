@@ -12,7 +12,7 @@ use crate::temporal::{self, Date, DateTime};
 /// Serialized externally tagged (`{"Float": 1.5}`, `"None"`, ...), like the
 /// file format: in human-readable formats (JSON), a NaN or infinite `Float`
 /// is written as the string `"NaN"`, `"Infinity"` or `"-Infinity"` and read
-/// back from it. The variant order is part of the binary format (bincode writes the variant
+/// back from it. The variant order is part of the binary format (postcard writes the variant
 /// index), so never reorder the variants. Serde (de)serialization fails for
 /// values nested more than [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels
 /// instead of overflowing the stack, counted like the file format: a value

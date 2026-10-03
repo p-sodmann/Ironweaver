@@ -13,9 +13,16 @@ a query layer and database foundations.
 
 ### Breaking changes
 
+- **Binary files saved by 0.1 are no longer supported.** Loading a format 1
+  binary file (`load_from_binary`, `format::from_binary`) raises an error
+  saying it is format 1. The reader for it was the only user of bincode 1.x
+  (unmaintained, RUSTSEC-2025-0141), which is no longer a dependency, and
+  `ironweaver-core` has no `format-v1` feature. To convert such a file, load
+  it with ironweaver 0.1 and save it with `save_to_json`, then load the JSON
+  file (see [the file format docs](https://github.com/p-sodmann/Ironweaver/blob/main/docs/format.md#format-1-ironweaver-01)).
 - **File format version 2.** Saved files (JSON and binary) use format 2: a
-  binary header, a checksum, labels, edge types and edge ids. Files saved by
-  0.1 (format 1) still load and are migrated (`attr["labels"]` / `attr["type"]`
+  binary header, a checksum, labels, edge types and edge ids. JSON files saved
+  by 0.1 (format 1) still load and are migrated (`attr["labels"]` / `attr["type"]`
   become labels and types; an old edge id is kept in `meta["legacy_id"]`), but
   0.1 can't read files saved by 0.2. See [the file format docs](https://github.com/p-sodmann/Ironweaver/blob/main/docs/format.md).
 - **Labels and edge types are graph fields.** `attr["labels"]` (a list of str)
@@ -30,7 +37,7 @@ a query layer and database foundations.
 - `datetime.date` / `datetime.datetime` attribute values are saved as dates
   and date-times (they used to be saved as their `str()` and load as
   strings), and `bytes` / `bytearray` as bytes (they used to become lists of
-  ints). Files saved by 0.1 load as before.
+  ints). JSON files saved by 0.1 load as before.
 
 ### Deprecated
 
@@ -128,10 +135,6 @@ a query layer and database foundations.
     byte-identical saves;
   - `record::lookup` reads an attribute path from an `Attrs` map with the
     same rules as `Record`, for other payload types that store `Attrs`;
-  - the `format-v1` feature (on by default) reads format version 1 binary
-    files. It is the only user of bincode 1.x (unmaintained,
-    RUSTSEC-2025-0141), so crates that only read files saved by 0.2 can
-    turn default features off and drop it.
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).

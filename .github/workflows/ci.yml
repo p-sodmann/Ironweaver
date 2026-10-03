@@ -32,9 +32,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p ironweaver-core
-      # Without the format-v1 feature (and bincode)
-      - run: cargo clippy -p ironweaver-core --all-targets --no-default-features -- -D warnings
-      - run: cargo test -p ironweaver-core --no-default-features
+      - name: bincode 1.x is not a dependency
+        run: |
+          if cargo tree --workspace -e all | grep -q "bincode v1"; then
+            echo "bincode 1.x must not be a dependency (RUSTSEC-2025-0141)" >&2
+            exit 1
+          fi
       - name: The core does not depend on pyo3
         run: |
           if cargo tree -p ironweaver-core -e normal | grep -q pyo3; then
