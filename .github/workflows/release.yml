@@ -74,6 +74,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: PyO3/maturin-action@v1
         with:
+          # Runner images can lag a release behind; rust-version needs current stable
+          rust-toolchain: stable
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
@@ -105,6 +107,8 @@ jobs:
             3.14
       - uses: PyO3/maturin-action@v1
         with:
+          # Runner images can lag a release behind; rust-version needs current stable
+          rust-toolchain: stable
           target: ${{ matrix.target }}
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
       - uses: actions/upload-artifact@v4
@@ -129,6 +133,8 @@ jobs:
             3.14
       - uses: PyO3/maturin-action@v1
         with:
+          # Runner images can lag a release behind; rust-version needs current stable
+          rust-toolchain: stable
           target: x64
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
       - uses: actions/upload-artifact@v4
@@ -144,6 +150,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: PyO3/maturin-action@v1
         with:
+          # Runner images can lag a release behind; rust-version needs current stable
+          rust-toolchain: stable
           command: sdist
           args: --out dist
       - uses: actions/upload-artifact@v4

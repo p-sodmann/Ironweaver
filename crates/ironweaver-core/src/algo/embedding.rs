@@ -78,7 +78,7 @@ pub fn fastrp(p: &Projection, opts: &FastRP) -> Result<Vec<f32>, GraphError> {
     random.par_chunks_mut(d).enumerate().for_each(|(u, v)| {
         let mut rng = StdRng::seed_from_u64(mix(opts.seed, u as u64));
         for x in v.iter_mut() {
-            let r: f32 = rng.gen();
+            let r: f32 = rng.random();
             *x = if r < 1.0 / 6.0 {
                 scale
             } else if r < 1.0 / 3.0 {

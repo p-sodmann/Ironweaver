@@ -188,8 +188,8 @@ impl TextWriter<'_> {
             .chain(p.edges.iter().filter_map(|e| e.name.as_deref()))
             .collect();
         names.sort_unstable();
-        if let Some(w) = names.windows(2).find(|w| w[0] == w[1]) {
-            let what = format!("the name '{}' is used twice", w[0]);
+        if let Some([name, _]) = names.array_windows().find(|[a, b]| a == b) {
+            let what = format!("the name '{}' is used twice", name);
             self.unwritable(&what)?;
         }
 
@@ -809,19 +809,19 @@ mod tests {
         let names = ["a", "b", "c", "d", "`x y`", "é_1"];
         let values = ["1", "-2", "0.5", "-1e-7", "true", "false", "'s'", "\"q\\\"x\"", "\"\\\\\"", "''"];
         fn pick(rng: &mut rand::rngs::StdRng, items: &[&'static str]) -> &'static str {
-            items[rng.gen_range(0..items.len())]
+            items[rng.random_range(0..items.len())]
         }
         let node = |rng: &mut rand::rngs::StdRng| {
             let mut t = String::from("(");
-            if rng.gen_bool(0.7) {
+            if rng.random_bool(0.7) {
                 t.push_str(pick(rng, &names));
             }
-            for _ in 0..rng.gen_range(0..3) {
+            for _ in 0..rng.random_range(0..3) {
                 t.push(':');
                 t.push_str(pick(rng, &["L", "M", "`N n`"]));
             }
-            if rng.gen_bool(0.3) {
-                let props: Vec<String> = (0..rng.gen_range(0..3))
+            if rng.random_bool(0.3) {
+                let props: Vec<String> = (0..rng.random_range(0..3))
                     .map(|_| format!("{}: {}", pick(rng, &["k", "v", "`w w`"]), pick(rng, &values)))
                     .collect();
                 t.push_str(&format!(" {{{}}}", props.join(", ")));
@@ -830,24 +830,24 @@ mod tests {
             t
         };
         let mut paths = Vec::new();
-        for _ in 0..rng.gen_range(1..4) {
+        for _ in 0..rng.random_range(1..4) {
             let mut t = node(rng);
-            for _ in 0..rng.gen_range(0..4) {
+            for _ in 0..rng.random_range(0..4) {
                 let mut body = String::new();
-                if rng.gen_bool(0.3) {
+                if rng.random_bool(0.3) {
                     body.push_str(pick(rng, &["r", "s", "t"]));
                 }
-                if rng.gen_bool(0.4) {
+                if rng.random_bool(0.4) {
                     body.push_str(pick(rng, &[":T", ":T|U", ":T|:U|`V v`"]));
                 }
-                if rng.gen_bool(0.3) {
+                if rng.random_bool(0.3) {
                     body.push_str(pick(rng, &["*", "*2", "*1..3", "*..4", "*2..", "*0..0"]));
                 }
-                if rng.gen_bool(0.2) {
+                if rng.random_bool(0.2) {
                     body.push_str(&format!(" {{k: {}}}", pick(rng, &values)));
                 }
-                let body = if body.is_empty() && rng.gen_bool(0.5) { String::new() } else { format!("[{body}]") };
-                t.push_str(&match rng.gen_range(0..3) {
+                let body = if body.is_empty() && rng.random_bool(0.5) { String::new() } else { format!("[{body}]") };
+                t.push_str(&match rng.random_range(0..3) {
                     0 => format!("-{body}->"),
                     1 => format!("<-{body}-"),
                     _ => format!("-{body}-"),
@@ -877,20 +877,20 @@ mod tests {
         // Arbitrary structs: either written exactly or refused
         let mut exact = 0;
         for _ in 0..5000 {
-            let n = rng.gen_range(1..5);
+            let n = rng.random_range(1..5);
             let nodes: Vec<NodePattern> = (0..n)
                 .map(|i| NodePattern {
-                    name: rng.gen_bool(0.6).then(|| format!("n{i}")),
-                    labels: if rng.gen_bool(0.3) { vec!["L".into()] } else { vec![] },
+                    name: rng.random_bool(0.6).then(|| format!("n{i}")),
+                    labels: if rng.random_bool(0.3) { vec!["L".into()] } else { vec![] },
                     ..Default::default()
                 })
                 .collect();
-            let edges: Vec<EdgePattern> = (0..rng.gen_range(0..4))
+            let edges: Vec<EdgePattern> = (0..rng.random_range(0..4))
                 .map(|_| EdgePattern {
                     name: None,
-                    from: rng.gen_range(0..n),
-                    to: rng.gen_range(0..n),
-                    directed: rng.gen_bool(0.6),
+                    from: rng.random_range(0..n),
+                    to: rng.random_range(0..n),
+                    directed: rng.random_bool(0.6),
                     types: vec![],
                     filter: None,
                     hops: None,

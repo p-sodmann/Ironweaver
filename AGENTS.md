@@ -8,6 +8,8 @@
   - The root crate (`src/`) — the PyO3 bindings (`_ironweaver` extension):
     Python classes, conversion of Python values, callbacks and errors.
   - `Cargo.toml` and `pyproject.toml` at the root configure the PyO3 build.
+  - Both crates use edition 2024; `rustfmt.toml` keeps `style_edition = "2021"`
+    so the formatting (import order, line breaks) stays as it was.
 - Python sources are in `python/ironweaver/`.
 - Examples live in the `examples/` directory.
 - Python helper utilities live at repo root (e.g., `embedding_utils.py`).
@@ -57,8 +59,9 @@ API, update `llms.txt`, the `.pyi` stubs and the docs together.
 CI (`.github/workflows/ci.yml`) also runs `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo audit`
 (ignored advisories, with reasons, are in `.cargo/audit.toml`), a check that
-the core does not depend on pyo3, a build with the minimum supported Rust
-version (1.85, `rust-version` in both Cargo.toml files), rustdoc with
+the core does not depend on pyo3, and builds with the latest stable Rust (the minimum
+supported version is 1.99, `rust-version` in both Cargo.toml files; raise it
+when a newer std API or language feature is worth using), rustdoc with
 `-D warnings` plus `cargo package` for the core (its README is the crate
 docs, so its example runs as a doctest), and pytest on Python 3.9-3.14
 (Linux) plus macOS and Windows. Run fmt and clippy before pushing.

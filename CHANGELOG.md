@@ -150,6 +150,12 @@ a query layer and database foundations.
 
 ### Changed
 
+- The minimum supported Rust version is 1.99; both crates use edition 2024.
+  `rand` is 0.9 (was 0.8): a seed still gives the same result on every run,
+  whatever the number of cores, but random walks, node2vec walks and Leiden
+  give different results for a given seed than builds with `rand` 0.8
+  (FastRP and sampled betweenness don't change).
+
 - Size limits raise errors instead of panicking: more than 2^32 - 2 node
   or edge slots gives `GraphError::Capacity` (`OverflowError` in Python). A
   slot whose generation counter runs out is retired, so a handle to a

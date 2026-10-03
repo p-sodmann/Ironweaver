@@ -336,8 +336,8 @@ impl RawProjection {
         // keep their insertion order
         let mut rows: Vec<&mut [(u32, f64)]> = Vec::with_capacity(nodes.len());
         let mut rest = &mut adj[..];
-        for w in start.windows(2) {
-            let (row, tail) = rest.split_at_mut((w[1] - w[0]) as usize);
+        for [from, to] in start.array_windows() {
+            let (row, tail) = rest.split_at_mut((to - from) as usize);
             rows.push(row);
             rest = tail;
         }

@@ -135,10 +135,10 @@ pub fn node_paths(py: Python<'_>, vertex: &Py<Vertex>, start: NodeIx, opts: Path
                 hops,
                 uniqueness,
                 |e, edge| {
-                    if let Some(w) = &wanted {
-                        if !edge.edge_type().is_some_and(|t| w.contains(&t)) {
-                            return Ok(false);
-                        }
+                    if let Some(w) = &wanted
+                        && !edge.edge_type().is_some_and(|t| w.contains(&t))
+                    {
+                        return Ok(false);
                     }
                     match &filter {
                         Some(f) => Ok(f.matches_edge(g, e)?),

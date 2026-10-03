@@ -33,19 +33,17 @@ impl ObservedDictionary {
 
         self.dict.insert(key.clone(), value.clone_ref(py));
 
-        if changed {
-            if let Some(callbacks) = self.callbacks.get(&key) {
-                for cb in callbacks {
-                    cb.call1(
-                        py,
-                        (
-                            self.node.as_ref().map(|n| n.clone_ref(py)),
-                            key.clone(),
-                            value.clone_ref(py),
-                            old_value.as_ref().map(|v| v.clone_ref(py)),
-                        ),
-                    )?;
-                }
+        if changed && let Some(callbacks) = self.callbacks.get(&key) {
+            for cb in callbacks {
+                cb.call1(
+                    py,
+                    (
+                        self.node.as_ref().map(|n| n.clone_ref(py)),
+                        key.clone(),
+                        value.clone_ref(py),
+                        old_value.as_ref().map(|v| v.clone_ref(py)),
+                    ),
+                )?;
             }
         }
 

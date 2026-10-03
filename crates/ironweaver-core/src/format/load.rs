@@ -437,10 +437,10 @@ impl<'a> LoadGraph<'a> {
             };
             if let Some(LoadValue(RawValue::List(items))) = node.attr.take_if("labels", all_strings) {
                 for item in items {
-                    if let RawValue::String(s) = item.0 {
-                        if !node.labels.iter().any(|l| l.as_str() == s.as_str()) {
-                            node.labels.push(s);
-                        }
+                    if let RawValue::String(s) = item.0
+                        && !node.labels.iter().any(|l| l.as_str() == s.as_str())
+                    {
+                        node.labels.push(s);
                     }
                 }
             }
@@ -528,10 +528,10 @@ impl<'a> LoadGraph<'a> {
             let ty = edge.edge_type().map(|t| graph.intern(t));
             edge_ixs.push(graph.add_edge_detached(from, to, id, ty, data)?);
         }
-        if let Some(LoadKind::String(next)) = self.metadata.get("next_edge_id").map(LoadValue::kind) {
-            if let Ok(next) = next.parse() {
-                graph.reserve_edge_ids(EdgeId(next));
-            }
+        if let Some(LoadKind::String(next)) = self.metadata.get("next_edge_id").map(LoadValue::kind)
+            && let Ok(next) = next.parse()
+        {
+            graph.reserve_edge_ids(EdgeId(next));
         }
         restore_indexes(&mut graph, &self.metadata)?;
 
@@ -540,19 +540,21 @@ impl<'a> LoadGraph<'a> {
         for (key, node) in &self.nodes.0 {
             let key = key.as_str();
             for id in &node.edge_ids {
-                if let Some(&i) = by_key.get(id.as_str()) {
-                    if !out_done[i] && self.edges.0[i].1.from_id() == key {
-                        graph.attach_out(edge_ixs[i]);
-                        out_done[i] = true;
-                    }
+                if let Some(&i) = by_key.get(id.as_str())
+                    && !out_done[i]
+                    && self.edges.0[i].1.from_id() == key
+                {
+                    graph.attach_out(edge_ixs[i]);
+                    out_done[i] = true;
                 }
             }
             for id in &node.inverse_edge_ids {
-                if let Some(&i) = by_key.get(id.as_str()) {
-                    if !in_done[i] && self.edges.0[i].1.to_id() == key {
-                        graph.attach_in(edge_ixs[i]);
-                        in_done[i] = true;
-                    }
+                if let Some(&i) = by_key.get(id.as_str())
+                    && !in_done[i]
+                    && self.edges.0[i].1.to_id() == key
+                {
+                    graph.attach_in(edge_ixs[i]);
+                    in_done[i] = true;
                 }
             }
         }

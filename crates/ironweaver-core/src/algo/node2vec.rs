@@ -75,14 +75,14 @@ impl<'a> Picker<'a> {
     fn pick(&self, u: u32, rng: &mut StdRng) -> Option<u32> {
         let row = self.p.out_neighbors(u);
         let i = match &self.cumulative {
-            None => rng.gen_range(0..row.len()),
+            None => rng.random_range(0..row.len()),
             Some(c) => {
                 let c = &c[self.row_start[u as usize]..self.row_start[u as usize + 1]];
                 let total = *c.last()?;
                 if total <= 0.0 {
                     return None;
                 }
-                let r = rng.gen::<f64>() * total;
+                let r = rng.random::<f64>() * total;
                 c.partition_point(|&x| x <= r).min(c.len() - 1)
             }
         };
@@ -116,7 +116,7 @@ fn walk(p: &Projection, picker: &Picker, start: u32, opts: &Node2Vec, rng: &mut 
                 } else {
                     out
                 };
-                if rng.gen::<f64>() * max_bias < bias {
+                if rng.random::<f64>() * max_bias < bias {
                     chosen = Some(x);
                     break;
                 }

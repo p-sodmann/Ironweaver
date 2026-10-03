@@ -491,10 +491,11 @@ impl<N, E> Graph<N, E> {
                     |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
                 for open in [false, true] {
                     for item in items.iter().filter(|e| open_range(e) == open) {
-                        if let Expr::Compare { path, .. } = item {
-                            if open && combined.contains(&path.as_slice()) {
-                                continue;
-                            }
+                        if let Expr::Compare { path, .. } = item
+                            && open
+                            && combined.contains(&path.as_slice())
+                        {
+                            continue;
                         }
                         plans.extend(self.index_plan(item));
                     }
@@ -944,10 +945,10 @@ impl<N: Attributes, E> Graph<N, E> {
         if !self.indexes.dirty.is_empty() {
             out.retain(|ix| !self.indexes.dirty.contains(ix));
             for &ix in &self.indexes.dirty {
-                if let Some(node) = self.node(ix) {
-                    if key_of(&node.data, &index.path)?.is_some_and(|k| fits(&k)) {
-                        out.push(ix);
-                    }
+                if let Some(node) = self.node(ix)
+                    && key_of(&node.data, &index.path)?.is_some_and(|k| fits(&k))
+                {
+                    out.push(ix);
                 }
             }
         }
@@ -1075,13 +1076,13 @@ mod tests {
     }
 
     fn random_value(rng: &mut StdRng) -> Option<Value> {
-        Some(match rng.gen_range(0..9) {
+        Some(match rng.random_range(0..9) {
             0 => return None,
-            1 => Value::Int(rng.gen_range(-3..4)),
-            2 => Value::Float(rng.gen_range(-6..8) as f64 / 2.0),
-            3 => Value::from(["a", "b", "c"][rng.gen_range(0..3)]),
-            4 => Value::Bool(rng.gen()),
-            5 => Value::Date(Date(rng.gen_range(0..4))),
+            1 => Value::Int(rng.random_range(-3..4)),
+            2 => Value::Float(rng.random_range(-6..8) as f64 / 2.0),
+            3 => Value::from(["a", "b", "c"][rng.random_range(0..3)]),
+            4 => Value::Bool(rng.random()),
+            5 => Value::Date(Date(rng.random_range(0..4))),
             6 => Value::List(vec![Value::Int(1)]),
             7 => Value::None,
             _ => Value::Float(f64::NAN),
@@ -1170,22 +1171,22 @@ mod tests {
         check(&g);
         for round in 0..30 {
             for _ in 0..5 {
-                match rng.gen_range(0..5) {
+                match rng.random_range(0..5) {
                     0 => {
-                        let ix = g.add_node(format!("m{round}_{}", rng.gen::<u32>()), Record::default()).unwrap();
+                        let ix = g.add_node(format!("m{round}_{}", rng.random::<u32>()), Record::default()).unwrap();
                         set(&mut g, ix, &mut rng);
                         live.push(ix);
                     }
                     1 if !live.is_empty() => {
-                        let ix = live.swap_remove(rng.gen_range(0..live.len()));
+                        let ix = live.swap_remove(rng.random_range(0..live.len()));
                         g.remove_node(ix);
                     }
                     2 if !live.is_empty() => {
-                        let ix = live[rng.gen_range(0..live.len())];
+                        let ix = live[rng.random_range(0..live.len())];
                         g.add_label(ix, "L").unwrap();
                     }
                     _ if !live.is_empty() => {
-                        let ix = live[rng.gen_range(0..live.len())];
+                        let ix = live[rng.random_range(0..live.len())];
                         set(&mut g, ix, &mut rng);
                     }
                     _ => {}
@@ -1368,22 +1369,22 @@ mod tests {
 
     /// One random change: add, remove, relabel or set a node.
     fn random_change(g: &mut G, live: &mut Vec<NodeIx>, rng: &mut StdRng) {
-        match rng.gen_range(0..5) {
+        match rng.random_range(0..5) {
             0 => {
-                let ix = g.add_node(format!("m{}", rng.gen::<u64>()), Record::default()).unwrap();
+                let ix = g.add_node(format!("m{}", rng.random::<u64>()), Record::default()).unwrap();
                 set(g, ix, rng);
                 live.push(ix);
             }
             1 if !live.is_empty() => {
-                let ix = live.swap_remove(rng.gen_range(0..live.len()));
+                let ix = live.swap_remove(rng.random_range(0..live.len()));
                 g.remove_node(ix);
             }
             2 if !live.is_empty() => {
-                let ix = live[rng.gen_range(0..live.len())];
+                let ix = live[rng.random_range(0..live.len())];
                 g.add_label(ix, "L").unwrap();
             }
             _ if !live.is_empty() => {
-                let ix = live[rng.gen_range(0..live.len())];
+                let ix = live[rng.random_range(0..live.len())];
                 set(g, ix, rng);
             }
             _ => {}
@@ -1416,7 +1417,7 @@ mod tests {
                     continue; // never read: install must find these
                 }
                 build.read::<_, _, GraphError>(&g, chunk.iter().copied()).unwrap();
-                for _ in 0..rng.gen_range(0..4) {
+                for _ in 0..rng.random_range(0..4) {
                     random_change(&mut g, &mut live, &mut rng);
                 }
                 if case % 10 == 7 && i == 2 {
@@ -1425,7 +1426,7 @@ mod tests {
                     }
                 }
             }
-            for _ in 0..rng.gen_range(0..4) {
+            for _ in 0..rng.random_range(0..4) {
                 random_change(&mut g, &mut live, &mut rng);
             }
             assert!(g.install_index(build).unwrap());
