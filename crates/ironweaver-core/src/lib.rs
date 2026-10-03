@@ -40,6 +40,7 @@ pub use error::GraphError;
 pub use expr::{CmpOp, Expr};
 pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
 pub use index::IndexBuild;
+pub use index::IndexPlan;
 pub use index::IndexStats;
 pub use ops::{AttrPatch, Op};
 pub use projection::Projection;

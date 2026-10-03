@@ -20,6 +20,12 @@
 // installing only looks at those (they are marked dirty), so the `&mut`
 // steps don't depend on the graph's size.
 //
+// Filters pick their candidates in two steps: `index_plan` decides how
+// (which index or label, a point lookup, a range, a union) from the filter
+// and O(1)-ish size estimates, without reading postings, and
+// `execute_index_plan` runs the plan. `index_candidates` is the two in a
+// row, so an `explain` built on `index_plan` says what a filter does.
+//
 // Only scalar values are indexed (see `Key`): a node whose value at the
 // path is missing, none, a list, a dict or NaN is not in the index, which
 // matches `Expr` semantics (such values never compare equal or ordered).
@@ -62,6 +68,13 @@ impl Posting {
                 }
                 set_is_empty(self)
             }
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Posting::One(_) => 1,
+            Posting::Many(set) => set.len(),
         }
     }
 
@@ -182,6 +195,30 @@ pub struct IndexStats {
     /// indexes): `entries` and `distinct_keys` count them as last indexed.
     pub dirty: usize,
 }
+
+/// How the candidate nodes for a filter are found through the indexes
+/// ([`Graph::index_plan`]); [`Graph::execute_index_plan`] runs it and
+/// [`Graph::index_plan_estimate`] estimates its size.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum IndexPlan {
+    /// Nothing can match (e.g. `x == [1]`, or a range with no room).
+    Empty,
+    /// The nodes carrying a label.
+    Label(String),
+    /// The nodes whose value at `path` equals `value` (a scalar).
+    Point { path: Vec<String>, value: Value },
+    /// The nodes whose value at `path` equals one of `values` (scalars).
+    In { path: Vec<String>, values: Vec<Value> },
+    /// The nodes whose value at `path` lies between the bounds (scalars of
+    /// one kind, at least one of them bounded).
+    Range { path: Vec<String>, lower: Bound<Value>, upper: Bound<Value> },
+    /// The candidates of any of the plans (an `Or`).
+    Union(Vec<IndexPlan>),
+}
+
+/// Keys a range estimate reads before settling for the index's size.
+const RANGE_ESTIMATE_KEYS: usize = 64;
 
 /// The nodes changed (added, touched or removed) since an index build
 /// began.
@@ -392,6 +429,145 @@ impl<N, E> Graph<N, E> {
             memory_bytes: index.memory_usage(),
             dirty,
         })
+    }
+
+    /// How [`Graph::index_candidates`] finds the candidates for `expr`
+    /// (`None`: the indexes can't narrow it down, so every node is a
+    /// candidate). Reads no postings: O(size of `expr`) index and label
+    /// lookups, plus at most a few dozen keys per range to estimate it. In
+    /// an `And`, the plan with the smallest [`Graph::index_plan_estimate`]
+    /// is picked (a lower and an upper bound on one indexed path make one
+    /// range), the rest is left to `expr.matches_node`.
+    pub fn index_plan(&self, expr: &Expr) -> Option<IndexPlan> {
+        match expr {
+            Expr::Const(false) => Some(IndexPlan::Empty),
+            Expr::Label(name) => Some(IndexPlan::Label(name.clone())),
+            Expr::Compare { path, op, value } if self.has_index(path) => {
+                let (lower, upper) = match op {
+                    CmpOp::Eq => {
+                        return Some(match Key::of(value) {
+                            Some(_) => IndexPlan::Point { path: path.clone(), value: value.clone() },
+                            // Never equal to a non-scalar (or NaN)
+                            None => IndexPlan::Empty,
+                        });
+                    }
+                    CmpOp::Ne => return None,
+                    CmpOp::Lt => (Bound::Unbounded, Bound::Excluded(value)),
+                    CmpOp::Le => (Bound::Unbounded, Bound::Included(value)),
+                    CmpOp::Gt => (Bound::Excluded(value), Bound::Unbounded),
+                    CmpOp::Ge => (Bound::Included(value), Bound::Unbounded),
+                };
+                Some(range_plan(path, lower, upper))
+            }
+            Expr::In { path, values } if self.has_index(path) => {
+                let values: Vec<Value> = values.iter().filter(|v| Key::of(v).is_some()).cloned().collect();
+                Some(if values.is_empty() { IndexPlan::Empty } else { IndexPlan::In { path: path.clone(), values } })
+            }
+            Expr::And(items) => {
+                // Candidate plans in order of preference on equal estimates:
+                // combined ranges, then the rest, then open-ended ranges
+                // (often most of the graph)
+                let mut plans = Vec::new();
+                let mut combined: Vec<&[String]> = Vec::new();
+                for a in items {
+                    let Expr::Compare { path, op: lo_op @ (CmpOp::Gt | CmpOp::Ge), value: lo } = a else { continue };
+                    if !self.has_index(path) {
+                        continue;
+                    }
+                    for b in items {
+                        let Expr::Compare { path: p, op: hi_op @ (CmpOp::Lt | CmpOp::Le), value: hi } = b else {
+                            continue;
+                        };
+                        if p != path {
+                            continue;
+                        }
+                        let lo = if *lo_op == CmpOp::Ge { Bound::Included(lo) } else { Bound::Excluded(lo) };
+                        let hi = if *hi_op == CmpOp::Le { Bound::Included(hi) } else { Bound::Excluded(hi) };
+                        plans.push(range_plan(path, lo, hi));
+                        combined.push(path);
+                    }
+                }
+                let open_range =
+                    |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
+                for open in [false, true] {
+                    for item in items.iter().filter(|e| open_range(e) == open) {
+                        if let Expr::Compare { path, .. } = item {
+                            if open && combined.contains(&path.as_slice()) {
+                                continue;
+                            }
+                        }
+                        plans.extend(self.index_plan(item));
+                    }
+                }
+                let mut best: Option<(IndexPlan, usize)> = None;
+                for plan in plans {
+                    let size = self.index_plan_estimate(&plan);
+                    if best.as_ref().is_none_or(|(_, b)| size < *b) {
+                        best = Some((plan, size));
+                    }
+                }
+                best.map(|(plan, _)| plan)
+            }
+            Expr::Or(items) => {
+                let mut plans = Vec::new();
+                for item in items {
+                    match self.index_plan(item)? {
+                        IndexPlan::Empty => {}
+                        plan => plans.push(plan),
+                    }
+                }
+                Some(match plans.len() {
+                    0 => IndexPlan::Empty,
+                    1 => plans.pop().expect("one plan"),
+                    _ => IndexPlan::Union(plans),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Estimated number of candidates `plan` finds, without reading
+    /// postings: exact for labels and point lookups (as of the last
+    /// reindex, like [`Graph::index_stats`]), for a range exact if it spans
+    /// at most a few dozen keys and the index's size otherwise, for a union
+    /// the sum of its parts. A lookup that will scan (every node dirty, or
+    /// no index on the path) is estimated at the node count.
+    pub fn index_plan_estimate(&self, plan: &IndexPlan) -> usize {
+        let index = |path: &[String]| match self.indexes.position(path) {
+            Some(at) if !self.indexes.all_dirty => Some(&self.indexes.list[at]),
+            _ => None,
+        };
+        let point = |path: &[String], value: &Value| match (index(path), Key::of(value)) {
+            (_, None) => 0,
+            (Some(i), Some(key)) => i.map.get(&key).map_or(0, Posting::len),
+            (None, Some(_)) => self.node_count(),
+        };
+        match plan {
+            IndexPlan::Empty => 0,
+            IndexPlan::Label(name) => self.label_count(name),
+            IndexPlan::Point { path, value } => point(path, value),
+            IndexPlan::In { path, values } => values.iter().map(|v| point(path, v)).fold(0, usize::saturating_add),
+            IndexPlan::Range { path, lower, upper } => match Range::new(lower.as_ref(), upper.as_ref()) {
+                Err(_) => 0,
+                Ok(r) if r.empty => 0,
+                Ok(r) => match index(path) {
+                    None => self.node_count(),
+                    Some(i) => {
+                        let mut total = 0;
+                        for (n, (k, p)) in i.map.range((r.lo.clone(), r.hi.clone())).enumerate() {
+                            if n == RANGE_ESTIMATE_KEYS {
+                                return i.keys.len();
+                            }
+                            if k.same_kind(&r.kind) {
+                                total += p.len();
+                            }
+                        }
+                        total
+                    }
+                },
+            },
+            IndexPlan::Union(plans) => plans.iter().map(|p| self.index_plan_estimate(p)).fold(0, usize::saturating_add),
+        }
     }
 
     /// Whether there is an index on `path`.
@@ -760,15 +936,10 @@ impl<N: Attributes, E> Graph<N, E> {
         collect: impl FnOnce(&BTreeMap<Key, Posting>, &mut Vec<NodeIx>),
     ) -> Result<Vec<NodeIx>, N::Error> {
         let index = &self.indexes.list[at];
-        let mut out = Vec::new();
         if self.indexes.all_dirty {
-            for (ix, node) in self.nodes() {
-                if key_of(&node.data, &index.path)?.is_some_and(|k| fits(&k)) {
-                    out.push(ix);
-                }
-            }
-            return Ok(out);
+            return self.scan(&index.path, fits);
         }
+        let mut out = Vec::new();
         collect(&index.map, &mut out);
         if !self.indexes.dirty.is_empty() {
             out.retain(|ix| !self.indexes.dirty.contains(ix));
@@ -786,96 +957,68 @@ impl<N: Attributes, E> Graph<N, E> {
 
     /// A superset of the nodes matching `expr` found through indexes (and
     /// the label index), in slot order; `None` if the indexes can't narrow
-    /// it down. Check each candidate with `expr.matches_node`.
+    /// it down. Check each candidate with `expr.matches_node`. The same as
+    /// running [`Graph::index_plan`] with [`Graph::execute_index_plan`].
     pub fn index_candidates(&self, expr: &Expr) -> Result<Option<Vec<NodeIx>>, N::Error> {
-        Ok(match expr {
-            Expr::Const(false) => Some(Vec::new()),
-            Expr::Label(name) => Some(self.nodes_with_label(name)),
-            Expr::Compare { path, op, value } if self.has_index(path) => {
-                let range = match op {
-                    CmpOp::Eq => return self.find_nodes(path, value),
-                    CmpOp::Ne => return Ok(None),
-                    CmpOp::Lt => (Bound::Unbounded, Bound::Excluded(value)),
-                    CmpOp::Le => (Bound::Unbounded, Bound::Included(value)),
-                    CmpOp::Gt => (Bound::Excluded(value), Bound::Unbounded),
-                    CmpOp::Ge => (Bound::Included(value), Bound::Unbounded),
-                };
-                match Range::new(range.0, range.1) {
-                    Ok(r) => Some(self.range_lookup(self.indexes.position(path).expect("indexed"), &r)?),
-                    // Comparisons with non-scalars (or NaN) are never true
-                    Err(_) => Some(Vec::new()),
-                }
-            }
-            Expr::In { path, values } if self.has_index(path) => {
+        match self.index_plan(expr) {
+            Some(plan) => self.execute_index_plan(&plan).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// The candidates of `plan`, in slot order (exact while nodes are
+    /// dirty, like [`Graph::find_nodes`]). A lookup on a path without an
+    /// index scans the nodes.
+    pub fn execute_index_plan(&self, plan: &IndexPlan) -> Result<Vec<NodeIx>, N::Error> {
+        Ok(match plan {
+            IndexPlan::Empty => Vec::new(),
+            IndexPlan::Label(name) => self.nodes_with_label(name),
+            IndexPlan::Point { path, value } => self.point_lookup(path, value)?,
+            IndexPlan::In { path, values } => {
                 let mut all = Vec::new();
                 for v in values {
-                    all.extend(self.find_nodes(path, v)?.expect("indexed"));
+                    all.extend(self.point_lookup(path, v)?);
                 }
-                Some(sorted_unique(all))
+                sorted_unique(all)
             }
-            Expr::And(items) => {
-                // The smallest narrowed-down set (the rest is checked later)
-                let mut best: Option<Vec<NodeIx>> = None;
-                // A lower and an upper bound on one indexed path: one range
-                let mut combined: Vec<&[String]> = Vec::new();
-                for a in items {
-                    let Expr::Compare { path, op: lo_op @ (CmpOp::Gt | CmpOp::Ge), value: lo } = a else { continue };
-                    let Some(at) = self.indexes.position(path) else { continue };
-                    for b in items {
-                        let Expr::Compare { path: p, op: hi_op @ (CmpOp::Lt | CmpOp::Le), value: hi } = b else {
-                            continue;
-                        };
-                        if p != path {
-                            continue;
-                        }
-                        let lo = if *lo_op == CmpOp::Ge { Bound::Included(lo) } else { Bound::Excluded(lo) };
-                        let hi = if *hi_op == CmpOp::Le { Bound::Included(hi) } else { Bound::Excluded(hi) };
-                        let c = match Range::new(lo, hi) {
-                            Ok(r) => self.range_lookup(at, &r)?,
-                            // Bounds of different kinds (or NaN): nothing lies between
-                            Err(_) => Vec::new(),
-                        };
-                        combined.push(path);
-                        if best.as_ref().is_none_or(|b| c.len() < b.len()) {
-                            best = Some(c);
-                        }
-                    }
-                }
-                // Then point lookups and the rest; open-ended ranges (often
-                // most of the graph) only if nothing narrower was found
-                let open_range =
-                    |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
-                for pass in [false, true] {
-                    if pass && best.is_some() {
-                        break;
-                    }
-                    for item in items.iter().filter(|e| open_range(e) == pass) {
-                        if let Expr::Compare { path, .. } = item {
-                            if combined.contains(&path.as_slice()) {
-                                continue;
-                            }
-                        }
-                        if let Some(c) = self.index_candidates(item)? {
-                            if best.as_ref().is_none_or(|b| c.len() < b.len()) {
-                                best = Some(c);
-                            }
-                        }
-                    }
-                }
-                best
-            }
-            Expr::Or(items) => {
+            IndexPlan::Range { path, lower, upper } => match Range::new(lower.as_ref(), upper.as_ref()) {
+                Ok(r) => match self.indexes.position(path) {
+                    Some(at) => self.range_lookup(at, &r)?,
+                    None => self.scan(path, |k| r.contains(k))?,
+                },
+                // Comparisons with non-scalars (or NaN) are never true
+                Err(_) => Vec::new(),
+            },
+            IndexPlan::Union(plans) => {
                 let mut all = Vec::new();
-                for item in items {
-                    match self.index_candidates(item)? {
-                        Some(c) => all.extend(c),
-                        None => return Ok(None),
-                    }
+                for p in plans {
+                    all.extend(self.execute_index_plan(p)?);
                 }
-                Some(sorted_unique(all))
+                sorted_unique(all)
             }
-            _ => None,
         })
+    }
+
+    fn point_lookup(&self, path: &[String], value: &Value) -> Result<Vec<NodeIx>, N::Error> {
+        match self.find_nodes(path, value)? {
+            Some(found) => Ok(found),
+            None => match Key::of(value) {
+                Some(key) => self.scan(path, |k| *k == key),
+                None => Ok(Vec::new()),
+            },
+        }
+    }
+
+    /// The nodes whose current key at `path` satisfies `fits`, in slot
+    /// order, read from every node.
+    fn scan(&self, path: &[String], fits: impl Fn(&Key) -> bool) -> Result<Vec<NodeIx>, N::Error> {
+        let mut out = Vec::new();
+        for (ix, node) in self.nodes() {
+            if key_of(&node.data, path)?.is_some_and(|k| fits(&k)) {
+                out.push(ix);
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -900,6 +1043,15 @@ impl IndexBuild {
             }
         }
         Ok(())
+    }
+}
+
+/// The plan for values of `path` between the bounds: `Empty` if the bounds
+/// can't hold anything (non-scalar, NaN, different kinds, lower above upper).
+fn range_plan(path: &[String], lower: Bound<&Value>, upper: Bound<&Value>) -> IndexPlan {
+    match Range::new(lower, upper) {
+        Ok(r) if !r.empty => IndexPlan::Range { path: path.to_vec(), lower: lower.cloned(), upper: upper.cloned() },
+        _ => IndexPlan::Empty,
     }
 }
 
@@ -980,6 +1132,18 @@ mod tests {
                     assert_eq!(got, want, "{e:?}");
                 }
                 None => assert!(matches!(e, Expr::Compare { op: CmpOp::Ne, .. } | Expr::Or(_)), "{e:?}"),
+            }
+            // The plan is what index_candidates runs; clean estimates bound it
+            if let Some(plan) = g.index_plan(e) {
+                let c = g.execute_index_plan(&plan).unwrap();
+                assert_eq!(Some(&c), g.index_candidates(e).unwrap().as_ref());
+                let estimate = g.index_plan_estimate(&plan);
+                if !g.indexes_dirty() {
+                    assert!(estimate >= c.len(), "{plan:?}: {estimate} < {}", c.len());
+                    if matches!(plan, IndexPlan::Point { .. } | IndexPlan::Label(_) | IndexPlan::Empty) {
+                        assert_eq!(estimate, c.len(), "{plan:?}");
+                    }
+                }
             }
         }
         // Exact lookups are exact (not just supersets)
@@ -1084,6 +1248,79 @@ mod tests {
         assert_eq!((stats.entries, stats.distinct_keys, stats.dirty), (5, 4, 0));
         let _ = g.nodes_mut();
         assert_eq!(g.index_stats(&p("x")).unwrap().dirty, g.node_count());
+    }
+
+    #[test]
+    fn plans_and_estimates() {
+        let mut g = G::new();
+        for i in 0..200 {
+            let attrs = Record::with_attr([("x", Value::Int(i % 100)), ("y", Value::Int(i))]);
+            let ix = g.add_node(format!("n{i}"), attrs).unwrap();
+            if i == 0 {
+                g.add_label(ix, "L").unwrap();
+            }
+        }
+        for path in ["x", "y"] {
+            g.create_index::<GraphError>(&p(path)).unwrap();
+        }
+        let cmp = |path: &str, op, v: i64| Expr::Compare { path: p(path), op, value: Value::Int(v) };
+        let point = |path: &str, v: i64| IndexPlan::Point { path: p(path), value: Value::Int(v) };
+
+        assert_eq!(g.index_plan(&cmp("x", CmpOp::Eq, 7)), Some(point("x", 7)));
+        assert_eq!(g.index_plan_estimate(&point("x", 7)), 2);
+        assert_eq!(g.index_plan(&cmp("z", CmpOp::Eq, 7)), None); // no index
+        assert_eq!(g.index_plan(&cmp("x", CmpOp::Ne, 7)), None);
+        let list = Expr::Compare { path: p("x"), op: CmpOp::Eq, value: Value::List(vec![]) };
+        assert_eq!(g.index_plan(&list), Some(IndexPlan::Empty));
+        // Lower and upper bound on one path: one range, estimated exactly
+        let both = Expr::And(vec![cmp("y", CmpOp::Ge, 10), cmp("y", CmpOp::Lt, 20)]);
+        let range = IndexPlan::Range {
+            path: p("y"),
+            lower: Bound::Included(Value::Int(10)),
+            upper: Bound::Excluded(Value::Int(20)),
+        };
+        assert_eq!(g.index_plan(&both), Some(range.clone()));
+        assert_eq!(g.index_plan_estimate(&range), 10);
+        assert_eq!(
+            g.index_plan(&Expr::And(vec![cmp("y", CmpOp::Gt, 20), cmp("y", CmpOp::Lt, 10)])),
+            Some(IndexPlan::Empty)
+        );
+        // Wide ranges are estimated at the index's size
+        let wide = g.index_plan(&cmp("y", CmpOp::Ge, 0)).unwrap();
+        assert_eq!(g.index_plan_estimate(&wide), 200);
+        // The smallest estimate wins in an And: the label, then the point
+        let e = Expr::And(vec![cmp("y", CmpOp::Ge, 0), cmp("x", CmpOp::Eq, 7), Expr::Label("L".into())]);
+        assert_eq!(g.index_plan(&e), Some(IndexPlan::Label("L".into())));
+        let e = Expr::And(vec![cmp("y", CmpOp::Ge, 0), cmp("x", CmpOp::Eq, 7), Expr::Label("M".into())]);
+        assert_eq!(g.index_plan(&e), Some(IndexPlan::Label("M".into())));
+        let e = Expr::And(vec![both.clone(), cmp("x", CmpOp::Eq, 7)]);
+        assert_eq!(g.index_plan(&e), Some(point("x", 7)));
+        // A narrow open-ended range can win too
+        let e = Expr::And(vec![cmp("x", CmpOp::Eq, 7), cmp("y", CmpOp::Ge, 199)]);
+        let top = IndexPlan::Range { path: p("y"), lower: Bound::Included(Value::Int(199)), upper: Bound::Unbounded };
+        assert_eq!(g.index_plan(&e), Some(top));
+        // Or: a union (empty parts dropped), or None if a part can't be narrowed
+        let e = Expr::Or(vec![cmp("x", CmpOp::Eq, 7), list.clone(), cmp("y", CmpOp::Eq, 3)]);
+        let union = IndexPlan::Union(vec![point("x", 7), point("y", 3)]);
+        assert_eq!(g.index_plan(&e), Some(union.clone()));
+        assert_eq!(g.index_plan_estimate(&union), 3);
+        assert_eq!(g.execute_index_plan(&union).unwrap().len(), 3);
+        assert_eq!(g.index_plan(&Expr::Or(vec![cmp("x", CmpOp::Eq, 7), cmp("x", CmpOp::Ne, 1)])), None);
+        let e = Expr::In { path: p("x"), values: vec![Value::Int(1), Value::List(vec![]), Value::Int(2)] };
+        let plan = IndexPlan::In { path: p("x"), values: vec![Value::Int(1), Value::Int(2)] };
+        assert_eq!(g.index_plan(&e), Some(plan.clone()));
+        assert_eq!(g.index_plan_estimate(&plan), 4);
+        // A plan on a path without an index scans
+        let unindexed =
+            IndexPlan::Range { path: p("z"), lower: Bound::Unbounded, upper: Bound::Included(Value::Int(0)) };
+        assert_eq!(g.index_plan_estimate(&unindexed), 200);
+        assert!(g.execute_index_plan(&unindexed).unwrap().is_empty());
+        let y3 = point("y", 3);
+        g.drop_index(&p("y"));
+        assert_eq!(g.execute_index_plan(&y3).unwrap(), [g.node_ix("n3").unwrap()]);
+        // Plans serialize (for an explain)
+        let json = sonic_rs::to_string(&union).unwrap();
+        assert_eq!(sonic_rs::from_str::<IndexPlan>(&json).unwrap(), union);
     }
 
     #[test]

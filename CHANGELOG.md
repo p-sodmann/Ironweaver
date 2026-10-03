@@ -128,6 +128,13 @@ a query layer and database foundations.
   networkit (`benchmarks/compare_libraries.py`).
 - `Graph::index_stats(path)` / `Vertex.index_stats(name)`: an index's
   entry count, distinct keys, memory and dirty node count, in O(1).
+- `Graph::index_plan(expr)` (core): how `index_candidates` would find a
+  filter's candidates (`IndexPlan`: a label, a point, `In` or range lookup
+  on an index, a union, or nothing), without reading postings, with
+  `index_plan_estimate` for its size and `execute_index_plan` to run it.
+  `index_candidates` is the two in a row, so an `explain` can't disagree
+  with it. In an `And`, the part with the smallest estimate is now used
+  (it used to look up every part and keep the smallest result).
 
 ### Changed
 
