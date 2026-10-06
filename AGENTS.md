@@ -98,6 +98,12 @@ Below is a quick guide to notable functions and where to find them.
   property index its keys and postings). Code that changes those must
   update the counter (capacity before / after, also on removal from a hash
   set) or call `recount`; a randomized test checks it against a recount.
+  Payloads (`HeapSize`, in `heap_size.rs`) are counted only after
+  `count_payloads` (the `format` loaders call it): `Payloads` keeps node
+  and edge payload sizes; `node_mut` / `edge_mut` / `nodes_mut` /
+  `edges_mut` mark them dirty and `settle_payloads` (on add / remove and
+  after `apply`) counts them again. Code that adds or drops payloads
+  outside those paths must update it too.
 - **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
   Posting>` + each node's key): `create_index` / `create_index_with_keys`,
   `find_nodes`, `find_nodes_in_range`, `index_stats` (O(1) sizes),

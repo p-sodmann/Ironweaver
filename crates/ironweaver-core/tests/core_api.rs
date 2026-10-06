@@ -222,10 +222,14 @@ fn format_round_trips() {
     let (loaded, loaded_meta) = format::from_json(&json).unwrap();
     assert_eq!(loaded_meta, meta);
     assert_same(&g, &loaded);
+    // Loaded graphs count their payloads (the raw bytes alone are 256)
+    assert!(loaded.counts_payloads() && !g.counts_payloads());
+    assert!(loaded.memory_usage() > g.memory_usage() + 256);
 
     let bin = format::to_binary(&g, &meta, false).unwrap();
     let (loaded, _) = format::from_binary(&bin).unwrap();
     assert_same(&g, &loaded);
+    assert!(format::from_binary_reader(bin.as_slice()).unwrap().0.counts_payloads());
 
     let half = format::to_binary(&g, &meta, true).unwrap();
     let (loaded, _) = format::from_binary(&half).unwrap();

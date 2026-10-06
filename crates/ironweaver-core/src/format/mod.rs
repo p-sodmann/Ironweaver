@@ -234,6 +234,8 @@ pub fn to_binary(graph: &Graph<Record, Record>, meta: &Attrs, half: bool) -> Res
 }
 
 /// Decode a JSON document into a `Graph<Record, Record>` and its graph-level meta.
+/// The graph counts its payloads in `memory_usage` (see [`Graph::count_payloads`]),
+/// as do the graphs the other loaders return.
 pub fn from_json(bytes: &[u8]) -> Result<(Graph<Record, Record>, Attrs), GraphError> {
     records(&LoadGraph::from_json_slice(bytes)?)
 }
@@ -255,6 +257,7 @@ pub fn from_binary_reader(reader: impl std::io::Read) -> Result<(Graph<Record, R
         |e| Ok(Record { attr: e.attr().to_attrs(), meta: e.meta().to_attrs() }),
     )?;
     graph.flush_indexes()?;
+    graph.count_payloads();
     Ok((graph, meta.to_attrs()))
 }
 
@@ -264,6 +267,7 @@ fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphE
         |e| Ok(Record { attr: e.attr().to_attrs(), meta: e.meta().to_attrs() }),
     )?;
     graph.flush_indexes()?;
+    graph.count_payloads();
     Ok((graph, doc.meta().to_attrs()))
 }
 

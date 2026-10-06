@@ -115,6 +115,8 @@ pub struct RawProjection {
     weighted: bool,
     nodes: Vec<NodeIx>,
     ids: Vec<String>,
+    /// Heap bytes of `ids`' strings.
+    id_bytes: usize,
     dense: Vec<u32>,
 }
 
@@ -148,11 +150,14 @@ impl Projection {
         let mut dense = vec![NONE; g.node_bound()];
         let mut nodes = Vec::with_capacity(g.node_count());
         let mut ids = Vec::with_capacity(g.node_count());
+        let mut id_bytes = 0;
         for (ix, node) in g.nodes() {
             if node_ok(ix, node)? {
                 dense[ix.slot()] = nodes.len() as u32;
                 nodes.push(ix);
-                ids.push(node.id().to_owned());
+                let id = node.id().to_owned();
+                id_bytes += id.capacity();
+                ids.push(id);
             }
         }
 
@@ -216,7 +221,7 @@ impl Projection {
             }
         }
         drop(kept);
-        Ok(RawProjection { direction, edge_count, start, adj, weighted, nodes, ids, dense })
+        Ok(RawProjection { direction, edge_count, start, adj, weighted, nodes, ids, id_bytes, dense })
     }
 
     /// Number of nodes.
@@ -328,9 +333,21 @@ impl Projection {
 }
 
 impl RawProjection {
+    /// Approximate heap memory used, in bytes. O(1). `finish` sorts in
+    /// place, so this is also about what finishing holds at its peak, on
+    /// top of the projection it returns.
+    pub fn memory_usage(&self) -> usize {
+        use std::mem::size_of;
+        size_of::<u32>() * (self.start.capacity() + self.dense.capacity())
+            + size_of::<(u32, f64)>() * self.adj.capacity()
+            + size_of::<NodeIx>() * self.nodes.capacity()
+            + size_of::<String>() * self.ids.capacity()
+            + self.id_bytes
+    }
+
     /// Sort the neighbour lists (in parallel where it pays off).
     pub fn finish(self) -> Projection {
-        let RawProjection { direction, edge_count, start, mut adj, weighted, nodes, ids, dense } = self;
+        let RawProjection { direction, edge_count, start, mut adj, weighted, nodes, ids, dense, .. } = self;
 
         // Sort each row by neighbour; the sort is stable, so parallel edges
         // keep their insertion order
@@ -373,6 +390,19 @@ mod tests {
         g.add_edge(a, b, weighted(1.0)).unwrap();
         g.add_edge(b, c, weighted(5.0)).unwrap();
         (g, ix)
+    }
+
+    #[test]
+    fn raw_projection_reports_its_memory() {
+        let (g, _) = graph();
+        let cost = EdgeCost::weighted(None, None);
+        let raw = Projection::collect::<_, _, GraphError>(&g, Direction::Both, &cost, |_, _| Ok(true), |_, _| Ok(true))
+            .unwrap();
+        let m = raw.memory_usage();
+        // 10 adjacency entries, 4 row starts, 3 nodes and their ids
+        assert!(m >= 10 * 16 + 4 * 4 + 3 * (8 + 24 + 1), "{m}");
+        let p = raw.finish();
+        assert!(m >= p.memory_usage() / 2, "{m} {}", p.memory_usage());
     }
 
     #[test]

@@ -117,6 +117,14 @@ impl<N: AttrPatch, E: AttrPatch> Graph<N, E> {
     /// Apply one op; returns the ops that undo it (apply them in order).
     /// On error the graph is unchanged.
     pub fn apply(&mut self, op: Op<N, E>) -> Result<Vec<Op<N, E>>, GraphError> {
+        let undo = self.apply_op(op)?;
+        // Count the payloads the op set (handed out through `node_mut` /
+        // `edge_mut`), so they don't pile up as dirty
+        self.settle_payloads();
+        Ok(undo)
+    }
+
+    fn apply_op(&mut self, op: Op<N, E>) -> Result<Vec<Op<N, E>>, GraphError> {
         Ok(match op {
             Op::AddNode { id, labels, data } => {
                 if self.contains_node(&id) {

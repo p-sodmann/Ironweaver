@@ -13,6 +13,7 @@
 //! - [`budget`]: [`Budget`] limits on visited nodes, examined edges and results for traversals, path expansion and walks.
 //! - [`format`](mod@format): saving and loading ([`Record`] graphs), format version 2.
 //! - [`value`], [`record`]: [`Value`], [`Record`] and the [`Attributes`] trait.
+//! - [`heap_size`]: [`HeapSize`], payload memory for [`Graph::memory_usage`].
 
 pub mod algo;
 pub mod batch;
@@ -23,6 +24,7 @@ pub mod error;
 pub mod expr;
 pub mod format;
 pub mod graph;
+pub mod heap_size;
 pub mod index;
 pub mod ops;
 pub mod pathfinding;
@@ -39,6 +41,7 @@ pub use direction::Direction;
 pub use error::GraphError;
 pub use expr::{CmpOp, Expr};
 pub use graph::{Edge, EdgeId, EdgeIx, Graph, Node, NodeIx, Symbol, Symbols};
+pub use heap_size::HeapSize;
 pub use index::IndexBuild;
 pub use index::IndexPlan;
 pub use index::IndexStats;
