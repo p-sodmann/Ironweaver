@@ -29,12 +29,15 @@ fn triangles_and_degrees(u: &Undirected) -> Vec<(u64, usize)> {
     // forward(a), so nothing is cleared between nodes
     let piece = (n / (8 * rayon::current_num_threads())).max(64);
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("triangles", Some(n as u64));
     let counts = (0..n as u32)
         .into_par_iter()
         .with_min_len(piece)
         .fold(
             || (vec![0u64; n], vec![0u32; n]),
             |(mut count, mut mark), a| {
+                report.tick(a as usize, n);
                 let fa = &forward[a as usize];
                 if fa.len() < 2 || stop.requested() {
                     return (count, mark);
@@ -138,7 +141,14 @@ pub fn core_number(p: &Projection) -> Vec<u32> {
         order[pos[v]] = v as u32;
         next[degree[v]] += 1;
     }
+    let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("core number", Some(n as u64));
     for i in 0..n {
+        report.tick(i, n);
+        if i.is_multiple_of(crate::cancel::TICK) && stop.requested() {
+            break;
+        }
         let v = order[i];
         for &w in u.neighbors(v) {
             let (w, dv) = (w as usize, degree[v as usize]);

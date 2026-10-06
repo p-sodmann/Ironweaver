@@ -136,6 +136,10 @@ Below is a quick guide to notable functions and where to find them.
   sequential loops call now and then), `stop()` -> `Stop`: parallel loops
   check `requested()`, sequential searches `poll()`. A new long-running
   loop must check one and bail out early (the partial result is dropped).
+  Progress the same way: `run_with_progress` installs a `Progress`
+  (phase, done, total; read with `snapshot` from any thread), algorithms
+  fetch `progress()` -> `Report` and call `start` / `add` / `tick` where
+  they check the stop flag.
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
   graphs), the `Attributes` trait, `Lookup`, and `lookup` (the attribute

@@ -75,6 +75,34 @@ under `cancel::run(&token, || ...)` and call `token.cancel()` from another
 thread: it stops soon after and `run` returns `Err(GraphError::Interrupted)`.
 Without a token the checks cost nothing measurable.
 
+To watch how far an algorithm has got, run it with
+`cancel::run_with_progress(&token, &progress, || ...)` and read
+`progress.snapshot()` from another thread: its phase (`"pagerank"`,
+`"leiden"`, ...), the units done (iterations, rounds, runs, nodes, sources)
+and the phase's total.
+
+```rust
+use ironweaver_core::algo::{pagerank, PageRank};
+use ironweaver_core::cancel::{run_with_progress, Progress, Token};
+use ironweaver_core::pathfinding::EdgeCost;
+use ironweaver_core::{Direction, Graph, GraphError, Projection, Record};
+
+fn main() -> Result<(), GraphError> {
+    let mut g: Graph<Record, Record> = Graph::new();
+    let a = g.add_node("a", Record::default())?;
+    let b = g.add_node("b", Record::default())?;
+    g.add_edge(a, b, Record::default())?;
+    let p = Projection::build::<_, _, GraphError>(&g, Direction::Out, &EdgeCost::Unit)?;
+
+    let progress = Progress::new(); // a clone goes to the thread that watches
+    let opts = PageRank { tol: 0.0, max_iter: 50, ..Default::default() };
+    run_with_progress(&Token::new(), &progress, || pagerank(&p, &opts))??;
+    let s = progress.snapshot();
+    assert_eq!((s.phase, s.done, s.total), ("pagerank", 50, Some(50)));
+    Ok(())
+}
+```
+
 ## Budgets
 
 Depth limits don't bound work: a depth-2 traversal from a node with a

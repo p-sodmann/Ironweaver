@@ -18,6 +18,8 @@ fn per_node(p: &Projection, weighted: bool, f: impl Fn(&Search) -> f64 + Sync + 
     }
     let n = p.node_count();
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("closeness", Some(n as u64));
     Ok((0..n as u32)
         .into_par_iter()
         .with_min_len(16)
@@ -29,6 +31,7 @@ fn per_node(p: &Projection, weighted: bool, f: impl Fn(&Search) -> f64 + Sync + 
                 }
                 // Distances to u: search against the edges
                 s.run(p, u, weighted, true);
+                report.add(1);
                 f(s)
             },
         )
