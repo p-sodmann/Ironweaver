@@ -748,7 +748,29 @@ impl<N, E> Graph<N, E> {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
                 if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
-                    to.inc.retain(|&x| x != e);
+                    if to.inc.len() == 1 {
+                        to.inc.clear();
+                        continue;
+                    }
+                    if node.out.len() == 1 {
+                        to.inc.retain(|&x| x != e);
+                        continue;
+                    }
+                    // Remove parallel edges in this same pass. Later visits
+                    // through node.out find their slots already empty, so each
+                    // target's incoming list is scanned only once.
+                    to.inc.retain(|&x| {
+                        if x == e {
+                            return false;
+                        }
+                        if self.edges.get(x.slot, x.generation).is_some_and(|edge| edge.from == ix) {
+                            if let Some(edge) = self.edges.remove(x.slot, x.generation) {
+                                self.edge_index.remove(edge.id);
+                            }
+                            return false;
+                        }
+                        true
+                    });
                 }
             }
         }
@@ -756,7 +778,27 @@ impl<N, E> Graph<N, E> {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
                 if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
-                    from.out.retain(|&x| x != e);
+                    if from.out.len() == 1 {
+                        from.out.clear();
+                        continue;
+                    }
+                    if node.inc.len() == 1 {
+                        from.out.retain(|&x| x != e);
+                        continue;
+                    }
+                    // As above, drain all parallel edges from this source.
+                    from.out.retain(|&x| {
+                        if x == e {
+                            return false;
+                        }
+                        if self.edges.get(x.slot, x.generation).is_some_and(|edge| edge.to == ix) {
+                            if let Some(edge) = self.edges.remove(x.slot, x.generation) {
+                                self.edge_index.remove(edge.id);
+                            }
+                            return false;
+                        }
+                        true
+                    });
                 }
             }
         }
