@@ -1,0 +1,5882 @@
+{
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "cpu_affinity": 0,
+  "binaries": {
+    "baseline": "/workspace/ironweaver-perf/rebuilt/baseline/bench_remove_node",
+    "candidate": "/workspace/ironweaver-perf/rebuilt/candidate/bench_remove_node"
+  },
+  "binary_sha256": {
+    "baseline": "bec59f7748237db8d2745f5ce6daf0d96954f9782181e29ccca9d194aa2083bd",
+    "candidate": "5525c3e6cd6985f0c1fd76b9c06b3bd61a0008d6bf51498926cd2450f695e3c6"
+  },
+  "pairs": 20,
+  "samples_per_process": 3,
+  "warmup_samples": 3,
+  "results": [
+    {
+      "shape": "parallel-out",
+      "edges": 1000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 279486.375,
+        "candidate_median_ns": 12129.75,
+        "baseline_range_ns": [
+          241436.75,
+          627731.5
+        ],
+        "candidate_range_ns": [
+          11912.75,
+          37053.5
+        ],
+        "paired_geomean_speedup": 23.616936864032642,
+        "speedup_95pct_ci": [
+          20.659444741197937,
+          27.025431972942016
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            325005.5,
+            247487.5,
+            302580.75
+          ],
+          "candidate": [
+            11886.25,
+            11912.75,
+            12053.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            11627.25,
+            11949.0,
+            19064.25
+          ],
+          "baseline": [
+            352331.0,
+            283375.75,
+            240829.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            627731.5,
+            843741.25,
+            277121.5
+          ],
+          "candidate": [
+            12084.0,
+            12021.0,
+            12134.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            11870.5,
+            12151.75,
+            12312.25
+          ],
+          "baseline": [
+            252560.0,
+            240430.25,
+            266081.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            256458.5,
+            352553.5,
+            249647.0
+          ],
+          "candidate": [
+            12378.25,
+            12273.0,
+            12280.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            11936.5,
+            12002.25,
+            11869.5
+          ],
+          "baseline": [
+            291528.5,
+            328147.75,
+            406084.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            468357.0,
+            376333.75,
+            315283.5
+          ],
+          "candidate": [
+            12135.75,
+            12180.25,
+            12125.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12195.75,
+            12017.5,
+            11982.5
+          ],
+          "baseline": [
+            262854.75,
+            348407.75,
+            1003782.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            263774.5,
+            260719.25,
+            259739.5
+          ],
+          "candidate": [
+            12220.75,
+            11929.5,
+            12095.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12363.5,
+            19291.75,
+            12389.0
+          ],
+          "baseline": [
+            241889.25,
+            304410.0,
+            265707.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            242425.0,
+            311744.0,
+            258322.5
+          ],
+          "candidate": [
+            12463.5,
+            12399.75,
+            12135.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12307.75,
+            12275.25,
+            12181.0
+          ],
+          "baseline": [
+            323256.75,
+            253032.5,
+            239924.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            357185.0,
+            421430.75,
+            673512.25
+          ],
+          "candidate": [
+            11856.5,
+            12232.0,
+            11916.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            11787.0,
+            11946.5,
+            170431.5
+          ],
+          "baseline": [
+            246557.25,
+            275597.0,
+            340998.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            368095.5,
+            240527.75,
+            637426.75
+          ],
+          "candidate": [
+            12037.0,
+            37053.5,
+            40042.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12543.25,
+            16253.0,
+            12075.0
+          ],
+          "baseline": [
+            293487.75,
+            260225.25,
+            256118.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            240118.25,
+            241436.75,
+            292965.0
+          ],
+          "candidate": [
+            12021.75,
+            12158.5,
+            12106.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12045.75,
+            12147.5,
+            12123.75
+          ],
+          "baseline": [
+            304632.25,
+            273815.25,
+            334316.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            245523.75,
+            306838.5,
+            241303.5
+          ],
+          "candidate": [
+            12228.25,
+            12204.0,
+            12152.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            39001.5,
+            12004.75,
+            12224.5
+          ],
+          "baseline": [
+            341606.25,
+            315320.5,
+            260672.75
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "parallel-out",
+      "edges": 4000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 4468861.0,
+        "candidate_median_ns": 46818.75,
+        "baseline_range_ns": [
+          3848598.0,
+          5592747.75
+        ],
+        "candidate_range_ns": [
+          45943.75,
+          121349.25
+        ],
+        "paired_geomean_speedup": 87.56083844979557,
+        "speedup_95pct_ci": [
+          77.90060938437877,
+          96.77302728644537
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            20989142.75,
+            5592747.75,
+            4325852.75
+          ],
+          "candidate": [
+            46033.0,
+            46397.5,
+            54387.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            45082.5,
+            47210.5,
+            50566.25
+          ],
+          "baseline": [
+            4280176.0,
+            4192637.5,
+            4604723.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            3868852.5,
+            4449545.0,
+            4012475.0
+          ],
+          "candidate": [
+            46883.5,
+            46147.5,
+            47186.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            46544.0,
+            46904.5,
+            52364.0
+          ],
+          "baseline": [
+            3848598.0,
+            4089838.25,
+            3809019.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            3637933.5,
+            5371899.0,
+            5459667.75
+          ],
+          "candidate": [
+            46738.0,
+            50628.75,
+            46754.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            198110.0,
+            121349.25,
+            96312.0
+          ],
+          "baseline": [
+            7254387.25,
+            5492222.5,
+            4268893.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            5216054.0,
+            5649291.0,
+            4005435.25
+          ],
+          "candidate": [
+            70644.75,
+            59042.75,
+            51093.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            72462.25,
+            57323.25,
+            45984.5
+          ],
+          "baseline": [
+            5602656.5,
+            3913917.5,
+            4703354.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            4501228.75,
+            5476725.75,
+            5034040.0
+          ],
+          "candidate": [
+            53432.25,
+            46058.0,
+            44825.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            46016.5,
+            98499.5,
+            103992.25
+          ],
+          "baseline": [
+            4605349.75,
+            4944855.5,
+            4349938.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            4136219.25,
+            5613373.25,
+            4037550.0
+          ],
+          "candidate": [
+            45943.75,
+            45843.75,
+            46408.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            93258.5,
+            46368.5,
+            46544.0
+          ],
+          "baseline": [
+            4466271.25,
+            4551175.75,
+            3958603.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            4113878.0,
+            4755173.5,
+            4448771.25
+          ],
+          "candidate": [
+            45239.0,
+            340716.5,
+            49381.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            87134.5,
+            46736.5,
+            60787.5
+          ],
+          "baseline": [
+            4663470.25,
+            4200297.5,
+            4146207.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            3834683.25,
+            4922264.25,
+            4501245.25
+          ],
+          "candidate": [
+            60542.5,
+            46463.25,
+            45912.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            59982.25,
+            46279.25,
+            46892.25
+          ],
+          "baseline": [
+            4001728.5,
+            7071291.25,
+            5528219.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            4324205.5,
+            4774354.5,
+            3991451.5
+          ],
+          "candidate": [
+            45938.75,
+            50394.5,
+            46203.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            52137.0,
+            46704.75,
+            46588.5
+          ],
+          "baseline": [
+            3979492.5,
+            4471450.75,
+            5646195.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            3712988.0,
+            4803847.75,
+            4426812.0
+          ],
+          "candidate": [
+            46111.75,
+            46990.5,
+            46429.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            46341.75,
+            45939.25,
+            49311.25
+          ],
+          "baseline": [
+            3791448.5,
+            4380918.5,
+            4192722.0
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "parallel-out",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 68282927.0,
+        "candidate_median_ns": 217962.5,
+        "baseline_range_ns": [
+          64212052.0,
+          121397831.75
+        ],
+        "candidate_range_ns": [
+          197717.75,
+          494724.0
+        ],
+        "paired_geomean_speedup": 323.8094498743818,
+        "speedup_95pct_ci": [
+          293.9588525737216,
+          358.0812002353486
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            87386698.75,
+            81078602.25,
+            65339995.5
+          ],
+          "candidate": [
+            201037.0,
+            229768.5,
+            238987.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            207967.25,
+            217710.5,
+            228579.5
+          ],
+          "baseline": [
+            65266955.0,
+            72670746.75,
+            65416264.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            65597333.5,
+            65566699.75,
+            73620532.5
+          ],
+          "candidate": [
+            213511.5,
+            251240.75,
+            360040.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            199257.75,
+            206430.75,
+            211760.75
+          ],
+          "baseline": [
+            66796230.5,
+            64371772.75,
+            65109660.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            68535682.25,
+            67784773.0,
+            63648516.25
+          ],
+          "candidate": [
+            201645.25,
+            194156.25,
+            232596.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            199943.5,
+            297275.75,
+            250250.75
+          ],
+          "baseline": [
+            63572323.75,
+            64942619.5,
+            64629939.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            66669165.0,
+            69115305.5,
+            64792141.25
+          ],
+          "candidate": [
+            214335.0,
+            309962.25,
+            226445.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            197717.75,
+            201595.75,
+            195761.25
+          ],
+          "baseline": [
+            63567801.5,
+            74246581.0,
+            69181604.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            64419519.25,
+            63576147.75,
+            70478808.25
+          ],
+          "candidate": [
+            201240.25,
+            265806.0,
+            225115.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            218564.5,
+            197391.5,
+            203976.0
+          ],
+          "baseline": [
+            66488200.0,
+            68310552.5,
+            66309418.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            69746124.5,
+            74768261.0,
+            65223039.25
+          ],
+          "candidate": [
+            244005.75,
+            260227.25,
+            218542.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            227553.75,
+            216221.75,
+            243568.75
+          ],
+          "baseline": [
+            64169665.75,
+            65981288.5,
+            68505835.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            68895695.75,
+            71882789.25,
+            85253899.5
+          ],
+          "candidate": [
+            228961.5,
+            210013.25,
+            204990.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            200267.75,
+            221307.0,
+            206584.25
+          ],
+          "baseline": [
+            71622620.5,
+            70093584.25,
+            67974590.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            117711719.75,
+            111442518.0,
+            67586008.75
+          ],
+          "candidate": [
+            247725.0,
+            246920.0,
+            269108.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            218214.5,
+            220622.25,
+            199580.75
+          ],
+          "baseline": [
+            71692232.75,
+            64451200.5,
+            68781081.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            64212052.0,
+            65999146.25,
+            63974427.0
+          ],
+          "candidate": [
+            201226.0,
+            243524.5,
+            207597.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            515250.0,
+            239267.25,
+            494724.0
+          ],
+          "baseline": [
+            64282643.75,
+            100998421.75,
+            96445526.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            96416118.0,
+            104968663.25,
+            67621704.5
+          ],
+          "candidate": [
+            206649.5,
+            229622.5,
+            200275.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            211402.0,
+            205613.5,
+            288148.75
+          ],
+          "baseline": [
+            126475683.5,
+            121397831.75,
+            86842881.25
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "parallel-in",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 66094032.625,
+        "candidate_median_ns": 250365.0,
+        "baseline_range_ns": [
+          63304219.5,
+          110618363.25
+        ],
+        "candidate_range_ns": [
+          210958.0,
+          752649.25
+        ],
+        "paired_geomean_speedup": 262.8912589479077,
+        "speedup_95pct_ci": [
+          227.26308917471275,
+          296.05302425468534
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            70377172.75,
+            140610443.75,
+            110618363.25
+          ],
+          "candidate": [
+            237740.0,
+            643311.5,
+            241134.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            764677.25,
+            752649.25,
+            232826.0
+          ],
+          "baseline": [
+            71663462.5,
+            67926966.25,
+            75307436.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            76305605.75,
+            67803364.5,
+            67917732.5
+          ],
+          "candidate": [
+            227740.75,
+            205227.75,
+            306989.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            220195.0,
+            282100.0,
+            278467.25
+          ],
+          "baseline": [
+            66622109.75,
+            66897626.75,
+            63999084.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            63246219.75,
+            63524265.0,
+            63304219.5
+          ],
+          "candidate": [
+            209447.0,
+            213914.25,
+            216377.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            288903.5,
+            260891.25,
+            328762.75
+          ],
+          "baseline": [
+            73817183.25,
+            64832447.0,
+            64622588.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            66952886.75,
+            63573376.5,
+            64128522.25
+          ],
+          "candidate": [
+            216968.0,
+            264949.0,
+            253824.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            254467.25,
+            215098.5,
+            210244.25
+          ],
+          "baseline": [
+            63226233.25,
+            63894035.25,
+            63786973.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            69312532.75,
+            65891888.0,
+            63239464.0
+          ],
+          "candidate": [
+            268357.75,
+            214580.5,
+            216049.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            246905.75,
+            210407.25,
+            275983.25
+          ],
+          "baseline": [
+            64935518.25,
+            64683973.5,
+            73373436.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            66684688.5,
+            65441985.0,
+            64853229.5
+          ],
+          "candidate": [
+            207166.25,
+            238563.5,
+            221016.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            221923.0,
+            214179.5,
+            337954.75
+          ],
+          "baseline": [
+            69540822.0,
+            66811075.5,
+            65783446.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            65061540.25,
+            68562453.0,
+            65727929.75
+          ],
+          "candidate": [
+            208868.25,
+            217257.75,
+            210958.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            226382.75,
+            283462.0,
+            281239.5
+          ],
+          "baseline": [
+            63388307.25,
+            66867897.5,
+            63011990.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            63544631.0,
+            66365801.75,
+            66296177.25
+          ],
+          "candidate": [
+            220491.75,
+            219090.25,
+            260416.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            243809.75,
+            346447.75,
+            267560.0
+          ],
+          "baseline": [
+            68135637.0,
+            74597312.0,
+            71119893.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            64718672.0,
+            66394762.75,
+            64819927.5
+          ],
+          "candidate": [
+            338393.0,
+            235575.25,
+            273096.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            271113.5,
+            302467.75,
+            249081.5
+          ],
+          "baseline": [
+            64063321.25,
+            78611482.75,
+            78845946.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            68515810.5,
+            91136444.25,
+            97357032.25
+          ],
+          "candidate": [
+            266511.25,
+            502238.0,
+            222817.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            1139066.0,
+            281179.0,
+            447592.75
+          ],
+          "baseline": [
+            75986147.75,
+            75868162.0,
+            78081680.5
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "bidirectional",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 33490975.625,
+        "candidate_median_ns": 255087.0,
+        "baseline_range_ns": [
+          32487831.5,
+          47687388.25
+        ],
+        "candidate_range_ns": [
+          215001.0,
+          485115.75
+        ],
+        "paired_geomean_speedup": 132.93220770328622,
+        "speedup_95pct_ci": [
+          120.97676698210532,
+          145.48499552042
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            32537254.5,
+            33557191.5,
+            35793390.25
+          ],
+          "candidate": [
+            273896.75,
+            253418.25,
+            221376.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            229464.0,
+            357638.25,
+            279595.75
+          ],
+          "baseline": [
+            33015210.0,
+            32627929.5,
+            36928335.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            33634639.0,
+            33277356.0,
+            32840861.25
+          ],
+          "candidate": [
+            227195.25,
+            258275.0,
+            256755.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            327976.75,
+            243270.0,
+            804493.75
+          ],
+          "baseline": [
+            31688155.75,
+            33636542.0,
+            33296571.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            32878013.0,
+            32706854.5,
+            31833502.0
+          ],
+          "candidate": [
+            290167.5,
+            286991.5,
+            219973.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            241666.75,
+            297995.25,
+            233987.75
+          ],
+          "baseline": [
+            33408132.75,
+            33130820.5,
+            33855634.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            34519335.25,
+            37375370.0,
+            50465602.0
+          ],
+          "candidate": [
+            1147576.75,
+            485115.75,
+            349390.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            218579.0,
+            238782.25,
+            450217.5
+          ],
+          "baseline": [
+            53212100.0,
+            47687388.25,
+            39048840.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            41600752.25,
+            40411080.5,
+            39047593.75
+          ],
+          "candidate": [
+            219593.75,
+            222238.25,
+            237131.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            270395.0,
+            228060.25,
+            284584.25
+          ],
+          "baseline": [
+            33530021.75,
+            32910866.0,
+            34121524.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            32996665.5,
+            35497680.5,
+            32218349.0
+          ],
+          "candidate": [
+            224033.75,
+            240166.5,
+            234871.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            275633.75,
+            214999.5,
+            493259.5
+          ],
+          "baseline": [
+            38585943.75,
+            39867040.5,
+            48502043.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            33579126.75,
+            32869347.0,
+            34369213.25
+          ],
+          "candidate": [
+            266653.0,
+            221718.75,
+            248702.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            248250.0,
+            261455.0,
+            247773.5
+          ],
+          "baseline": [
+            33679342.0,
+            37822861.25,
+            33075427.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            32006290.0,
+            33356213.25,
+            33654482.5
+          ],
+          "candidate": [
+            285982.75,
+            353445.5,
+            272212.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            332440.0,
+            246250.5,
+            285128.0
+          ],
+          "baseline": [
+            37027083.75,
+            33448298.5,
+            36537284.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            55773686.0,
+            41331511.75,
+            33108875.75
+          ],
+          "candidate": [
+            215111.0,
+            272122.0,
+            213313.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            215001.0,
+            210820.75,
+            226214.75
+          ],
+          "baseline": [
+            33351954.25,
+            34922380.5,
+            31835768.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            32402125.0,
+            34297680.0,
+            32487831.5
+          ],
+          "candidate": [
+            217464.0,
+            249905.0,
+            236729.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            288325.25,
+            303705.25,
+            232054.25
+          ],
+          "baseline": [
+            34543884.5,
+            32658925.5,
+            33451929.5
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "mixed",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 12492826.125,
+        "candidate_median_ns": 412499.0,
+        "baseline_range_ns": [
+          11274939.25,
+          23207128.5
+        ],
+        "candidate_range_ns": [
+          340933.0,
+          796019.75
+        ],
+        "paired_geomean_speedup": 31.821198897104328,
+        "speedup_95pct_ci": [
+          28.459905181527994,
+          36.00837492320758
+        ],
+        "candidate_faster_pairs": 20
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            12333130.75,
+            11615014.0,
+            10845460.75
+          ],
+          "candidate": [
+            365736.0,
+            361134.5,
+            353071.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            402335.0,
+            415215.5,
+            390008.5
+          ],
+          "baseline": [
+            11389778.75,
+            10294747.25,
+            12796928.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            12161350.5,
+            14381816.5,
+            12580137.0
+          ],
+          "candidate": [
+            413863.75,
+            392787.25,
+            374162.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            339420.25,
+            342531.0,
+            449357.25
+          ],
+          "baseline": [
+            13988052.25,
+            28214553.0,
+            23207128.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            20431862.25,
+            22162647.25,
+            19921782.25
+          ],
+          "candidate": [
+            391406.75,
+            423203.75,
+            538650.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            2223057.75,
+            525617.75,
+            454701.0
+          ],
+          "baseline": [
+            12859624.5,
+            12189911.0,
+            13948313.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            13288996.25,
+            11628834.5,
+            11883267.5
+          ],
+          "candidate": [
+            406652.5,
+            628911.25,
+            558844.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            354014.75,
+            400955.0,
+            366341.5
+          ],
+          "baseline": [
+            13274444.5,
+            14367549.25,
+            15402771.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            20109426.0,
+            20005747.25,
+            18593960.0
+          ],
+          "candidate": [
+            796019.75,
+            1385337.25,
+            360403.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            377428.25,
+            370534.5,
+            374941.0
+          ],
+          "baseline": [
+            13445125.5,
+            13009049.0,
+            11488985.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            16735960.5,
+            15751240.25,
+            15703654.5
+          ],
+          "candidate": [
+            383385.0,
+            382445.75,
+            400355.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            392954.0,
+            368115.75,
+            350873.25
+          ],
+          "baseline": [
+            14759698.0,
+            15502738.25,
+            15466459.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            16471303.5,
+            15672649.75,
+            16447025.25
+          ],
+          "candidate": [
+            494194.25,
+            422655.75,
+            490695.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            765237.75,
+            458841.25,
+            447244.75
+          ],
+          "baseline": [
+            13363410.75,
+            12405515.25,
+            12120127.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            11017904.25,
+            11394683.0,
+            11799398.25
+          ],
+          "candidate": [
+            400857.25,
+            441723.75,
+            405784.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            488339.25,
+            471526.0,
+            479420.75
+          ],
+          "baseline": [
+            11381405.75,
+            11870601.75,
+            11508568.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            12261110.0,
+            11593845.75,
+            11327852.5
+          ],
+          "candidate": [
+            368253.25,
+            424005.25,
+            424887.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            340474.25,
+            340933.0,
+            361088.5
+          ],
+          "baseline": [
+            10833034.0,
+            11274939.25,
+            11879390.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            11317501.75,
+            11302680.0,
+            11236624.75
+          ],
+          "candidate": [
+            419213.75,
+            405735.25,
+            552660.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            448354.75,
+            389986.75,
+            452401.75
+          ],
+          "baseline": [
+            12887862.5,
+            11646080.5,
+            10571689.75
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "star",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 289574.375,
+        "candidate_median_ns": 228325.5,
+        "baseline_range_ns": [
+          247805.0,
+          467084.25
+        ],
+        "candidate_range_ns": [
+          207387.5,
+          282408.25
+        ],
+        "paired_geomean_speedup": 1.2839953935442874,
+        "speedup_95pct_ci": [
+          1.1961739808344294,
+          1.4001706172365975
+        ],
+        "candidate_faster_pairs": 19
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            394207.5,
+            235833.25,
+            295163.0
+          ],
+          "candidate": [
+            282408.25,
+            232599.25,
+            430459.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            445858.25,
+            204167.25,
+            234114.0
+          ],
+          "baseline": [
+            240288.25,
+            348953.5,
+            320087.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            358737.0,
+            330076.75,
+            383583.0
+          ],
+          "candidate": [
+            214945.75,
+            321262.0,
+            241807.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            221816.75,
+            226764.0,
+            315504.25
+          ],
+          "baseline": [
+            279735.5,
+            290498.25,
+            247572.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            249750.25,
+            272887.25,
+            307236.75
+          ],
+          "candidate": [
+            331257.25,
+            225084.5,
+            246506.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            222572.25,
+            272728.0,
+            208040.75
+          ],
+          "baseline": [
+            349124.0,
+            277471.5,
+            243620.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            301207.0,
+            295173.0,
+            292197.75
+          ],
+          "candidate": [
+            214088.5,
+            272867.25,
+            245447.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            254808.75,
+            218138.75,
+            238565.0
+          ],
+          "baseline": [
+            366656.0,
+            261872.5,
+            291364.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            309545.75,
+            289166.0,
+            242331.0
+          ],
+          "candidate": [
+            258481.0,
+            217054.5,
+            205864.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            316065.5,
+            229887.0,
+            211928.5
+          ],
+          "baseline": [
+            275028.0,
+            416905.75,
+            245659.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            241566.25,
+            289982.75,
+            368466.0
+          ],
+          "candidate": [
+            203184.75,
+            242403.25,
+            317559.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            209401.25,
+            215434.5,
+            230072.25
+          ],
+          "baseline": [
+            252330.75,
+            279007.5,
+            253223.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            274979.5,
+            266397.75,
+            238915.0
+          ],
+          "candidate": [
+            217949.75,
+            251942.25,
+            224880.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            269360.0,
+            238996.5,
+            270842.25
+          ],
+          "baseline": [
+            372005.0,
+            321292.75,
+            252307.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            239918.75,
+            289787.0,
+            258518.75
+          ],
+          "candidate": [
+            770685.0,
+            266339.5,
+            261013.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            208187.0,
+            219247.5,
+            208774.0
+          ],
+          "baseline": [
+            242347.25,
+            343968.25,
+            323875.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            254540.75,
+            246897.0,
+            247805.0
+          ],
+          "candidate": [
+            219544.5,
+            220832.0,
+            255725.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            202115.75,
+            244317.5,
+            207387.5
+          ],
+          "baseline": [
+            285296.5,
+            288942.5,
+            252182.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            374997.75,
+            257433.25,
+            377307.75
+          ],
+          "candidate": [
+            209114.5,
+            256630.75,
+            217835.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            211500.5,
+            204553.25,
+            241534.0
+          ],
+          "baseline": [
+            762551.0,
+            243326.5,
+            467084.25
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "shuffled-star",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 463625.25,
+        "candidate_median_ns": 337608.875,
+        "baseline_range_ns": [
+          407966.5,
+          599118.0
+        ],
+        "candidate_range_ns": [
+          289051.5,
+          481435.25
+        ],
+        "paired_geomean_speedup": 1.3571189822989764,
+        "speedup_95pct_ci": [
+          1.257101474466736,
+          1.4661773872290658
+        ],
+        "candidate_faster_pairs": 18
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            620470.75,
+            458463.5,
+            432178.5
+          ],
+          "candidate": [
+            412424.75,
+            481435.25,
+            682833.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            489919.0,
+            356608.75,
+            371767.25
+          ],
+          "baseline": [
+            701270.5,
+            482566.5,
+            434332.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            419670.75,
+            498509.5,
+            410830.25
+          ],
+          "candidate": [
+            531625.25,
+            314490.75,
+            321433.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            362868.5,
+            369614.75,
+            296567.25
+          ],
+          "baseline": [
+            458182.0,
+            612247.25,
+            406443.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            435143.75,
+            562289.75,
+            414249.5
+          ],
+          "candidate": [
+            314834.0,
+            938683.75,
+            447856.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            296863.75,
+            302005.5,
+            339822.75
+          ],
+          "baseline": [
+            483577.75,
+            503576.75,
+            569791.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            464357.25,
+            599118.0,
+            630867.75
+          ],
+          "candidate": [
+            302942.5,
+            308731.25,
+            267643.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            340416.5,
+            348773.0,
+            352023.0
+          ],
+          "baseline": [
+            378602.0,
+            608944.5,
+            423100.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            784225.75,
+            472344.5,
+            464845.5
+          ],
+          "candidate": [
+            367567.25,
+            326751.25,
+            285429.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            322800.0,
+            420508.5,
+            311442.0
+          ],
+          "baseline": [
+            395061.5,
+            503418.25,
+            418311.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            523121.75,
+            632572.5,
+            470749.75
+          ],
+          "candidate": [
+            607370.5,
+            437025.5,
+            275573.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            301447.0,
+            373880.5,
+            284949.25
+          ],
+          "baseline": [
+            383377.5,
+            503583.75,
+            417406.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            487955.0,
+            458815.5,
+            468787.0
+          ],
+          "candidate": [
+            275966.0,
+            337627.0,
+            320975.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            762664.0,
+            337574.75,
+            350893.5
+          ],
+          "baseline": [
+            591959.0,
+            670356.0,
+            437688.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            470735.25,
+            505602.5,
+            752407.75
+          ],
+          "candidate": [
+            365217.0,
+            469931.25,
+            391340.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            295475.25,
+            395516.75,
+            356847.5
+          ],
+          "baseline": [
+            473584.0,
+            595423.25,
+            452321.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            443651.0,
+            413148.5,
+            503095.0
+          ],
+          "candidate": [
+            297047.25,
+            294119.25,
+            398347.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            349545.25,
+            348466.5,
+            339999.0
+          ],
+          "baseline": [
+            431535.25,
+            401924.75,
+            407966.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            422968.5,
+            479844.75,
+            402636.75
+          ],
+          "candidate": [
+            289051.5,
+            274324.25,
+            311350.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            316285.5,
+            330033.75,
+            296451.5
+          ],
+          "baseline": [
+            406852.25,
+            577585.0,
+            534353.0
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "star",
+      "edges": 4,
+      "batch": 1000,
+      "summary": {
+        "baseline_median_ns": 138.8595,
+        "candidate_median_ns": 134.2235,
+        "baseline_range_ns": [
+          135.683,
+          198.884
+        ],
+        "candidate_range_ns": [
+          131.108,
+          196.699
+        ],
+        "paired_geomean_speedup": 1.0521832684754806,
+        "speedup_95pct_ci": [
+          0.99284758282637,
+          1.1104047145189135
+        ],
+        "candidate_faster_pairs": 17
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            135.461,
+            139.118,
+            139.266
+          ],
+          "candidate": [
+            143.389,
+            229.201,
+            136.073
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            131.785,
+            133.97,
+            132.638
+          ],
+          "baseline": [
+            135.683,
+            135.084,
+            138.303
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            150.001,
+            135.218,
+            135.909
+          ],
+          "candidate": [
+            131.018,
+            131.108,
+            203.594
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            131.688,
+            133.04,
+            132.04
+          ],
+          "baseline": [
+            141.758,
+            143.481,
+            143.372
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            137.596,
+            137.129,
+            140.154
+          ],
+          "candidate": [
+            132.28,
+            132.323,
+            132.907
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            141.475,
+            131.279,
+            131.189
+          ],
+          "baseline": [
+            136.342,
+            140.22,
+            138.601
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            311.298,
+            136.919,
+            172.805
+          ],
+          "candidate": [
+            148.798,
+            158.267,
+            131.48
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            130.983,
+            152.528,
+            132.865
+          ],
+          "baseline": [
+            137.086,
+            137.264,
+            137.225
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            140.522,
+            141.838,
+            159.981
+          ],
+          "candidate": [
+            131.322,
+            188.36,
+            132.288
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            132.74,
+            133.216,
+            132.955
+          ],
+          "baseline": [
+            154.666,
+            153.434,
+            154.037
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            144.111,
+            355.018,
+            139.722
+          ],
+          "candidate": [
+            140.191,
+            133.813,
+            132.306
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            224.286,
+            196.699,
+            141.9
+          ],
+          "baseline": [
+            135.932,
+            139.375,
+            157.453
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            135.392,
+            250.061,
+            138.548
+          ],
+          "candidate": [
+            189.455,
+            132.941,
+            134.634
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            138.559,
+            185.171,
+            131.681
+          ],
+          "baseline": [
+            139.497,
+            151.037,
+            141.912
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            1589.009,
+            198.884,
+            159.832
+          ],
+          "candidate": [
+            131.268,
+            137.579,
+            203.308
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            211.846,
+            134.866,
+            132.722
+          ],
+          "baseline": [
+            168.563,
+            192.579,
+            159.17
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            136.724,
+            136.706,
+            136.934
+          ],
+          "candidate": [
+            141.738,
+            132.021,
+            136.162
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            134.066,
+            137.813,
+            138.171
+          ],
+          "baseline": [
+            224.005,
+            137.034,
+            136.378
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            136.452,
+            137.329,
+            137.655
+          ],
+          "candidate": [
+            142.059,
+            132.551,
+            131.324
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            140.246,
+            135.328,
+            134.024
+          ],
+          "baseline": [
+            136.232,
+            216.77,
+            136.261
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "self-loops",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 189116.625,
+        "candidate_median_ns": 204808.5,
+        "baseline_range_ns": [
+          174206.25,
+          429204.75
+        ],
+        "candidate_range_ns": [
+          173975.5,
+          907537.0
+        ],
+        "paired_geomean_speedup": 0.9855924951292105,
+        "speedup_95pct_ci": [
+          0.819963763138755,
+          1.1571000972712522
+        ],
+        "candidate_faster_pairs": 10
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            540853.25,
+            429204.75,
+            278092.0
+          ],
+          "candidate": [
+            735639.5,
+            205134.0,
+            174900.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            206564.75,
+            202982.25,
+            184224.75
+          ],
+          "baseline": [
+            222545.0,
+            172163.25,
+            186035.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            179753.0,
+            326144.75,
+            180831.25
+          ],
+          "candidate": [
+            241224.5,
+            195056.5,
+            222159.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            180870.5,
+            259352.75,
+            220560.0
+          ],
+          "baseline": [
+            174206.25,
+            175486.5,
+            171244.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            272233.0,
+            218992.75,
+            175647.0
+          ],
+          "candidate": [
+            211944.5,
+            228536.75,
+            206286.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            173551.75,
+            173975.5,
+            209929.25
+          ],
+          "baseline": [
+            194761.75,
+            175926.25,
+            174741.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            172970.75,
+            201395.0,
+            231451.5
+          ],
+          "candidate": [
+            163774.25,
+            237524.75,
+            225031.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            174513.75,
+            172097.0,
+            258355.25
+          ],
+          "baseline": [
+            278995.5,
+            191202.5,
+            177013.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            185378.25,
+            175740.75,
+            227199.5
+          ],
+          "candidate": [
+            165005.75,
+            251194.0,
+            342085.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            183723.25,
+            521205.75,
+            163553.75
+          ],
+          "baseline": [
+            824371.75,
+            341584.75,
+            217129.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            293704.25,
+            179911.75,
+            542759.75
+          ],
+          "candidate": [
+            204483.0,
+            233772.75,
+            195663.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            179111.75,
+            193866.25,
+            185788.5
+          ],
+          "baseline": [
+            452840.5,
+            196621.5,
+            220572.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            206561.0,
+            279510.0,
+            187622.0
+          ],
+          "candidate": [
+            167491.5,
+            188339.25,
+            227929.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            239960.0,
+            222963.5,
+            204560.5
+          ],
+          "baseline": [
+            200929.75,
+            172193.5,
+            174348.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            203070.25,
+            180608.5,
+            177267.5
+          ],
+          "candidate": [
+            190718.5,
+            187639.0,
+            248899.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            165850.0,
+            308086.5,
+            212544.0
+          ],
+          "baseline": [
+            187030.75,
+            172104.75,
+            232321.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            267936.5,
+            923639.75,
+            255399.25
+          ],
+          "candidate": [
+            907537.0,
+            171136.75,
+            993231.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            173640.5,
+            205735.25,
+            218533.25
+          ],
+          "baseline": [
+            258388.0,
+            197805.25,
+            252433.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            182413.75,
+            190411.5,
+            170375.75
+          ],
+          "candidate": [
+            175492.5,
+            170144.0,
+            182299.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            186709.0,
+            192200.0,
+            221535.25
+          ],
+          "baseline": [
+            174710.75,
+            206872.25,
+            180798.75
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "isolated",
+      "edges": 0,
+      "batch": 1000,
+      "summary": {
+        "baseline_median_ns": 73.708,
+        "candidate_median_ns": 74.38149999999999,
+        "baseline_range_ns": [
+          71.036,
+          81.583
+        ],
+        "candidate_range_ns": [
+          73.515,
+          171.302
+        ],
+        "paired_geomean_speedup": 0.8705770531577951,
+        "speedup_95pct_ci": [
+          0.7641706313704473,
+          0.9673022708217277
+        ],
+        "candidate_faster_pairs": 5
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            70.859,
+            77.839,
+            73.9
+          ],
+          "candidate": [
+            144.241,
+            73.699,
+            74.114
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            153.308,
+            165.912,
+            256.859
+          ],
+          "baseline": [
+            75.088,
+            74.727,
+            78.897
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            74.128,
+            70.82,
+            90.72
+          ],
+          "candidate": [
+            211.884,
+            152.791,
+            171.302
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            73.901,
+            95.327,
+            104.12
+          ],
+          "baseline": [
+            71.414,
+            83.823,
+            71.436
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            71.059,
+            71.144,
+            84.411
+          ],
+          "candidate": [
+            74.804,
+            73.535,
+            73.724
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            75.096,
+            73.717,
+            73.693
+          ],
+          "baseline": [
+            105.13,
+            77.849,
+            79.392
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            73.266,
+            78.797,
+            72.895
+          ],
+          "candidate": [
+            73.876,
+            101.058,
+            74.353
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            73.548,
+            74.86,
+            80.589
+          ],
+          "baseline": [
+            151.89,
+            80.17,
+            81.583
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            75.781,
+            95.191,
+            80.054
+          ],
+          "candidate": [
+            141.47,
+            73.649,
+            156.599
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            75.348,
+            74.841,
+            186.088
+          ],
+          "baseline": [
+            129.951,
+            73.439,
+            76.521
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            77.178,
+            77.014,
+            76.811
+          ],
+          "candidate": [
+            74.186,
+            73.705,
+            74.405
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            74.407,
+            92.126,
+            73.99
+          ],
+          "baseline": [
+            241.893,
+            72.772,
+            76.04
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            73.099,
+            73.744,
+            73.516
+          ],
+          "candidate": [
+            73.579,
+            74.039,
+            73.786
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            152.922,
+            95.892,
+            71.445
+          ],
+          "baseline": [
+            71.15,
+            71.231,
+            82.617
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            73.189,
+            73.529,
+            73.146
+          ],
+          "candidate": [
+            74.356,
+            90.266,
+            73.944
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            73.515,
+            74.926,
+            73.451
+          ],
+          "baseline": [
+            72.982,
+            73.333,
+            73.088
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            73.122,
+            73.514,
+            73.319
+          ],
+          "candidate": [
+            75.834,
+            76.084,
+            79.308
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            74.01,
+            74.282,
+            84.701
+          ],
+          "baseline": [
+            71.269,
+            83.463,
+            71.626
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            75.649,
+            74.77,
+            74.921
+          ],
+          "candidate": [
+            77.358,
+            76.795,
+            80.098
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            73.641,
+            73.721,
+            73.931
+          ],
+          "baseline": [
+            158.01,
+            71.036,
+            70.914
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "leaf-out",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 12559.25,
+        "candidate_median_ns": 11132.875,
+        "baseline_range_ns": [
+          8928.5,
+          37982.5
+        ],
+        "candidate_range_ns": [
+          9647.75,
+          37396.5
+        ],
+        "paired_geomean_speedup": 1.06684800060038,
+        "speedup_95pct_ci": [
+          0.8761963167787186,
+          1.3132932934597141
+        ],
+        "candidate_faster_pairs": 10
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9516.25,
+            9217.0,
+            9732.75
+          ],
+          "candidate": [
+            9762.25,
+            11199.5,
+            10802.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10111.0,
+            9492.0,
+            19052.25
+          ],
+          "baseline": [
+            10591.0,
+            24336.75,
+            14102.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9716.0,
+            10518.5,
+            12673.5
+          ],
+          "candidate": [
+            13563.5,
+            11889.0,
+            14587.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9904.75,
+            9463.75,
+            14449.25
+          ],
+          "baseline": [
+            9461.0,
+            9426.5,
+            9913.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9242.5,
+            12026.0,
+            9474.5
+          ],
+          "candidate": [
+            9691.0,
+            9647.75,
+            9422.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9919.75,
+            10342.0,
+            10060.75
+          ],
+          "baseline": [
+            9285.25,
+            8928.5,
+            8891.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18351.75,
+            9288.5,
+            9425.25
+          ],
+          "candidate": [
+            21722.25,
+            10622.5,
+            9052.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9721.0,
+            10269.25,
+            9550.0
+          ],
+          "baseline": [
+            9924.0,
+            9326.75,
+            9817.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            10528.25,
+            9450.25,
+            9363.0
+          ],
+          "candidate": [
+            12589.0,
+            13337.25,
+            11098.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10594.25,
+            13109.0,
+            19832.25
+          ],
+          "baseline": [
+            11210.0,
+            80425.5,
+            37982.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17538.75,
+            12095.75,
+            13078.0
+          ],
+          "candidate": [
+            285711.5,
+            13817.75,
+            11562.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12735.25,
+            16889.0,
+            10731.0
+          ],
+          "baseline": [
+            15539.75,
+            9776.0,
+            19556.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            29554.75,
+            9480.25,
+            49554.5
+          ],
+          "candidate": [
+            9607.5,
+            9739.5,
+            14933.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10026.5,
+            11463.25,
+            11600.25
+          ],
+          "baseline": [
+            12555.5,
+            12040.5,
+            10000.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            10432.25,
+            13335.25,
+            13682.25
+          ],
+          "candidate": [
+            10033.5,
+            9835.25,
+            10470.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10014.25,
+            10171.75,
+            10570.75
+          ],
+          "baseline": [
+            13722.25,
+            10923.25,
+            31788.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            29390.5,
+            18431.0,
+            17159.5
+          ],
+          "candidate": [
+            13623.25,
+            77170.5,
+            13597.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            304055.25,
+            11287.75,
+            37396.5
+          ],
+          "baseline": [
+            18181.75,
+            35813.75,
+            18085.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            21885.25,
+            17475.25,
+            14162.0
+          ],
+          "candidate": [
+            11594.75,
+            14472.75,
+            12581.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            25787.0,
+            359139.5,
+            16739.25
+          ],
+          "baseline": [
+            12698.5,
+            10091.25,
+            9936.5
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "leaf-in",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 10680.375,
+        "candidate_median_ns": 9908.375,
+        "baseline_range_ns": [
+          9106.25,
+          21919.5
+        ],
+        "candidate_range_ns": [
+          9268.25,
+          14495.0
+        ],
+        "paired_geomean_speedup": 1.0553940931160972,
+        "speedup_95pct_ci": [
+          0.9493932009475954,
+          1.1901955652343554
+        ],
+        "candidate_faster_pairs": 11
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            55649.0,
+            10488.0,
+            9309.5
+          ],
+          "candidate": [
+            9591.75,
+            12258.25,
+            9956.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10090.0,
+            12291.25,
+            13024.0
+          ],
+          "baseline": [
+            9545.75,
+            9775.75,
+            9981.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            52365.5,
+            11030.5,
+            9567.75
+          ],
+          "candidate": [
+            8740.0,
+            9860.0,
+            10900.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            11998.25,
+            9268.25,
+            9028.25
+          ],
+          "baseline": [
+            13147.0,
+            11205.0,
+            9509.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9349.0,
+            9462.5,
+            9521.75
+          ],
+          "candidate": [
+            9327.25,
+            9710.75,
+            9891.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            36870.5,
+            14495.0,
+            11733.0
+          ],
+          "baseline": [
+            9705.25,
+            9767.75,
+            10045.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            10156.75,
+            13484.0,
+            16565.25
+          ],
+          "candidate": [
+            15802.5,
+            12149.0,
+            10205.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            10171.5,
+            9337.5,
+            14201.0
+          ],
+          "baseline": [
+            9106.25,
+            9024.25,
+            9894.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            10876.75,
+            9532.75,
+            32547.25
+          ],
+          "candidate": [
+            9857.75,
+            9155.0,
+            9466.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9189.0,
+            9660.0,
+            9431.5
+          ],
+          "baseline": [
+            13932.5,
+            13802.75,
+            10898.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9179.5,
+            9764.75,
+            9671.5
+          ],
+          "candidate": [
+            10455.5,
+            9836.75,
+            9753.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            12690.75,
+            14410.25,
+            11397.5
+          ],
+          "baseline": [
+            10102.5,
+            9305.0,
+            10948.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            11612.5,
+            10159.25,
+            9711.75
+          ],
+          "candidate": [
+            10376.25,
+            83886.0,
+            9498.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            13673.25,
+            16550.5,
+            14353.5
+          ],
+          "baseline": [
+            16086.5,
+            11803.5,
+            10463.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9660.0,
+            12681.75,
+            12432.5
+          ],
+          "candidate": [
+            12098.25,
+            9353.75,
+            9084.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9669.25,
+            9352.75,
+            9032.0
+          ],
+          "baseline": [
+            10715.5,
+            21919.5,
+            45881.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            14012.25,
+            11547.0,
+            18047.25
+          ],
+          "candidate": [
+            12530.25,
+            11232.5,
+            19063.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9443.5,
+            9522.0,
+            10895.0
+          ],
+          "baseline": [
+            11358.75,
+            10374.5,
+            9923.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            9059.0,
+            11906.0,
+            10872.75
+          ],
+          "candidate": [
+            9527.25,
+            9499.5,
+            9330.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            9526.0,
+            12081.5,
+            11823.25
+          ],
+          "baseline": [
+            26101.5,
+            9171.0,
+            10213.25
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "two-hubs-out",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 19968.0,
+        "candidate_median_ns": 18730.0,
+        "baseline_range_ns": [
+          17786.5,
+          36089.0
+        ],
+        "candidate_range_ns": [
+          17042.75,
+          48715.5
+        ],
+        "paired_geomean_speedup": 0.9842016045598017,
+        "speedup_95pct_ci": [
+          0.9040057746517399,
+          1.0635145318451904
+        ],
+        "candidate_faster_pairs": 13
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17562.5,
+            39846.5,
+            19473.25
+          ],
+          "candidate": [
+            18586.75,
+            17312.75,
+            23254.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            19052.25,
+            18119.5,
+            17640.25
+          ],
+          "baseline": [
+            17793.25,
+            41041.0,
+            19112.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            19870.5,
+            32851.0,
+            17194.75
+          ],
+          "candidate": [
+            19114.5,
+            36122.75,
+            18685.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            16600.0,
+            17042.75,
+            17282.75
+          ],
+          "baseline": [
+            16989.0,
+            18453.0,
+            18063.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18905.25,
+            118642.25,
+            18102.25
+          ],
+          "candidate": [
+            17392.25,
+            17945.25,
+            20475.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            37116.25,
+            29430.25,
+            30064.0
+          ],
+          "baseline": [
+            18666.0,
+            21407.5,
+            21132.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17511.5,
+            23581.25,
+            46117.0
+          ],
+          "candidate": [
+            17815.75,
+            68220.0,
+            26105.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            17839.75,
+            18026.0,
+            18282.0
+          ],
+          "baseline": [
+            19840.25,
+            18423.0,
+            24880.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            20111.0,
+            19832.0,
+            20065.5
+          ],
+          "candidate": [
+            20032.25,
+            19147.25,
+            19134.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            18259.25,
+            18100.25,
+            17922.5
+          ],
+          "baseline": [
+            20883.25,
+            41557.5,
+            20739.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18444.0,
+            17907.75,
+            18508.75
+          ],
+          "candidate": [
+            24099.5,
+            18632.0,
+            27390.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            17976.0,
+            24329.0,
+            18217.0
+          ],
+          "baseline": [
+            21939.5,
+            44994.0,
+            19863.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            47649.0,
+            17415.5,
+            17786.5
+          ],
+          "candidate": [
+            20272.5,
+            17600.75,
+            17553.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            22973.0,
+            17250.5,
+            17225.75
+          ],
+          "baseline": [
+            18289.0,
+            24542.5,
+            18365.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18033.75,
+            29458.0,
+            17929.25
+          ],
+          "candidate": [
+            17423.5,
+            34631.75,
+            18873.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            17828.25,
+            17516.25,
+            17597.0
+          ],
+          "baseline": [
+            18249.0,
+            24318.75,
+            83544.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            36821.25,
+            31050.0,
+            36089.0
+          ],
+          "candidate": [
+            36682.0,
+            36924.0,
+            145731.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            39609.75,
+            25814.5,
+            34702.5
+          ],
+          "baseline": [
+            21995.25,
+            39833.0,
+            20495.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            34611.0,
+            36009.0,
+            91092.5
+          ],
+          "candidate": [
+            23222.75,
+            324710.0,
+            48715.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            33745.75,
+            24667.75,
+            23821.5
+          ],
+          "baseline": [
+            586778.5,
+            27603.25,
+            24653.5
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "two-hubs-in",
+      "edges": 16000,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 19519.375,
+        "candidate_median_ns": 21816.75,
+        "baseline_range_ns": [
+          17248.75,
+          42933.0
+        ],
+        "candidate_range_ns": [
+          17367.25,
+          44606.75
+        ],
+        "paired_geomean_speedup": 0.9259122083107677,
+        "speedup_95pct_ci": [
+          0.8217120427067574,
+          1.0357419575253408
+        ],
+        "candidate_faster_pairs": 11
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            23435.5,
+            21125.75,
+            17571.0
+          ],
+          "candidate": [
+            22063.75,
+            17855.25,
+            18208.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            359449.5,
+            22120.75,
+            20567.75
+          ],
+          "baseline": [
+            17422.75,
+            17243.75,
+            19031.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18195.5,
+            17104.75,
+            17423.5
+          ],
+          "candidate": [
+            21176.5,
+            18274.75,
+            22751.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            19195.25,
+            17752.75,
+            17388.0
+          ],
+          "baseline": [
+            18215.0,
+            18225.5,
+            22027.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            18234.5,
+            17525.25,
+            43078.5
+          ],
+          "candidate": [
+            17202.25,
+            17594.0,
+            17367.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            28573.0,
+            18173.75,
+            17680.75
+          ],
+          "baseline": [
+            17532.75,
+            58541.0,
+            19761.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17248.75,
+            17237.75,
+            19018.75
+          ],
+          "candidate": [
+            28099.5,
+            30855.0,
+            40618.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            31872.75,
+            34847.75,
+            19049.5
+          ],
+          "baseline": [
+            17744.5,
+            18404.0,
+            25065.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17056.25,
+            26380.5,
+            18598.0
+          ],
+          "candidate": [
+            25476.75,
+            220692.75,
+            17986.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            18094.5,
+            18302.0,
+            17888.5
+          ],
+          "baseline": [
+            22052.75,
+            19310.25,
+            28166.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            17591.75,
+            17147.25,
+            70633.0
+          ],
+          "candidate": [
+            79042.75,
+            23275.25,
+            20157.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            18199.25,
+            19139.75,
+            18733.75
+          ],
+          "baseline": [
+            20437.25,
+            29582.75,
+            18263.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            50898.5,
+            42933.0,
+            23258.75
+          ],
+          "candidate": [
+            33364.75,
+            27366.25,
+            17366.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            17984.0,
+            30323.75,
+            21512.75
+          ],
+          "baseline": [
+            23952.0,
+            21456.75,
+            27103.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            20215.5,
+            32517.0,
+            25415.75
+          ],
+          "candidate": [
+            38658.25,
+            23501.5,
+            23095.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            21582.0,
+            175315.25,
+            24129.75
+          ],
+          "baseline": [
+            19094.75,
+            19197.75,
+            17844.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            22381.75,
+            18364.75,
+            26736.5
+          ],
+          "candidate": [
+            18602.0,
+            22350.5,
+            20027.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            18187.75,
+            20775.0,
+            22017.5
+          ],
+          "baseline": [
+            23218.0,
+            23602.75,
+            25153.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            29860.5,
+            40910.25,
+            22436.0
+          ],
+          "candidate": [
+            67965.25,
+            44606.75,
+            30848.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            23060.0,
+            32407.0,
+            23828.0
+          ],
+          "baseline": [
+            35408.25,
+            17926.75,
+            19277.25
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "fan-survivors",
+      "edges": 1024,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 75231.0,
+        "candidate_median_ns": 73543.375,
+        "baseline_range_ns": [
+          67721.25,
+          125319.25
+        ],
+        "candidate_range_ns": [
+          68630.75,
+          264794.25
+        ],
+        "paired_geomean_speedup": 0.9230725209271368,
+        "speedup_95pct_ci": [
+          0.7640444307802865,
+          1.0880774802703157
+        ],
+        "candidate_faster_pairs": 8
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            75924.25,
+            109382.75,
+            71466.0
+          ],
+          "candidate": [
+            98451.5,
+            70590.75,
+            70071.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            120549.25,
+            67266.0,
+            107939.0
+          ],
+          "baseline": [
+            70283.75,
+            100273.25,
+            69656.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            74676.75,
+            90642.0,
+            86014.75
+          ],
+          "candidate": [
+            69483.75,
+            144464.75,
+            130551.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            70426.0,
+            67871.25,
+            133386.0
+          ],
+          "baseline": [
+            115269.75,
+            110171.5,
+            80945.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            68045.5,
+            66773.5,
+            76109.25
+          ],
+          "candidate": [
+            107294.0,
+            70754.25,
+            71176.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            76299.5,
+            264794.25,
+            286293.25
+          ],
+          "baseline": [
+            70004.25,
+            67229.75,
+            69860.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            71087.0,
+            74450.5,
+            69201.75
+          ],
+          "candidate": [
+            102360.25,
+            138309.0,
+            73872.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            101814.5,
+            93989.0,
+            68934.25
+          ],
+          "baseline": [
+            66978.75,
+            86544.25,
+            67721.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            67919.5,
+            69402.75,
+            73469.0
+          ],
+          "candidate": [
+            72973.5,
+            67059.0,
+            70439.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            68850.0,
+            69780.5,
+            71397.0
+          ],
+          "baseline": [
+            74623.5,
+            71105.75,
+            74537.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            104135.5,
+            72475.5,
+            133552.0
+          ],
+          "candidate": [
+            69088.0,
+            69745.0,
+            68277.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            109237.25,
+            69293.5,
+            87706.0
+          ],
+          "baseline": [
+            72979.25,
+            81166.0,
+            66267.25
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            80751.5,
+            71484.25,
+            117563.5
+          ],
+          "candidate": [
+            68220.0,
+            68888.0,
+            68630.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            73667.75,
+            73313.75,
+            101327.0
+          ],
+          "baseline": [
+            72792.25,
+            71010.5,
+            139671.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            147538.75,
+            125319.25,
+            72732.75
+          ],
+          "candidate": [
+            85656.75,
+            68574.0,
+            70028.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            77585.25,
+            73419.0,
+            69526.5
+          ],
+          "baseline": [
+            71787.25,
+            194138.5,
+            81024.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            69555.5,
+            105879.5,
+            88259.75
+          ],
+          "candidate": [
+            68716.75,
+            70567.75,
+            92904.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            125760.5,
+            220295.25,
+            68390.5
+          ],
+          "baseline": [
+            95461.5,
+            70513.0,
+            126742.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            89437.0,
+            91539.75,
+            71566.25
+          ],
+          "candidate": [
+            71940.25,
+            130561.5,
+            113178.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            75514.25,
+            78425.75,
+            68280.5
+          ],
+          "baseline": [
+            70408.75,
+            73528.75,
+            79809.0
+          ]
+        }
+      ]
+    },
+    {
+      "shape": "dense",
+      "edges": 512,
+      "batch": 4,
+      "summary": {
+        "baseline_median_ns": 328718.75,
+        "candidate_median_ns": 327874.75,
+        "baseline_range_ns": [
+          238843.25,
+          480337.5
+        ],
+        "candidate_range_ns": [
+          223924.25,
+          736960.5
+        ],
+        "paired_geomean_speedup": 0.9212547083459278,
+        "speedup_95pct_ci": [
+          0.7740134957738791,
+          1.090640612447539
+        ],
+        "candidate_faster_pairs": 9
+      },
+      "raw_pairs": [
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            338790.5,
+            976384.0,
+            280385.75
+          ],
+          "candidate": [
+            1255884.25,
+            511253.0,
+            255249.25
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            771491.25,
+            529769.75,
+            390250.0
+          ],
+          "baseline": [
+            326378.25,
+            431820.25,
+            517303.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            335262.25,
+            275241.25,
+            295633.0
+          ],
+          "candidate": [
+            300853.25,
+            262293.0,
+            438044.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            380539.75,
+            337331.25,
+            382509.5
+          ],
+          "baseline": [
+            431540.5,
+            279680.5,
+            271056.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            239024.5,
+            228483.75,
+            296422.25
+          ],
+          "candidate": [
+            627474.0,
+            293264.5,
+            528462.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            671543.75,
+            272435.0,
+            673468.5
+          ],
+          "baseline": [
+            323198.0,
+            327844.5,
+            391850.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            275568.5,
+            404365.5,
+            452504.25
+          ],
+          "candidate": [
+            252824.75,
+            228974.75,
+            248489.0
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            224855.0,
+            244017.25,
+            255578.75
+          ],
+          "baseline": [
+            223577.75,
+            279459.25,
+            437177.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            870368.75,
+            455098.75,
+            319757.75
+          ],
+          "candidate": [
+            515904.0,
+            302395.5,
+            870600.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            455826.25,
+            350552.5,
+            258487.75
+          ],
+          "baseline": [
+            386484.5,
+            406949.0,
+            366293.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            601419.0,
+            411727.25,
+            407951.75
+          ],
+          "candidate": [
+            922448.75,
+            724839.25,
+            736960.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            254829.25,
+            290834.0,
+            298277.5
+          ],
+          "baseline": [
+            352052.5,
+            259148.0,
+            292765.5
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            707192.25,
+            278849.25,
+            480337.5
+          ],
+          "candidate": [
+            314375.25,
+            238437.5,
+            202239.75
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            212812.5,
+            223924.25,
+            355685.75
+          ],
+          "baseline": [
+            255055.5,
+            281471.75,
+            273920.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            248821.5,
+            310102.0,
+            304056.0
+          ],
+          "candidate": [
+            264683.0,
+            310718.5,
+            225367.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            251672.5,
+            343186.25,
+            217973.75
+          ],
+          "baseline": [
+            254151.25,
+            388949.0,
+            339713.75
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            238843.25,
+            231823.25,
+            282751.75
+          ],
+          "candidate": [
+            267626.25,
+            476406.25,
+            1158340.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            263637.75,
+            234150.25,
+            314624.0
+          ],
+          "baseline": [
+            241727.75,
+            345242.5,
+            558235.0
+          ]
+        },
+        {
+          "order": [
+            "baseline",
+            "candidate"
+          ],
+          "baseline": [
+            333073.75,
+            238485.0,
+            329593.0
+          ],
+          "candidate": [
+            432098.25,
+            344016.75,
+            300013.5
+          ]
+        },
+        {
+          "order": [
+            "candidate",
+            "baseline"
+          ],
+          "candidate": [
+            311732.75,
+            283253.25,
+            665296.5
+          ],
+          "baseline": [
+            316862.25,
+            286425.5,
+            230827.25
+          ]
+        }
+      ]
+    }
+  ]
+}
