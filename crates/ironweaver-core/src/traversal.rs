@@ -17,6 +17,46 @@ use crate::graph::{IxMap, IxSet};
 use crate::query::paths::Steps;
 use crate::{Direction, Edge, EdgeIx, Graph, GraphError, NodeIx};
 
+/// Hash only small searches. Once enough live nodes have been reached, a
+/// slot bitmap avoids hashing every subsequent edge. Its zeroing cost is
+/// bounded by the work already done, even for a graph with many vacant slots.
+/// This is only used by single-source walks: a stale start has no neighbors,
+/// and all other visited handles are live in the immutably borrowed graph.
+struct Visited {
+    sparse: IxSet<NodeIx>,
+    bits: Vec<u64>,
+    bound: usize,
+}
+
+impl Visited {
+    fn new(bound: usize) -> Self {
+        Self { sparse: IxSet::default(), bits: Vec::new(), bound }
+    }
+
+    fn contains(&self, ix: &NodeIx) -> bool {
+        if self.bits.is_empty() {
+            self.sparse.contains(ix)
+        } else {
+            self.bits[ix.slot() / 64] & (1 << (ix.slot() % 64)) != 0
+        }
+    }
+
+    fn insert(&mut self, ix: NodeIx) {
+        if !self.bits.is_empty() {
+            self.bits[ix.slot() / 64] |= 1 << (ix.slot() % 64);
+        } else {
+            self.sparse.insert(ix);
+            if self.sparse.len() >= 128 && self.sparse.len() >= self.bound.div_ceil(64) {
+                self.bits = vec![0; self.bound.div_ceil(64)];
+                for node in self.sparse.drain() {
+                    self.bits[node.slot() / 64] |= 1 << (node.slot() % 64);
+                }
+                self.sparse = IxSet::default();
+            }
+        }
+    }
+}
+
 /// Depth-first (pre-order) traversal from `start` along outgoing edges for
 /// which `edge_ok` returns true. Returns the nodes in visiting order; `depth`
 /// limits how many edges away from `start` a node may be.
@@ -67,7 +107,7 @@ fn dfs_metered<N, E, X>(
     type Frame<'g> = (Steps<'g>, usize);
     struct Walk<'g, 'm> {
         order: Vec<NodeIx>,
-        visited: IxSet<NodeIx>,
+        visited: Visited,
         stack: Vec<Frame<'g>>,
         meter: &'m mut Meter,
         direction: Direction,
@@ -91,7 +131,7 @@ fn dfs_metered<N, E, X>(
         true
     }
 
-    let mut w = Walk { order: Vec::new(), visited: IxSet::default(), stack: Vec::new(), meter, direction };
+    let mut w = Walk { order: Vec::new(), visited: Visited::new(g.node_bound()), stack: Vec::new(), meter, direction };
     if !enter(g, &mut w, start, 0, depth) {
         return Ok(w.order);
     }
@@ -162,7 +202,7 @@ fn bfs_metered<N, E, X>(
         return Ok(Vec::new());
     }
     let mut order = vec![start];
-    let mut visited = IxSet::default();
+    let mut visited = Visited::new(g.node_bound());
     visited.insert(start);
     let mut queue = VecDeque::from([(start, 0usize)]);
 
@@ -452,6 +492,71 @@ mod tests {
 
     fn ids(g: &Graph<(), &str>, nodes: &[NodeIx]) -> Vec<String> {
         nodes.iter().map(|&n| g.node(n).unwrap().id().to_string()).collect()
+    }
+
+    #[test]
+    fn large_walks_keep_order_handles_filters_and_budgets() {
+        let mut g = Graph::<(), ()>::new();
+        let mut nodes: Vec<_> = (0..512).map(|i| g.add_node(i.to_string(), ()).unwrap()).collect();
+        // Reuse slots with new generations, then connect in logical order.
+        for i in (0..512).step_by(3) {
+            g.remove_node(nodes[i]).unwrap();
+            nodes[i] = g.add_node(format!("replacement-{i}"), ()).unwrap();
+        }
+        for i in 0..511 {
+            g.add_edge(nodes[i], nodes[i + 1], ()).unwrap();
+            g.add_edge(nodes[i], nodes[i], ()).unwrap();
+            g.add_edge(nodes[i], nodes[i + 1], ()).unwrap();
+        }
+        assert_eq!(bfs(&g, nodes[0], None, all).unwrap(), nodes);
+        assert_eq!(dfs(&g, nodes[0], None, all).unwrap(), nodes);
+        // A filter still sees self-loops and parallel/already-visited edges.
+        let mut called = 0;
+        let order = bfs(&g, nodes[0], None, |_, _| {
+            called += 1;
+            Ok::<_, Infallible>(true)
+        })
+        .unwrap();
+        assert_eq!(order, nodes);
+        assert_eq!(called, g.edge_count());
+        let budget = Budget::UNLIMITED.max_results(140).truncate();
+        let accept = |_: EdgeIx, _: &Edge<()>| Ok::<_, GraphError>(true);
+        for order in [
+            bfs_limited(&g, nodes[0], None, Direction::Out, budget, accept).unwrap(),
+            dfs_limited(&g, nodes[0], None, Direction::Out, budget, accept).unwrap(),
+        ] {
+            assert_eq!(order.value, nodes[..140]);
+            assert!(order.truncated);
+        }
+        let mut backward = nodes.clone();
+        backward.reverse();
+        assert_eq!(
+            bfs_limited(&g, nodes[511], None, Direction::In, Budget::UNLIMITED, accept).unwrap().value,
+            backward
+        );
+        assert_eq!(
+            dfs_limited(&g, nodes[511], None, Direction::In, Budget::UNLIMITED, accept).unwrap().value,
+            backward
+        );
+        // Fallible filters must still propagate errors after bitmap promotion.
+        let failed = bfs(
+            &g,
+            nodes[0],
+            None,
+            |_, edge| {
+                if edge.target() == nodes[300] {
+                    Err("filter failed")
+                } else {
+                    Ok(true)
+                }
+            },
+        );
+        assert_eq!(failed, Err("filter failed"));
+        let stale = nodes[0];
+        g.remove_node(stale).unwrap();
+        g.add_node("new-root", ()).unwrap();
+        assert_eq!(bfs(&g, stale, None, all).unwrap(), [stale]);
+        assert_eq!(dfs(&g, stale, None, all).unwrap(), [stale]);
     }
 
     #[test]
