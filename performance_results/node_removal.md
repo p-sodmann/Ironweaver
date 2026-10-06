@@ -1,126 +1,138 @@
-# Node deletion: parallel adjacency cleanup
+# Node deletion: measured adjacency batching
 
-Deleting a node with many parallel edges repeatedly scanned the same neighbor
-list: 1,000 / 4,000 / 16,000 outgoing edges took approximately 0.26 / 3.92 /
-61.72 ms through the Python API in the initial seven-run investigation.
-The roughly 16-fold cost increase for four times as many edges identified
-quadratic work in `Graph::try_remove_node`.
+Repeated single-edge adjacency scans made parallel-edge node deletion quadratic.
+The original investigation showed roughly 16-fold growth when quadrupling the
+number of parallel edges. The final candidate defers only adjacency compaction;
+it preserves the original edge removal, payload destruction and free-slot
+reuse order. The bindings and Python sources are unchanged.
 
-The change removes all parallel edges during the first scan of the opposite
-adjacency list. Later visits find those edge slots empty. Single-entry lists
-are cleared directly, and deleting a leaf retains the original single-edge
-scan. There are no new allocations or public API/binding changes. Surviving
-adjacency order is preserved. Work becomes linear in the removed node's
-incident edges plus the adjacency entries of its distinct neighbors; those
-neighbor lists can contain unrelated surviving edges.
+## Selected implementation and tradeoffs
 
-## Experiments
+Single-entry opposite lists are cleared directly. Other small deletions keep
+individual handle-comparison scans. Deferred grouping is considered only when
+the removed node has at least 32 edges in that direction and the opposite list
+has at least 256 entries. Deferred `(neighbor, edge)` pairs are sorted by neighbor.
+Groups of at least 16 removed edges clean the list once using live-handle checks;
+smaller groups retain individual comparisons. Surviving adjacency order stays
+stable, and self-loops are removed once.
 
-1. Collect, sort and deduplicate neighbor handles, then clean their lists once.
-   Pilot parallel-edge gains were large, but ordinary-star latency rose
-   about 46% and shuffled-star latency about 59%. Rejected.
-2. Remove parallel edges inside the first adjacency scan. This eliminated the
-   quadratic work without an allocation, but still added overhead to stars.
-3. Add direct clearing for single-entry lists and retain the original scan for
-   leaves. This is the selected implementation. Final measurements below use
-   independent runs after selecting it, not the exploratory pilot samples.
+This removes repeated scans for large parallel groups. Grouping adds a sort
+and temporary O(deferred incident edges) scratch storage, reused between the
+two directions; it does not add persistent graph storage. A 16,000-edge deferred
+list uses approximately 256 KiB of scratch capacity on this target. General
+sorting costs O(d log d), in addition to adjacency cleanup. These are explicit
+costs, not an allocation-free or universally linear deletion claim.
+
+## Alternatives and regression discovered
+
+- Sorting/deduplicating every neighbor improved parallel edges but slowed
+  ordinary/shuffled stars in the pilot. Rejected.
+- Removing all parallel edges inside the first opposite-list scan avoided
+  allocations, but an added control exposed an approximately 8× loss when
+  deleting only two edges into large hubs. It also changed drop/slot-reuse order.
+  This implementation was replaced.
+- The selected hybrid preserves removal order, avoids grouping small deletions,
+  and uses cheap comparisons when a neighbor has only a few removed edges.
+  Final measurements use freshly matched artifacts, not the exploratory data.
 
 ## Measurement protocol
 
-- Baseline: `7e7b7fa40e3224b512d59d046f28b5bc0ffe7144`.
-- Rust 1.99.0, standard Cargo release profile, identical dependency lockfile and
-  benchmark source for both binaries. No target-specific compiler flags.
-  Cargo.lock SHA-256: `8a88c8fe93618bb1741941a80608c7a75c627ed2fe60d2b70b25d7cd6272623a`.
-- Linux x86-64 cloud VM, Intel Xeon Platinum 8370C. Both binaries pinned to the
-  same available logical CPU. No concurrent builds or tests.
-- 20 independent process pairs per case, alternating baseline/candidate and
-  candidate/baseline order. Each process excludes three warmup samples and
-  records three measured samples, each averaging four deletions (1,000 for
-  tiny graphs).
-- The timer covers `Graph::remove_node` only. Fixture construction, cloning,
-  assertions, and graph/result destruction are outside the timer. Fixtures
-  use unit payloads. These are core deletion measurements, not whole-application
-  throughput or allocation-inclusive graph lifecycle timings.
-- Before/after values are medians of per-process medians. Speedup is the
-  geometric mean of paired ratios. A seeded 10,000-resample paired bootstrap
-  gives a 95% interval, resampling process pairs rather than correlated inner
-  samples. Intervals containing 1 do not establish a speedup; effects below
-  5% are treated as practically inconclusive even if statistically detectable.
-- The raw JSON retains all measured samples, run order and binary SHA-256s.
-  Intervals describe this machine/run, not guaranteed speedups on all hardware.
+Baseline is `7e7b7fa40e3224b512d59d046f28b5bc0ffe7144`. Both release binaries
+use Rust 1.99.0, one copied lockfile, identical benchmark source and flags on
+the same Xeon Platinum 8370C VM. They are pinned to the same logical CPU.
+There are 20 alternating process pairs per fixture, three warmups and three
+samples per process, averaging four deletions per sample (1,000 for tiny cases).
+Construction, cloning, validation and destruction are outside the timer;
+fixtures use unit payloads. Scratch allocation inside deletion is timed.
+No builds, tests or other benchmarks ran concurrently.
 
-## Results
+Values are medians of process medians. Ratios are paired geometric means with
+seeded 10,000-resample 95% bootstrap intervals. An interval containing 1 is
+inconclusive; small statistical effects are not application-level gains.
+Intervals characterize this VM/run, not every machine.
 
-| Case | Size | Before (µs) | After (µs) | Paired speedup | 95% interval | Faster pairs |
+## Complete focused results
+
+| Fixture | Size | Before (µs) | After (µs) | Paired speedup | 95% interval | Faster pairs |
 |---|---:|---:|---:|---:|---:|---:|
-| parallel-out | 1,000 | 251.770 | 20.360 | 12.673× | 12.340–13.055× | 20/20 |
-| parallel-out | 4,000 | 3,789.853 | 82.377 | 45.003× | 43.127–46.381× | 20/20 |
-| parallel-out | 16,000 | 58,902.253 | 343.689 | 170.130× | 162.775–176.811× | 20/20 |
-| parallel-in | 16,000 | 59,512.938 | 341.180 | 175.506× | 171.416–180.116× | 20/20 |
-| bidirectional | 16,000 | 29,876.997 | 357.968 | 84.041× | 82.204–85.843× | 20/20 |
-| mixed | 16,000 | 10,319.071 | 434.075 | 23.803× | 22.890–24.633× | 20/20 |
-| star | 16,000 | 244.371 | 208.018 | 1.191× | 1.152–1.233× | 20/20 |
-| shuffled-star | 16,000 | 399.426 | 275.262 | 1.439× | 1.376–1.502× | 20/20 |
-| star | 4 | 0.139 | 0.133 | 1.058× | 1.024–1.097× | 18/20 |
-| self-loops | 16,000 | 172.241 | 167.950 | 1.012× | 0.988–1.036× | 14/20 |
-| isolated | 0 | 0.072 | 0.071 | 1.057× | 1.001–1.156× | 12/20 |
-| leaf-out | 16,000 | 8.104 | 8.100 | 1.008× | 0.997–1.020× | 8/20 |
-| leaf-in | 16,000 | 8.109 | 8.160 | 0.975× | 0.929–1.005× | 9/20 |
+| parallel-out | 1,000 | 279.486 | 12.130 | 23.617× | 20.659–27.025× | 20/20 |
+| parallel-out | 4,000 | 4468.861 | 46.819 | 87.561× | 77.901–96.773× | 20/20 |
+| parallel-out | 16,000 | 68282.927 | 217.963 | 323.809× | 293.959–358.081× | 20/20 |
+| parallel-in | 16,000 | 66094.033 | 250.365 | 262.891× | 227.263–296.053× | 20/20 |
+| bidirectional | 16,000 | 33490.976 | 255.087 | 132.932× | 120.977–145.485× | 20/20 |
+| mixed | 16,000 | 12492.826 | 412.499 | 31.821× | 28.460–36.008× | 20/20 |
+| star | 16,000 | 289.574 | 228.326 | 1.284× | 1.196–1.400× | 19/20 |
+| shuffled-star | 16,000 | 463.625 | 337.609 | 1.357× | 1.257–1.466× | 18/20 |
+| star | 4 | 0.139 | 0.134 | 1.052× | 0.993–1.110× | 17/20 |
+| self-loops | 16,000 | 189.117 | 204.809 | 0.986× | 0.820–1.157× | 10/20 |
+| isolated | 0 | 0.074 | 0.074 | 0.871× | 0.764–0.967× | 5/20 |
+| leaf-out | 16,000 | 12.559 | 11.133 | 1.067× | 0.876–1.313× | 10/20 |
+| leaf-in | 16,000 | 10.680 | 9.908 | 1.055× | 0.949–1.190× | 11/20 |
+| two-hubs-out | 16,000 | 19.968 | 18.730 | 0.984× | 0.904–1.064× | 13/20 |
+| two-hubs-in | 16,000 | 19.519 | 21.817 | 0.926× | 0.822–1.036× | 11/20 |
+| fan-survivors | 1,024 | 75.231 | 73.543 | 0.923× | 0.764–1.088× | 8/20 |
+| dense | 512 | 328.719 | 327.875 | 0.921× | 0.774–1.091× | 9/20 |
 
-Parallel-edge cases improve decisively beyond run-to-run variation; all 20
-pairs favor the candidate. At 16,000 outgoing edges the paired speedup is
-170× (95% interval 163–177×). The 16,000-edge star controls also improve.
-Leaf, self-loop and isolated-node effects are too small or uncertain to
-claim practical improvements. The four-edge star changes by only a few
-nanoseconds; that result is not an application-level speed claim.
+Parallel-edge improvements are far beyond run noise: at 16,000 outgoing edges,
+68.3 ms becomes 218 µs, with a paired gain of 324× (294–358×). Large ordinary
+and shuffled stars also improve. No gain is claimed for the remaining controls.
 
-[Raw measurements](node_removal_samples.json).
+Size is incident edge count for parallel/star/loop fixtures, surviving-edge
+count for leaves, survivors per hub for two-hub fixtures, and neighbor count
+for fan/dense fixtures. `mixed` interleaves 16,000 removed and 16,000 surviving
+edges across 16 neighbors. Two-hub fixtures remove only two edges while 32,000
+edges survive. The fan has 64 unrelated incoming edges per neighbor; the dense
+fixture has a fully connected surviving neighborhood, including self-loops.
 
-`mixed` interleaves 16,000 removed edges with 16,000 surviving edges across
-16 neighbors. `star` and `shuffled-star` have one edge per neighbor, the latter
-in seeded shuffled insertion order. `leaf-out`/`leaf-in` remove one edge from
-an adjacency list containing another 16,000 surviving edges. Self-loops and
-isolated nodes are controls.
+## Independent larger-batch controls
 
-## Reproduction
+Nine controls were repeated in 30 alternating process pairs, three measured
+samples after three warmups, averaging 16 deletions per sample (10,000 for tiny
+fixtures). This reduces timer noise, but several intervals still remain wide.
 
-From the candidate checkout, with the Rust toolchain active:
+| Fixture | Size | Before (µs) | After (µs) | Paired ratio | 95% interval |
+|---|---:|---:|---:|---:|---:|
+| star | 4 | 0.156 | 0.153 | 1.041 | 0.989–1.098 |
+| self-loops | 16,000 | 236.056 | 212.359 | 1.063 | 0.926–1.181 |
+| isolated | 0 | 0.087 | 0.086 | 1.049 | 0.950–1.168 |
+| leaf-out | 16,000 | 11.626 | 10.445 | 0.985 | 0.889–1.088 |
+| leaf-in | 16,000 | 10.422 | 10.004 | 1.080 | 0.989–1.187 |
+| two-hubs-out | 16,000 | 22.762 | 22.454 | 0.910 | 0.759–1.061 |
+| two-hubs-in | 16,000 | 25.994 | 29.382 | 0.961 | 0.814–1.149 |
+| fan-survivors | 1,024 | 114.314 | 132.922 | 0.898 | 0.769–1.046 |
+| dense | 512 | 339.778 | 325.153 | 1.028 | 0.921–1.144 |
+
+The tiny isolated-node slowdown in the first run did not persist in the repeat.
+All control-repeat intervals include 1; this does not rule out moderate losses
+within their wide intervals. In particular, the two-hub control no longer
+reproduces the original 8× slowdown, but these measurements do not establish
+strict equivalence or a small improvement for that case.
+
+The [complete 143-metric broad screen and algorithm confirmations](revision_benchmarks.md)
+provide the required same-machine check beyond deletion. Short-run similarity
+results remain slower and inconsistent with a longer-sample repeat, so the PR
+stays draft; this report does not claim a regression-free change. No historical
+cross-machine timings were used.
+
+## Reproduction and validation
+
+Follow [benchmarks/README.md](../benchmarks/README.md) for matched builds and
+both complete suites. The control repeat uses:
 
 ```bash
-set -eu
-repo=$(pwd)
-base=$(mktemp -d)
-git archive 7e7b7fa40e3224b512d59d046f28b5bc0ffe7144 | tar -x -C "$base"
-mkdir -p "$base/crates/ironweaver-core/examples"
-cp crates/ironweaver-core/examples/bench_remove_node.rs "$base/crates/ironweaver-core/examples/"
-# Cargo.lock is ignored by the repository; use the same resolved dependencies.
-# Generate it first with cargo generate-lockfile if absent.
-cp Cargo.lock "$base/Cargo.lock"
-cargo build --locked --release --manifest-path "$base/Cargo.toml" \
-  -p ironweaver-core --example bench_remove_node
-cp "$base/target/release/examples/bench_remove_node" /tmp/remove-node-baseline
-cd "$repo"
-cargo build --locked --release -p ironweaver-core --example bench_remove_node
-cp target/release/examples/bench_remove_node /tmp/remove-node-candidate
-python benchmarks/compare_remove_node.py \
-  /tmp/remove-node-baseline /tmp/remove-node-candidate \
-  --pairs 20 --samples 3 --output /tmp/node-removal-results.json
+python benchmarks/compare_remove_node.py /tmp/revision-builds/baseline/bench_remove_node /tmp/revision-builds/candidate/bench_remove_node \
+  --pairs 30 --samples 3 --batch 16 --small-batch 10000 \
+  --cases star:4,self-loops:16000,isolated:0,leaf-out:16000,leaf-in:16000,two-hubs-out:16000,two-hubs-in:16000,fan-survivors:1024,dense:512 \
+  --output /tmp/deletion-controls.json
 ```
 
-Run comparisons serially with no compilation/test load. Increase repetitions
-or rerun independently before treating a small difference as an improvement.
-Do not turn timing ratios into CI assertions on shared runners.
+Regression tests cover surviving adjacency order, mixed directions and loops,
+dense/sparse edge IDs, stale handles, repeated slot reuse, exactly-once payload
+destruction, and exact original payload destruction/free-slot reuse order.
+Validation passed after rebuilding the editable extension: 154 Rust tests
+(including three doctests), 833 Python tests, `cargo fmt --all --check`, and
+`cargo clippy --workspace --all-targets -- -D warnings`. The pure core has no
+PyO3 dependency, and `src/`/`python/` match the baseline.
 
-## Correctness validation
-
-- `cargo test -p ironweaver-core`: 153 passed, including three new regression
-  tests and three doctests.
-- Rebuilt the editable extension, then `python -m pytest -q`: 830 passed.
-- `cargo fmt --all --check` and
-  `cargo clippy --workspace --all-targets -- -D warnings`: passed.
-- New tests cover mixed parallel edges and self-loops, both edge directions,
-  dense and sparse edge IDs, stable surviving adjacency order, repeated node
-  and edge slot reuse against a seeded edge-list oracle, and exactly-once
-  payload destruction. Existing invariant-error and memory-accounting tests
-  also pass.
-- `src/` and `python/` (bindings and Python API) are unchanged.
+[Raw focused samples](node_removal_samples.json),
+[raw control repeat](node_removal_controls_samples.json).

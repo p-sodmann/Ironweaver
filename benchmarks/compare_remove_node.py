@@ -31,6 +31,8 @@ CASES = [
     ("parallel-in", 16000), ("bidirectional", 16000), ("mixed", 16000),
     ("star", 16000), ("shuffled-star", 16000), ("star", 4),
     ("self-loops", 16000), ("isolated", 0), ("leaf-out", 16000), ("leaf-in", 16000),
+    ("two-hubs-out", 16000), ("two-hubs-in", 16000),
+    ("fan-survivors", 1024), ("dense", 512),
 ]
 
 
@@ -70,10 +72,18 @@ def main():
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--pairs", type=int, default=20)
     parser.add_argument("--samples", type=int, default=3)
+    parser.add_argument("--cases", help="Comma-separated shape:size fixtures; defaults to the complete inventory")
+    parser.add_argument("--batch", type=int, default=4, help="Deletions per sample for non-tiny fixtures")
+    parser.add_argument("--small-batch", type=int, default=1000, help="Deletions per sample for tiny fixtures")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.pairs < 2 or args.samples < 1:
-        parser.error("need at least two pairs and one sample")
+    if args.pairs < 2 or min(args.samples, args.batch, args.small_batch) < 1:
+        parser.error("need at least two pairs and positive samples/batches")
+    cases = CASES if args.cases is None else [
+        (shape, int(size)) for shape, size in (case.split(":") for case in args.cases.split(","))
+    ]
+    if any(case not in CASES for case in cases):
+        parser.error("unknown fixture")
     cpu = None
     if hasattr(os, "sched_getaffinity"):
         cpu = min(os.sched_getaffinity(0))
@@ -84,8 +94,8 @@ def main():
               "binary_sha256": {k: hashlib.sha256(v.read_bytes()).hexdigest() for k, v in binaries.items()},
               "pairs": args.pairs, "samples_per_process": args.samples,
               "warmup_samples": 3, "results": []}
-    for shape, edges in CASES:
-        batch = 1000 if edges <= 4 else 4
+    for shape, edges in cases:
+        batch = args.small_batch if edges <= 4 else args.batch
         pairs = []
         for i in range(args.pairs):
             order = ("baseline", "candidate") if i % 2 == 0 else ("candidate", "baseline")

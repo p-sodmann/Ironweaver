@@ -743,66 +743,66 @@ impl<N, E> Graph<N, E> {
         for &label in &node.labels {
             self.unindex_label(label, ix);
         }
+        // Keep the edge removal/drop/free-list order. Only defer adjacency
+        // compaction, and only when repeated long scans could justify grouping.
+        // Small degrees stay on the allocation-free single-edge path.
+        let mut pending = Vec::new();
         for &e in &node.out {
-            // Self loops appear in both lists; the second visit finds nothing.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
                 if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
                     if to.inc.len() == 1 {
                         to.inc.clear();
-                        continue;
-                    }
-                    if node.out.len() == 1 {
+                    } else if node.out.len() >= 32 && to.inc.len() >= 256 {
+                        pending.push((edge.to, e));
+                    } else {
                         to.inc.retain(|&x| x != e);
-                        continue;
                     }
-                    // Remove parallel edges in this same pass. Later visits
-                    // through node.out find their slots already empty, so each
-                    // target's incoming list is scanned only once.
-                    to.inc.retain(|&x| {
-                        if x == e {
-                            return false;
-                        }
-                        if self.edges.get(x.slot, x.generation).is_some_and(|edge| edge.from == ix) {
-                            if let Some(edge) = self.edges.remove(x.slot, x.generation) {
-                                self.edge_index.remove(edge.id);
-                            }
-                            return false;
-                        }
-                        true
-                    });
                 }
             }
         }
+        if !pending.is_empty() {
+            self.detach_removed(&mut pending, true);
+        }
         for &e in &node.inc {
+            // Self loops were already removed through the outgoing list.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
                 if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
                     if from.out.len() == 1 {
                         from.out.clear();
-                        continue;
-                    }
-                    if node.inc.len() == 1 {
+                    } else if node.inc.len() >= 32 && from.out.len() >= 256 {
+                        pending.push((edge.from, e));
+                    } else {
                         from.out.retain(|&x| x != e);
-                        continue;
                     }
-                    // As above, drain all parallel edges from this source.
-                    from.out.retain(|&x| {
-                        if x == e {
-                            return false;
-                        }
-                        if self.edges.get(x.slot, x.generation).is_some_and(|edge| edge.to == ix) {
-                            if let Some(edge) = self.edges.remove(x.slot, x.generation) {
-                                self.edge_index.remove(edge.id);
-                            }
-                            return false;
-                        }
-                        true
-                    });
                 }
             }
         }
+        if !pending.is_empty() {
+            self.detach_removed(&mut pending, false);
+        }
         Ok(Some((node.id, node.data)))
+    }
+
+    fn detach_removed(&mut self, pending: &mut Vec<(NodeIx, EdgeIx)>, incoming: bool) {
+        pending.sort_unstable_by_key(|&(node, _)| node);
+        for group in pending.chunk_by(|a, b| a.0 == b.0) {
+            let ix = group[0].0;
+            if let Some(node) = self.nodes.get_mut(ix.slot, ix.generation) {
+                let list = if incoming { &mut node.inc } else { &mut node.out };
+                // A live-edge lookup is costlier than comparing handles. Only
+                // pay it when it replaces many scans of this particular list.
+                if group.len() >= 16 {
+                    list.retain(|e| self.edges.get(e.slot, e.generation).is_some());
+                } else {
+                    for &(_, removed) in group {
+                        list.retain(|&e| e != removed);
+                    }
+                }
+            }
+        }
+        pending.clear();
     }
 
     /// Check the invariants removing a live node relies on: it is in the id

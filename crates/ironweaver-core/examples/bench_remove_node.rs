@@ -18,6 +18,8 @@ fn fixture(shape: &str, n: usize) -> (Graph<(), ()>, NodeIx, usize) {
         "parallel-out" | "parallel-in" | "bidirectional" => 1,
         "mixed" => 16,
         "leaf-out" | "leaf-in" => n + 1,
+        "two-hubs-out" | "two-hubs-in" => n + 2,
+        "fan-survivors" | "dense" => n,
         "star" | "shuffled-star" => n,
         "self-loops" | "isolated" => 0,
         _ => panic!("unknown shape: {shape}"),
@@ -31,9 +33,31 @@ fn fixture(shape: &str, n: usize) -> (Graph<(), ()>, NodeIx, usize) {
     } else if shape == "leaf-in" {
         g.add_edge(neighbors[0], hub, ()).unwrap();
     }
+    if shape == "two-hubs-out" {
+        g.add_edge(hub, neighbors[0], ()).unwrap();
+        g.add_edge(hub, neighbors[1], ()).unwrap();
+    } else if shape == "two-hubs-in" {
+        g.add_edge(neighbors[0], hub, ()).unwrap();
+        g.add_edge(neighbors[1], hub, ()).unwrap();
+    }
     for i in 0..n {
         match shape {
             "isolated" => (),
+            "two-hubs-out" => {
+                g.add_edge(neighbors[i + 2], neighbors[0], ()).unwrap();
+                g.add_edge(neighbors[i + 2], neighbors[1], ()).unwrap();
+            }
+            "two-hubs-in" => {
+                g.add_edge(neighbors[0], neighbors[i + 2], ()).unwrap();
+                g.add_edge(neighbors[1], neighbors[i + 2], ()).unwrap();
+            }
+            "fan-survivors" | "dense" => {
+                g.add_edge(hub, neighbors[i], ()).unwrap();
+                let degree = if shape == "dense" { n } else { 64 };
+                for j in 0..degree {
+                    g.add_edge(neighbors[(i + j) % n], neighbors[i], ()).unwrap();
+                }
+            }
             "leaf-out" => {
                 g.add_edge(neighbors[i + 1], neighbors[0], ()).unwrap();
             }
@@ -55,7 +79,13 @@ fn fixture(shape: &str, n: usize) -> (Graph<(), ()>, NodeIx, usize) {
             }
         }
     }
-    let remaining = if matches!(shape, "mixed" | "leaf-out" | "leaf-in") { n } else { 0 };
+    let remaining = match shape {
+        "mixed" | "leaf-out" | "leaf-in" => n,
+        "two-hubs-out" | "two-hubs-in" => 2 * n,
+        "fan-survivors" => 64 * n,
+        "dense" => n * n,
+        _ => 0,
+    };
     (g, hub, remaining)
 }
 
