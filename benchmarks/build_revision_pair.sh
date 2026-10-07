@@ -15,9 +15,11 @@ if [[ -e "$artifact_root/baseline" || -e "$artifact_root/candidate" ]]; then
   exit 2
 fi
 test -f "$repo/Cargo.lock" || { echo "Generate Cargo.lock first." >&2; exit 2; }
-benchmark_source=$(mktemp)
-trap 'rm -f "$benchmark_source"' EXIT
-git -C "$repo" show "$candidate_ref:crates/ironweaver-core/examples/bench_remove_node.rs" > "$benchmark_source"
+benchmark_source=$(mktemp -d)
+trap 'rm -rf "$benchmark_source"' EXIT
+for example in bench_remove_node traversal_bench construction_bench; do
+  git -C "$repo" show "$candidate_ref:crates/ironweaver-core/examples/$example.rs" > "$benchmark_source/$example.rs"
+done
 for revision in baseline candidate; do
   ref=$baseline_ref
   [[ $revision != candidate ]] || ref=$candidate_ref
@@ -26,14 +28,16 @@ for revision in baseline candidate; do
   git -C "$repo" archive "$ref" | tar -x -C "$source_dir"
   cp "$repo/Cargo.lock" "$source_dir/Cargo.lock"
   mkdir -p "$source_dir/crates/ironweaver-core/examples"
-  cp "$benchmark_source" "$source_dir/crates/ironweaver-core/examples/bench_remove_node.rs"
+  cp "$benchmark_source/"*.rs "$source_dir/crates/ironweaver-core/examples/"
   (
     cd "$source_dir"
     maturin build --release --locked --interpreter "$(command -v python)" --out "$artifact_root/wheels-$revision"
-    cargo build --release --locked -p ironweaver-core --example bench_remove_node
+    cargo build --release --locked -p ironweaver-core --examples
   )
   uv pip install --python "$(command -v python)" --no-deps --target "$artifact_root/$revision" "$artifact_root/wheels-$revision/"*.whl
-  cp "$source_dir/target/release/examples/bench_remove_node" "$artifact_root/$revision/bench_remove_node"
+  for example in bench_remove_node traversal_bench construction_bench; do
+    cp "${CARGO_TARGET_DIR:-$source_dir/target}/release/examples/$example" "$artifact_root/$revision/$example"
+  done
 done
 python - "$artifact_root" <<'PY'
 import hashlib
@@ -49,9 +53,11 @@ for revision in ('baseline', 'candidate'):
         'rustc': subprocess.check_output(['rustc', '-Vv'], text=True),
         'cargo_lock_sha256': hashlib.sha256((source / 'Cargo.lock').read_bytes()).hexdigest(),
         'flags': ['maturin build --release --locked', 'cargo build --release --locked'],
+        'rustflags': __import__('os').environ.get('RUSTFLAGS', ''),
         'bindings_sha256': hashlib.sha256(b''.join(
             p.read_bytes() for directory in ('src', 'python')
             for p in sorted((source / directory).rglob('*')) if p.is_file())).hexdigest(),
+        'core_sha256': hashlib.sha256(b''.join(p.read_bytes() for p in sorted((source / 'crates/ironweaver-core/src').rglob('*.rs')))).hexdigest(),
         'graph_sha256': hashlib.sha256((source / 'crates/ironweaver-core/src/graph.rs').read_bytes()).hexdigest(),
     }
     (root / revision / 'build.json').write_text(json.dumps(metadata, indent=2) + '\n')

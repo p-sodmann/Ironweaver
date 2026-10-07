@@ -100,3 +100,25 @@ python benchmarks/confirm_revision_results.py /tmp/revision-builds/baseline /tmp
 The focused runner also accepts `--cases shape:size,...`, `--batch` and
 `--small-batch` for independent control repeats. Keep the initial complete
 inventory and every repeat's raw samples in the report.
+
+## Construction and subgraph revision controls
+
+The revision builder also freezes `construction_bench` and `traversal_bench`
+from the candidate into both builds. Core construction isolates timed work from
+node setup and graph destruction, except that subgraph-result destruction is
+included. Controls cover node insertion, duplicates, stale endpoints, neighbor
+iteration, self-loops, parallel/typed/explicit-ID edges and small subgraphs.
+
+```bash
+python benchmarks/compare_construction.py BUILD/baseline/construction_bench BUILD/candidate/construction_bench --output construction.json
+python benchmarks/compare_traversal_revisions.py BUILD/baseline/traversal_bench BUILD/candidate/traversal_bench --output traversal.json
+python benchmarks/compare_construction_threads.py BUILD/candidate/construction_bench --output threads.json
+```
+
+The thread control inserts edges into four independent Rust graphs, alternating
+one/two-thread process pairs. It does not imply that Python graph mutation
+releases the GIL or that a single graph can be mutated concurrently.
+`compare_revisions.py --serial` runs entire workers serially, including all
+preparation between timed operations. Finish builds and correctness checks
+before starting any benchmark runner. Preserve primary and independent repeat
+samples separately; confidence intervals are pointwise, not simultaneous.

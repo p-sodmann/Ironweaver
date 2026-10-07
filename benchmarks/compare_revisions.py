@@ -209,6 +209,18 @@ def summarize(pairs):
 
 def run_pair(args, case, packages, env, pair_id):
     pair = {'order': ['baseline', 'candidate'] if pair_id % 2 == 0 else ['candidate', 'baseline']}
+    if args.serial:
+        with tempfile.TemporaryDirectory(prefix='ironweaver-serial-') as folder:
+            for revision in pair['order']:
+                path = Path(folder) / (revision + '.json')
+                command = [sys.executable, str(Path(__file__).resolve()), str(args.baseline), str(args.candidate),
+                           '--worker', case, '--repeats', str(args.repeats), '--output', str(path)]
+                result = subprocess.run(command, env=env | {'PYTHONPATH': str(packages[revision])},
+                                        capture_output=True, text=True)
+                if result.returncode:
+                    raise RuntimeError(result.stdout + result.stderr)
+                pair[revision] = json.loads(path.read_text())
+        return pair
     with tempfile.TemporaryDirectory(prefix='ironweaver-pair-') as folder:
         processes, paths, logs = {}, {}, {}
         try:
@@ -269,6 +281,7 @@ def main():
     parser.add_argument('--worker')
     parser.add_argument('--reference-cache', type=Path)
     parser.add_argument('--synchronized', action='store_true')
+    parser.add_argument('--serial', action='store_true', help='Run each entire worker serially, including setup')
     args = parser.parse_args()
     if args.worker:
         global SYNCHRONIZED
@@ -305,7 +318,7 @@ def main():
     for pair_id in range(args.pairs):
         # Reverse case order too, rather than always measuring one case late.
         for case in (cases if pair_id % 2 == 0 else list(reversed(cases))):
-            print(f'pair {pair_id + 1}/{args.pairs} {case}: interleaved operations', flush=True)
+            print(f'pair {pair_id + 1}/{args.pairs} {case}: ' + ('serial workers' if args.serial else 'interleaved operations'), flush=True)
             pair = run_pair(args, case, packages, env, pair_id)
             for revision in pair['order']:
                 run = pair[revision]
