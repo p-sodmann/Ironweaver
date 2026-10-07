@@ -116,3 +116,21 @@ def test_to_networkx_exports_labels_and_types():
     assert h.nodes["ann"]["labels"] == ["Person", "Admin"]
     assert h.edges["ann", "bob"]["type"] == "knows"
     assert "labels" not in h.nodes["acme"] or h.nodes["acme"]["labels"] == "not a list of str"
+
+
+def test_label_and_edge_type_counts():
+    g = graph()
+    assert g.labels() == {"Person": 2, "Admin": 1}
+    assert list(g.labels()) == ["Person", "Admin"]  # order of first use
+    assert g.edge_types() == {None: 2, "knows": 2}
+    assert g.edge_type_count("knows") == 2 and g.edge_type_count("Person") == 0
+    assert g.edge_type_count("nope") == 0
+    e = g.add_edge("acme", "ann", type="owns")
+    e.attr_set("type", "knows")
+    assert g.edge_types() == {None: 2, "knows": 3}
+    assert g.remove_edge("acme", "ann") == 1
+    g.remove_node("bob")  # drops one "knows" each way and an untyped edge
+    assert g.edge_types() == {None: 1}
+    assert g.labels() == {"Person": 1, "Admin": 1}
+    loaded = Vertex.load_from_json(g.save_to_json())
+    assert loaded.edge_types() == g.edge_types() and loaded.labels() == g.labels()

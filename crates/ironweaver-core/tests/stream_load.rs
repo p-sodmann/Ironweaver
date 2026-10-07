@@ -70,6 +70,12 @@ fn state(g: &G) -> Vec<String> {
     edges.sort();
     out.extend(edges);
     out.push(format!("next {}", g.next_edge_id().0));
+    // The label index and the edge type counts
+    let mut labels: Vec<_> = g.labels().collect();
+    labels.sort();
+    let mut types: Vec<_> = g.edge_types().collect();
+    types.sort();
+    out.push(format!("labels {labels:?} types {types:?}"));
     out
 }
 

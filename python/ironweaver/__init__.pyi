@@ -761,6 +761,19 @@ class Vertex:
     def nodes_with_label(self, label: str) -> list[Node]:
         """Nodes carrying *label*, in graph order (label index)."""
         ...
+    def labels(self) -> dict[str, int]:
+        """Every label at least one node carries, with its number of nodes,
+        in the order the labels were first used (label index)."""
+        ...
+    def edge_types(self) -> dict[str | None, int]:
+        """Every edge type at least one edge has, with its number of edges:
+        untyped edges first (key ``None``, if there are any), then the types
+        in the order they were first used. The counts are kept as edges
+        change, so this costs O(labels + types), not a scan of the edges."""
+        ...
+    def edge_type_count(self, type: str) -> int:
+        """Number of edges of type *type*, in O(1)."""
+        ...
     def create_index(self, name: str) -> bool:
         """Index node attribute *name* for fast :meth:`find` / :meth:`find_range`.
 
