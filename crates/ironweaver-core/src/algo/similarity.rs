@@ -152,6 +152,8 @@ pub fn most_similar(
             &all
         }
     };
+    let report = crate::cancel::progress();
+    report.start("most similar", Some(sources.len() as u64));
     Ok(sources
         .par_iter()
         .with_min_len(16)
@@ -161,6 +163,7 @@ pub fn most_similar(
                 if stop.requested() {
                     return Vec::new();
                 }
+                report.add(1);
                 // Common-neighbour weights with every node two hops away
                 for &w in u.neighbors(a) {
                     let add = metric.weight(u.degree(w));

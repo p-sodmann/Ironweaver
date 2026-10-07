@@ -22,6 +22,10 @@
 // whatever the number of threads (per-item seeds from `mix`); parallel sums
 // over sources use `ordered_sum` for the same reason.
 //
+// Long loops check `cancel::stop()` and report how far they got to
+// `cancel::progress()` (a phase with its total, then iterations, rounds,
+// nodes or sources done), at the same points.
+//
 // Adding an algorithm: a function here taking `&Projection` (plus options),
 // validating options into a `GraphError`, tests against a brute-force
 // reference in the same file, then a method on the Python `Projection`
@@ -279,5 +283,42 @@ mod tests {
         let p = testing::from_edges(4, &[(0, 1), (1, 0), (1, 1), (2, 1)], Direction::Out);
         let u = Undirected::of(&p);
         assert_eq!((u.neighbors(1), u.degree(3)), (&[0, 2][..], 0));
+    }
+
+    #[test]
+    fn algorithms_report_progress() {
+        use crate::cancel::{run_with_progress, Progress, ProgressSnapshot, Token};
+        let p = testing::random(1, 3000, 12_000, Direction::Out, false);
+        let n = p.node_count() as u64;
+        let token = Token::new();
+        let watched = Progress::new();
+        let snap = |phase, done, total| ProgressSnapshot { phase, done, total: Some(total) };
+        let after = |f: &dyn Fn()| {
+            run_with_progress(&token, &watched, f).unwrap();
+            watched.snapshot()
+        };
+
+        // 300 iterations, all heard (issue #62)
+        let opts = PageRank { tol: 0.0, max_iter: 300, ..Default::default() };
+        assert_eq!(after(&|| drop(pagerank(&p, &opts))), snap("pagerank", 300, 300));
+        // Converging early ends below the total
+        let s = after(&|| drop(pagerank(&p, &PageRank::default())));
+        assert!(s.phase == "pagerank" && s.done > 0 && s.done < 100, "{s:?}");
+        let (_, rounds) = label_propagation(&p, 50);
+        assert_eq!(after(&|| drop(label_propagation(&p, 50))), snap("label propagation", rounds as u64, 50));
+        let s = after(&|| drop(leiden(&p, &Leiden::default())));
+        assert!(s.phase == "leiden" && (1..=3).contains(&s.done) && s.total == Some(3), "{s:?}");
+        assert_eq!(after(&|| drop(triangles(&p))), snap("triangles", n, n));
+        assert_eq!(after(&|| drop(core_number(&p))), snap("core number", n, n));
+        assert_eq!(after(&|| drop(weakly_connected_components(&p))), snap("weakly connected components", n, n));
+        assert_eq!(after(&|| drop(strongly_connected_components(&p))), snap("strongly connected components", n, n));
+        assert_eq!(after(&|| drop(closeness_centrality(&p, false, true))), snap("closeness", n, n));
+        let bc = Betweenness { sources: Some(vec![0, 5, 9]), ..Default::default() };
+        assert_eq!(after(&|| drop(betweenness_centrality(&p, &bc))), snap("betweenness", 3, 3));
+        let walks = Node2Vec { walks_per_node: 2, walk_length: 5, ..Default::default() };
+        assert_eq!(after(&|| drop(node2vec_walks(&p, None, &walks))), snap("node2vec", 2 * n, 2 * n));
+
+        // Watching doesn't change results
+        assert_eq!(core_number(&p), run_with_progress(&token, &watched, || core_number(&p)).unwrap());
     }
 }

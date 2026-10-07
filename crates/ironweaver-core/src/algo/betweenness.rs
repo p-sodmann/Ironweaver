@@ -141,13 +141,16 @@ pub fn betweenness_centrality(p: &Projection, opts: &Betweenness) -> Result<Vec<
         }
     };
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("betweenness", Some(sources.len() as u64));
     let mut bc = ordered_sum(
         n,
         sources,
         || Brandes::new(n),
         |b, &s, acc| {
             if !stop.requested() {
-                b.accumulate(p, s, opts, acc)
+                b.accumulate(p, s, opts, acc);
+                report.add(1);
             }
         },
     );

@@ -18,7 +18,14 @@ pub fn weakly_connected_components(p: &Projection) -> Vec<Vec<u32>> {
 
     let n = p.node_count() as u32;
     let mut parent: Vec<u32> = (0..n).collect();
+    let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("weakly connected components", Some(n as u64));
     for u in 0..n {
+        report.tick(u as usize, n as usize);
+        if (u as usize).is_multiple_of(crate::cancel::TICK) && stop.requested() {
+            break;
+        }
         for &v in p.out_neighbors(u) {
             let (a, b) = (find(&mut parent, u), find(&mut parent, v));
             // The smaller index becomes the root: deterministic
@@ -69,7 +76,14 @@ pub fn strongly_connected_components(p: &Projection) -> Vec<Vec<u32>> {
     let mut component = vec![NONE; n];
     let mut components = 0u32;
 
+    let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("strongly connected components", Some(n as u64));
     for s in 0..n as u32 {
+        report.tick(s as usize, n);
+        if (s as usize).is_multiple_of(crate::cancel::TICK) && stop.requested() {
+            return Vec::new(); // unfinished nodes have no component; `run` drops it anyway
+        }
         if t.index[s as usize] != NONE {
             continue;
         }

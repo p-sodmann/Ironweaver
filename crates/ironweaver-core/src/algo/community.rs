@@ -33,6 +33,8 @@ pub fn label_propagation(p: &Projection, max_iter: usize) -> (Vec<Vec<u32>>, usi
     let mut labels: Vec<u32> = (0..n as u32).collect();
     let mut rounds = 0;
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("label propagation", Some(max_iter as u64));
     while rounds < max_iter && !stop.requested() {
         rounds += 1;
         let next: Vec<u32> = (0..n as u32)
@@ -63,6 +65,7 @@ pub fn label_propagation(p: &Projection, max_iter: usize) -> (Vec<Vec<u32>>, usi
             .collect();
         let changed = next != labels;
         labels = next;
+        report.add(1);
         if !changed {
             break;
         }

@@ -411,11 +411,14 @@ pub fn leiden(p: &Projection, opts: &Leiden) -> Result<Vec<Vec<u32>>, GraphError
     let mut rng = StdRng::seed_from_u64(opts.seed);
     let mut labels: Vec<u32> = (0..n as u32).collect();
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("leiden", Some(opts.max_iter.max(1) as u64));
     for _ in 0..opts.max_iter.max(1) {
         if stop.requested() {
             break;
         }
         let next = run(&base, labels.clone(), opts, &mut rng);
+        report.add(1);
         if next == labels {
             break;
         }

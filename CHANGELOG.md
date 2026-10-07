@@ -135,6 +135,14 @@ a query layer and database foundations.
     byte-identical saves;
   - `record::lookup` reads an attribute path from an `Attrs` map with the
     same rules as `Record`, for other payload types that store `Attrs`;
+  - progress of long algorithms: run one with
+    `cancel::run_with_progress(&token, &progress, || ...)` and read
+    `progress.snapshot()` (phase, done, total) from another thread. The
+    `algo` functions (PageRank and label propagation per iteration, Leiden
+    per run, triangles, core number, components, closeness, betweenness,
+    similarity and node2vec per node, source or walk) and the batch
+    queries report it. Core number and the connected components now
+    check for cancellation too;
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).
