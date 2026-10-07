@@ -29,6 +29,14 @@ for revision in baseline candidate; do
   cp "$repo/Cargo.lock" "$source_dir/Cargo.lock"
   mkdir -p "$source_dir/crates/ironweaver-core/examples"
   cp "$benchmark_source/"*.rs "$source_dir/crates/ironweaver-core/examples/"
+  # Archives retain commit timestamps. Force freshness when sharing a target
+  # directory, otherwise Cargo can reuse a different revision's older artifact.
+  python - "$source_dir" <<'STAMP'
+from pathlib import Path
+import sys
+for path in Path(sys.argv[1]).rglob('*.rs'):
+    path.touch()
+STAMP
   (
     cd "$source_dir"
     maturin build --release --locked --interpreter "$(command -v python)" --out "$artifact_root/wheels-$revision"

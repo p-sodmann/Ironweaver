@@ -54,11 +54,16 @@ fn main() {
             black_box(graphs);
             elapsed
         } else {
-            let (mut g, nodes) = fixture(n, m);
+            let (mut g, mut nodes) = fixture(n, m);
             // Controls use unchanged node insertion / duplicate validation,
             // failed edge insertion, or neighbor iteration over a built graph.
             if case == "neighbors" || case.starts_with("subgraph") {
                 edges(&mut g, &nodes, m, "random");
+            }
+            if case == "subgraph-small" {
+                for i in 0..3 {
+                    nodes.push(g.add_node(format!("isolated{i}"), ()).unwrap());
+                }
             }
             let stale = if case == "stale" {
                 let ix = g.add_node("removed", ()).unwrap();
@@ -70,7 +75,7 @@ fn main() {
             let start = Instant::now();
             match case.as_str() {
                 "subgraph" | "subgraph-small" => {
-                    let keep = if case == "subgraph-small" { &nodes[..3] } else { &nodes[..] };
+                    let keep = if case == "subgraph-small" { &nodes[n..] } else { &nodes[..] };
                     let out = g
                         .induced_subgraph(
                             keep.iter().copied(),
@@ -79,6 +84,10 @@ fn main() {
                         )
                         .unwrap();
                     assert_eq!(out.node_count(), keep.len());
+                    assert_eq!(out.next_edge_id(), g.next_edge_id());
+                    if case == "subgraph-small" {
+                        assert_eq!(out.edge_count(), 0);
+                    }
                     black_box(out);
                 }
                 "nodes" => {

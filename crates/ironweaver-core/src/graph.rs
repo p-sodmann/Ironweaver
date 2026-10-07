@@ -529,43 +529,6 @@ fn node_heap<N>(n: &Node<N>) -> usize {
         + (n.out.capacity() + n.inc.capacity()) * size_of::<EdgeIx>()
 }
 
-/// Remapping for subgraph copies. Near-full copies use slots directly; small
-/// copies avoid initializing storage proportional to the source arena.
-enum NodeRemap {
-    Dense(Vec<(u32, NodeIx)>),
-    Sparse(IxMap<NodeIx, NodeIx>),
-}
-
-impl NodeRemap {
-    fn new(expected: usize, bound: usize) -> Self {
-        if bound > 0 && expected >= bound.div_ceil(2) {
-            // Arena::insert never issues u32::MAX as a live slot.
-            let empty = NodeIx { slot: u32::MAX, generation: 0 };
-            Self::Dense(vec![(0, empty); bound])
-        } else {
-            Self::Sparse(IxMap::with_capacity_and_hasher(expected, Default::default()))
-        }
-    }
-
-    fn get(&self, old: &NodeIx) -> Option<&NodeIx> {
-        match self {
-            Self::Dense(slots) => slots
-                .get(old.slot())
-                .and_then(|(generation, new)| (*generation == old.generation && new.slot != u32::MAX).then_some(new)),
-            Self::Sparse(map) => map.get(old),
-        }
-    }
-
-    fn insert(&mut self, old: NodeIx, new: NodeIx) {
-        match self {
-            Self::Dense(slots) => slots[old.slot()] = (old.generation, new),
-            Self::Sparse(map) => {
-                map.insert(old, new);
-            }
-        }
-    }
-}
-
 /// Heap bytes of a label's node set.
 fn label_set_heap(set: &IxSet<NodeIx>) -> usize {
     hash_table_bytes(set.capacity(), std::mem::size_of::<NodeIx>())
@@ -1339,10 +1302,10 @@ impl<N, E> Graph<N, E> {
         let mut out: Graph<N2, E2> = Graph::with_capacity(keep.size_hint().0, 0);
         // Same symbols, so labels and types copy without re-interning
         out.symbols = self.symbols.clone();
-        let mut map = NodeRemap::new(keep.size_hint().0, self.node_bound());
+        let mut map: IxMap<NodeIx, NodeIx> = IxMap::with_capacity_and_hasher(keep.size_hint().0, Default::default());
         let mut order: Vec<(NodeIx, NodeIx)> = Vec::with_capacity(keep.size_hint().0);
         for ix in keep {
-            if map.get(&ix).is_some() {
+            if map.contains_key(&ix) {
                 continue;
             }
             if let Some(n) = self.node(ix) {
@@ -1374,7 +1337,11 @@ impl<N, E> Graph<N, E> {
             }
         }
         out.edges.slots.reserve_exact(n_edges);
-        out.edge_index.reserve(self.next_edge_id);
+        // An edgeless copy needs the persistent counter, but no id table.
+        // Avoid zeroing storage proportional to the source's edge-id range.
+        if n_edges != 0 {
+            out.edge_index.reserve(self.next_edge_id);
+        }
         for (slot, _, n) in out.nodes.iter_mut() {
             n.out.reserve_exact(out_deg[slot as usize] as usize);
             n.inc.reserve_exact(in_deg[slot as usize] as usize);
@@ -1592,63 +1559,25 @@ mod tests {
     }
 
     #[test]
-    fn subgraph_remapping_agrees_for_dense_and_sparse_copies() {
+    fn edgeless_subgraph_preserves_the_edge_id_counter() {
         let (mut g, [a, b, c]) = triangle();
-        g.remove_node(b).unwrap();
-        let replacement = g.add_node("replacement", ()).unwrap();
-        let loop_edge = g.insert_edge(replacement, replacement, None, Some("loop"), 7).unwrap();
-        g.add_edge(c, replacement, 8).unwrap();
-        g.add_edge(c, replacement, 9).unwrap();
-        g.add_label(replacement, "kept").unwrap();
-        // Include stale generations, duplicates and a handle outside the arena.
-        let outside = NodeIx { slot: 100, generation: 0 };
-        let keep = [b, replacement, c, replacement, a, b, outside];
-        let mut callbacks = Vec::new();
-        let dense = g
-            .induced_subgraph(
-                keep,
-                |n| {
-                    callbacks.push(n.id().to_owned());
-                    Ok::<_, ()>(())
-                },
-                |e| Ok(e.data),
-            )
-            .unwrap();
-        assert_eq!(callbacks, ["replacement", "c", "a"]);
-        // filter's zero lower size hint selects the sparse representation.
-        let sparse =
-            g.induced_subgraph(keep.into_iter().filter(|_| true), |_| Ok::<_, ()>(()), |e| Ok(e.data)).unwrap();
-        for copy in [&dense, &sparse] {
-            assert_eq!(copy.nodes().map(|(_, n)| n.id()).collect::<Vec<_>>(), callbacks);
-            assert_eq!(copy.edge_count(), g.edge_count());
-            assert_eq!(copy.next_edge_id(), g.next_edge_id());
-            let replacement = copy.node_ix("replacement").unwrap();
-            assert_eq!(copy.label_names(replacement).unwrap(), ["kept"]);
-            assert_eq!(copy.edge_type_name(copy.edge_ix(g.edge(loop_edge).unwrap().id()).unwrap()), Some("loop"));
-            assert_eq!(copy.heap, copy.count_heap());
-        }
-        let snapshot = |copy: &Graph<(), u32>| {
-            copy.nodes()
-                .map(|(ix, n)| {
-                    (
-                        n.id().to_owned(),
-                        copy.neighbors(ix, Direction::Both)
-                            .map(|(e, to)| {
-                                (
-                                    copy.edge(e).unwrap().id(),
-                                    copy.node(to).unwrap().id().to_owned(),
-                                    copy.edge(e).unwrap().data,
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(snapshot(&dense), snapshot(&sparse));
-        let failed = g.induced_subgraph(keep, |_| Ok::<_, &str>(()), |_| Err::<u32, _>("stop"));
-        assert_eq!(failed.unwrap_err(), "stop");
-        assert_eq!(g.node_count(), 3);
+        g.add_label(a, "kept").unwrap();
+        g.reserve_edge_ids(EdgeId(1_000_000));
+        let mut sub = g.induced_subgraph([a], |_| Ok::<_, ()>(()), |e| Ok(e.data)).unwrap();
+        assert_eq!(sub.node_count(), 1);
+        assert_eq!(sub.edge_count(), 0);
+        assert_eq!(sub.next_edge_id(), EdgeId(1_000_000));
+        let a = sub.node_ix("a").unwrap();
+        assert_eq!(sub.label_names(a).unwrap(), ["kept"]);
+        assert!(sub.edge_ix(EdgeId(0)).is_none());
+        let edge = sub.add_edge(a, a, 7).unwrap();
+        assert_eq!(sub.edge(edge).unwrap().id(), EdgeId(1_000_000));
+        assert_eq!(sub.edge_ix(EdgeId(1_000_000)), Some(edge));
+        assert_eq!(sub.next_edge_id(), EdgeId(1_000_001));
+        assert_eq!(sub.heap, sub.count_heap());
+        // The source, including the edges omitted from the copy, is unchanged.
+        assert!(g.node(b).is_some() && g.node(c).is_some());
+        assert_eq!(g.edge_count(), 3);
     }
 
     #[test]

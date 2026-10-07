@@ -53,6 +53,7 @@ def main():
             for threads in ([1, 2] if case == 'concurrent' else [1]):
                 key = f'{case}/{n}/threads={threads}'
                 rows = []
+                out['results'][key] = dict(affinity=cpus[:threads], threads=threads, raw=rows)
                 for i in range(a.pairs):
                     pair = dict(order=['baseline', 'candidate'] if i % 2 == 0 else ['candidate', 'baseline'])
                     for revision in pair['order']:
@@ -61,6 +62,7 @@ def main():
                         pair[revision] = [float(row['seconds']) for row in csv.DictReader(io.StringIO(r.stdout))]
                         assert len(pair[revision]) == a.samples
                     rows.append(pair)
+                    a.output.write_text(json.dumps(out, indent=2) + '\n')
                 out['results'][key] = dict(affinity=cpus[:threads], threads=threads, raw=rows, summary=summarize(rows))
                 a.output.write_text(json.dumps(out, indent=2) + '\n')
                 print(key, out['results'][key]['summary'], flush=True)
