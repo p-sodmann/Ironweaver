@@ -93,8 +93,9 @@ impl EdgeIndex {
     fn get(&self, id: EdgeId) -> Option<u32> {
         match self.dense.get(id.0 as usize) {
             Some(&s) if s != 0 => Some(s - 1),
-            Some(_) => None,
-            None => self.sparse.get(&id).copied(),
+            // A growing dense prefix can cover an id inserted sparsely.
+            // Empty dense entries must still consult that sparse mapping.
+            _ => self.sparse.get(&id).copied(),
         }
     }
 
@@ -117,8 +118,8 @@ impl EdgeIndex {
 
     fn remove(&mut self, id: EdgeId) {
         match self.dense.get_mut(id.0 as usize) {
-            Some(s) => *s = 0,
-            None => {
+            Some(s) if *s != 0 => *s = 0,
+            _ => {
                 self.sparse.remove(&id);
             }
         }
@@ -1574,6 +1575,18 @@ mod tests {
         assert_eq!(sub.edge(edge).unwrap().id(), EdgeId(1_000_000));
         assert_eq!(sub.edge_ix(EdgeId(1_000_000)), Some(edge));
         assert_eq!(sub.next_edge_id(), EdgeId(1_000_001));
+        // An explicit id starts sparse, then lies inside a grown dense
+        // prefix. It must remain findable, reject duplicates, and remove.
+        let sparse = sub.insert_edge(a, a, Some(EdgeId(1500)), None, 8).unwrap();
+        for id in 0..400 {
+            sub.insert_edge(a, a, Some(EdgeId(id)), None, 9).unwrap();
+        }
+        sub.insert_edge(a, a, Some(EdgeId(1600)), None, 10).unwrap();
+        assert_eq!(sub.edge_ix(EdgeId(1500)), Some(sparse));
+        assert_eq!(sub.insert_edge(a, a, Some(EdgeId(1500)), None, 0), Err(GraphError::DuplicateEdge(1500)));
+        sub.remove_edge(sparse).unwrap();
+        assert!(sub.edge_ix(EdgeId(1500)).is_none());
+        assert_eq!(sub.edge_ix(EdgeId(1_000_000)), Some(edge));
         assert_eq!(sub.heap, sub.count_heap());
         // The source, including the edges omitted from the copy, is unchanged.
         assert!(g.node(b).is_some() && g.node(c).is_some());
