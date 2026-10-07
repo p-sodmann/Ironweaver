@@ -32,7 +32,11 @@ pub fn bfs_levels(p: &Projection, sources: &[u32], max_depth: Option<u32>) -> Re
     let mut bottom_up = false;
     let mut depth = 0u32;
     let stop = crate::cancel::stop();
+    // Levels explored (out of `max_depth`, if given)
+    let report = crate::cancel::progress();
+    report.start("bfs levels", max_depth.map(u64::from));
     while !frontier.is_empty() && max_depth.is_none_or(|m| depth < m) && !stop.requested() {
+        report.add(1);
         let frontier_edges: usize = frontier.par_iter().map(|&u| p.out_degree(u)).sum();
         if !bottom_up && frontier_edges > unexplored / ALPHA {
             bottom_up = true;

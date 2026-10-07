@@ -93,6 +93,8 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
     let mut x = vec![1.0 / n as f64; n];
     let mut share = vec![0f64; n];
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("pagerank", Some(opts.max_iter as u64));
     for _ in 0..opts.max_iter {
         if stop.requested() {
             break;
@@ -117,6 +119,7 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
             .collect();
         let err: f64 = next.par_iter().zip(&x).map(|(a, b)| (a - b).abs()).sum();
         x = next;
+        report.add(1);
         if err < n as f64 * opts.tol {
             return Ok(x);
         }

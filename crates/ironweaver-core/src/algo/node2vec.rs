@@ -158,10 +158,13 @@ pub fn node2vec_walks(p: &Projection, starts: Option<&[u32]>, opts: &Node2Vec) -
     let picker = Picker::new(p);
     let total = starts.len() * opts.walks_per_node;
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("node2vec", Some(total as u64));
     Ok((0..total)
         .into_par_iter()
         .with_min_len(64)
         .map(|i| {
+            report.tick(i, total);
             if stop.requested() {
                 return Vec::new();
             }

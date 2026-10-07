@@ -90,7 +90,9 @@ Below is a quick guide to notable functions and where to find them.
   (explicit id / type), `remove_node`, `remove_edge`, `rename_node`,
   `node_ix`, `edge_ix` (by `EdgeId`; `EdgeIndex`: dense table + sparse
   map), `next_edge_id` / `reserve_edge_ids`, `add_label` / `remove_label` /
-  `nodes_with_label`, `set_edge_type` / `edge_type_name`, `edges_between`,
+  `nodes_with_label` / `labels`, `set_edge_type` / `edge_type_name`,
+  `edge_types` / `edge_type_count` (a count per type, kept on every edge
+  add / remove / retype), `edges_between`,
   `nodes`, `edges`, `neighbors`, `induced_subgraph` (shared by
   filter/expand/shortest paths/traversals; keeps ids, labels, types).
   `memory_usage` is O(1): the `heap` counter tracks each node's id, labels
@@ -142,6 +144,10 @@ Below is a quick guide to notable functions and where to find them.
   sequential loops call now and then), `stop()` -> `Stop`: parallel loops
   check `requested()`, sequential searches `poll()`. A new long-running
   loop must check one and bail out early (the partial result is dropped).
+  Progress the same way: `run_with_progress` installs a `Progress`
+  (phase, done, total; read with `snapshot` from any thread), algorithms
+  fetch `progress()` -> `Report` and call `start` / `add` / `tick` where
+  they check the stop flag.
 - **direction.rs** – `Direction` (`"out"`, `"in"`, `"both"`).
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
   graphs), the `Attributes` trait, `Lookup`, and `lookup` (the attribute

@@ -70,7 +70,10 @@ a query layer and database foundations.
   combined with `&`, `|`, `~`; accepted by `filter`, `project` and `match`.
 - **Labels and edge types:** `add_node(..., labels=)`, `add_edge(..., type=)`,
   `Node.labels` / `add_label` / `remove_label` / `has_label`,
-  `Vertex.nodes_with_label` (indexed), `Edge.type`.
+  `Vertex.nodes_with_label` (indexed), `Edge.type`. `Vertex.labels()`
+  lists every label with its node count, and `Vertex.edge_types()` /
+  `edge_type_count(type)` give the number of edges per type, from counts
+  the graph keeps (core: `Graph::labels`, `edge_types`, `edge_type_count`).
 - **Bulk loading:** `Vertex.add_nodes` / `Vertex.add_edges`, all-or-nothing,
   with attributes as columns.
 - **`Vertex.shortest_path`** with pluggable methods (BFS, Dijkstra, A* with
@@ -143,6 +146,14 @@ a query layer and database foundations.
     byte-identical saves;
   - `record::lookup` reads an attribute path from an `Attrs` map with the
     same rules as `Record`, for other payload types that store `Attrs`;
+  - progress of long algorithms: run one with
+    `cancel::run_with_progress(&token, &progress, || ...)` and read
+    `progress.snapshot()` (phase, done, total) from another thread. The
+    `algo` functions (PageRank and label propagation per iteration, Leiden
+    per run, triangles, core number, components, closeness, betweenness,
+    similarity and node2vec per node, source or walk) and the batch
+    queries report it. Core number and the connected components now
+    check for cancellation too;
 - Validation against the LDBC Graphalytics reference outputs, networkx on
   random graphs, and a benchmark against networkx, igraph, rustworkx and
   networkit (`benchmarks/compare_libraries.py`).

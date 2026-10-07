@@ -5,6 +5,7 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
 - **A directed property multigraph**, `Graph<N, E>`.
   - Nodes have unique string ids, sorted label sets (interned, with a label index) and a payload `N`.
   - Edges have persistent ids (never reused), an optional type and a payload `E`.
+  - `labels()` lists every label with its node count, and `edge_types()` / `edge_type_count()` count edges per type, from counters kept as the graph changes.
   - Handles (`NodeIx` / `EdgeIx`) never alias a removed node or edge.
 - **Changes as data.** `Op` values apply to a graph and return the ops that undo them, and `Graph::apply_all` applies a batch all-or-nothing. That's the base for a write-ahead log, replication or rollback.
 - **Filter expressions** (`Expr`): comparisons, membership and existence on attribute paths, labels and edge types, and `and` / `or` / `not`.
@@ -74,6 +75,34 @@ path expansion, searches, random walks) check a cancellation token. Run one
 under `cancel::run(&token, || ...)` and call `token.cancel()` from another
 thread: it stops soon after and `run` returns `Err(GraphError::Interrupted)`.
 Without a token the checks cost nothing measurable.
+
+To watch how far an algorithm has got, run it with
+`cancel::run_with_progress(&token, &progress, || ...)` and read
+`progress.snapshot()` from another thread: its phase (`"pagerank"`,
+`"leiden"`, ...), the units done (iterations, rounds, runs, nodes, sources)
+and the phase's total.
+
+```rust
+use ironweaver_core::algo::{pagerank, PageRank};
+use ironweaver_core::cancel::{run_with_progress, Progress, Token};
+use ironweaver_core::pathfinding::EdgeCost;
+use ironweaver_core::{Direction, Graph, GraphError, Projection, Record};
+
+fn main() -> Result<(), GraphError> {
+    let mut g: Graph<Record, Record> = Graph::new();
+    let a = g.add_node("a", Record::default())?;
+    let b = g.add_node("b", Record::default())?;
+    g.add_edge(a, b, Record::default())?;
+    let p = Projection::build::<_, _, GraphError>(&g, Direction::Out, &EdgeCost::Unit)?;
+
+    let progress = Progress::new(); // a clone goes to the thread that watches
+    let opts = PageRank { tol: 0.0, max_iter: 50, ..Default::default() };
+    run_with_progress(&Token::new(), &progress, || pagerank(&p, &opts))??;
+    let s = progress.snapshot();
+    assert_eq!((s.phase, s.done, s.total), ("pagerank", 50, Some(50)));
+    Ok(())
+}
+```
 
 ## Budgets
 

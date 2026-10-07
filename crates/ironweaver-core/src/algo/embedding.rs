@@ -98,10 +98,13 @@ pub fn fastrp(p: &Projection, opts: &FastRP) -> Result<Vec<f32>, GraphError> {
     let mut previous = random;
     let mut current = vec![0f32; n * d];
     let stop = crate::cancel::stop();
+    let report = crate::cancel::progress();
+    report.start("fastrp", Some(opts.iteration_weights.len() as u64));
     for &weight in &opts.iteration_weights {
         if stop.requested() {
             break;
         }
+        report.add(1);
         current.par_chunks_mut(d).enumerate().for_each(|(u, v)| {
             v.iter_mut().for_each(|x| *x = 0.0);
             let weights = p.out_weights(u as u32);

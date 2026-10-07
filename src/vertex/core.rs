@@ -458,6 +458,33 @@ impl Vertex {
         ixs.into_iter().map(|ix| Node::handle(slf.py(), &vertex, ix)).collect()
     }
 
+    /// Every label at least one node carries, with its number of nodes, in
+    /// the order the labels were first used (label index)
+    fn labels<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(slf.py());
+        for (label, count) in slf.try_borrow()?.graph.labels() {
+            dict.set_item(label, count)?;
+        }
+        Ok(dict)
+    }
+
+    /// Every edge type at least one edge has, with its number of edges:
+    /// untyped edges first (key None, if any), then the types in the order
+    /// they were first used (counted as edges change)
+    fn edge_types<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(slf.py());
+        for (ty, count) in slf.try_borrow()?.graph.edge_types() {
+            dict.set_item(ty, count)?;
+        }
+        Ok(dict)
+    }
+
+    /// Number of edges of type ``type`` (counted as edges change)
+    #[pyo3(signature = (r#type))]
+    fn edge_type_count(&self, r#type: &str) -> usize {
+        self.graph.edge_type_count(r#type)
+    }
+
     // Serialization methods
     /// Save the graph to a JSON file or return JSON string
     ///

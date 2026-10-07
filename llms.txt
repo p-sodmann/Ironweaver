@@ -46,10 +46,12 @@ assert big.project(weight="weight").edge_count() == 2
 g["alice"].add_label("Person")                     # or add_node(id, attr, labels=[...])
 g.add_node("dora", labels=["Person", "Admin"])
 assert [n.id for n in g.nodes_with_label("Person")] == ["alice", "dora"]   # label index
+assert g.labels()["Person"] == 2                    # every label and its node count
 e = g["alice"].edges[0]
 assert e.type == "knows" and e.attr["type"] == "knows"   # attr {"type": ...} became the type
 e2 = g.add_edge("dora", "acme", type="works_at")
 assert g.get_edge(e2.id) == e2                     # ids: int, unique, never reused, saved
+assert g.edge_type_count("works_at") == 3          # O(1); g.edge_types() -> {type or None: count}
 g.remove_node("dora")
 ```
 
