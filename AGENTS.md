@@ -90,7 +90,9 @@ Below is a quick guide to notable functions and where to find them.
   (explicit id / type), `remove_node`, `remove_edge`, `rename_node`,
   `node_ix`, `edge_ix` (by `EdgeId`; `EdgeIndex`: dense table + sparse
   map), `next_edge_id` / `reserve_edge_ids`, `add_label` / `remove_label` /
-  `nodes_with_label`, `set_edge_type` / `edge_type_name`, `edges_between`,
+  `nodes_with_label` / `labels`, `set_edge_type` / `edge_type_name`,
+  `edge_types` / `edge_type_count` (a count per type, kept on every edge
+  add / remove / retype), `edges_between`,
   `nodes`, `edges`, `neighbors`, `induced_subgraph` (shared by
   filter/expand/shortest paths/traversals; keeps ids, labels, types).
   `memory_usage` is O(1): the `heap` counter tracks each node's id, labels

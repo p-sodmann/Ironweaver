@@ -362,6 +362,8 @@ pub struct Graph<N, E> {
     symbols: Symbols,
     /// Nodes carrying each label.
     labeled: HashMap<Symbol, IxSet<NodeIx>>,
+    /// Number of edges of each type.
+    type_counts: TypeCounts,
     /// Property indexes (see `index.rs`).
     pub(crate) indexes: Indexes,
     /// Heap bytes that grow with the graph, kept up to date by every change
@@ -380,12 +382,47 @@ impl<N: Clone, E: Clone> Clone for Graph<N, E> {
             next_edge_id: self.next_edge_id,
             symbols: self.symbols.clone(),
             labeled: self.labeled.clone(),
+            type_counts: self.type_counts.clone(),
             indexes: self.indexes.clone(),
             heap: 0,
         };
         // Cloned strings and lists have other capacities
         g.recount();
         g
+    }
+}
+
+/// Edges per type: by symbol (zero for labels and unused types), and
+/// untyped.
+#[derive(Clone, Debug, Default)]
+struct TypeCounts {
+    typed: Vec<usize>,
+    untyped: usize,
+}
+
+impl TypeCounts {
+    fn add(&mut self, ty: Option<Symbol>) {
+        match ty {
+            None => self.untyped += 1,
+            Some(s) => {
+                let i = s.0 as usize;
+                if i >= self.typed.len() {
+                    self.typed.resize(i + 1, 0);
+                }
+                self.typed[i] += 1;
+            }
+        }
+    }
+
+    fn remove(&mut self, ty: Option<Symbol>) {
+        match ty {
+            None => self.untyped -= 1,
+            Some(s) => self.typed[s.0 as usize] -= 1,
+        }
+    }
+
+    fn get(&self, ty: Symbol) -> usize {
+        self.typed.get(ty.0 as usize).copied().unwrap_or(0)
     }
 }
 
@@ -422,6 +459,7 @@ impl<N, E> Graph<N, E> {
             next_edge_id: 0,
             symbols: Symbols::default(),
             labeled: HashMap::new(),
+            type_counts: TypeCounts::default(),
             indexes: Indexes::default(),
             heap: 0,
         }
@@ -515,6 +553,7 @@ impl<N, E> Graph<N, E> {
         let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data }, "edges")?;
         let ix = EdgeIx { slot, generation };
         self.edge_index.insert(id, slot, self.edges.len);
+        self.type_counts.add(ty);
         Ok(ix)
     }
 
@@ -541,6 +580,8 @@ impl<N, E> Graph<N, E> {
         let sym = ty.map(|t| self.symbols.intern(t));
         let edge = self.edges.get_mut(ix.slot, ix.generation).ok_or(GraphError::Stale)?;
         let old = std::mem::replace(&mut edge.ty, sym);
+        self.type_counts.remove(old);
+        self.type_counts.add(sym);
         Ok(old.map(|s| self.symbols.name(s).to_owned()))
     }
 
@@ -613,6 +654,29 @@ impl<N, E> Graph<N, E> {
     /// Number of nodes carrying `label`.
     pub fn label_count(&self, label: &str) -> usize {
         self.symbols.get(label).and_then(|s| self.labeled.get(&s)).map_or(0, |set| set.len())
+    }
+
+    /// Every label at least one node carries, with its number of nodes, in
+    /// the order the labels were first used. O(labels and types).
+    pub fn labels(&self) -> impl Iterator<Item = (&str, usize)> {
+        self.symbols.names.iter().enumerate().filter_map(|(i, name)| {
+            let count = self.labeled.get(&Symbol(i as u32)).map_or(0, |set| set.len());
+            (count > 0).then_some((&**name, count))
+        })
+    }
+
+    /// Number of edges of type `ty`. O(1).
+    pub fn edge_type_count(&self, ty: &str) -> usize {
+        self.symbols.get(ty).map_or(0, |s| self.type_counts.get(s))
+    }
+
+    /// Every edge type at least one edge has, with its number of edges:
+    /// untyped edges first (`None`, if there are any), then the types in
+    /// the order they were first used. O(labels and types).
+    pub fn edge_types(&self) -> impl Iterator<Item = (Option<&str>, usize)> {
+        let untyped = (self.type_counts.untyped > 0).then_some((None, self.type_counts.untyped));
+        let typed = self.type_counts.typed.iter().enumerate().filter(|&(_, &count)| count > 0);
+        untyped.into_iter().chain(typed.map(|(i, &count)| (Some(&*self.symbols.names[i]), count)))
     }
 
     /// Nodes carrying `label`, in slot order.
@@ -750,6 +814,7 @@ impl<N, E> Graph<N, E> {
         for &e in &node.out {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
+                self.type_counts.remove(edge.ty);
                 if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
                     if to.inc.len() == 1 {
                         to.inc.clear();
@@ -768,6 +833,7 @@ impl<N, E> Graph<N, E> {
             // Self loops were already removed through the outgoing list.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
+                self.type_counts.remove(edge.ty);
                 if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
                     if from.out.len() == 1 {
                         from.out.clear();
@@ -840,6 +906,7 @@ impl<N, E> Graph<N, E> {
         let edge =
             self.edges.remove(ix.slot, ix.generation).ok_or_else(|| internal("an edge just looked up is gone"))?;
         self.edge_index.remove(edge.id);
+        self.type_counts.remove(edge.ty);
         if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
             from.out.retain(|&x| x != ix);
         }
@@ -892,6 +959,7 @@ impl<N, E> Graph<N, E> {
         total += self.symbols.name_bytes;
         total += self.symbols.names.capacity() * size_of::<Box<str>>();
         total += hash_table_bytes(self.symbols.index.capacity(), size_of::<(Box<str>, Symbol)>());
+        total += self.type_counts.typed.capacity() * size_of::<usize>();
         total + hash_table_bytes(self.labeled.capacity(), size_of::<(Symbol, IxSet<NodeIx>)>())
     }
 
@@ -1159,8 +1227,10 @@ mod tests {
         assert!(g.remove_label(a, "Person").unwrap());
         assert!(!g.remove_label(b, "Nope").unwrap());
         assert_eq!(g.nodes_with_label("Person"), [c]);
+        assert_eq!(g.labels().collect::<Vec<_>>(), [("Person", 1), ("Admin", 1)]);
         g.remove_node(c).unwrap();
         assert!(g.nodes_with_label("Person").is_empty());
+        assert_eq!(g.labels().collect::<Vec<_>>(), [("Admin", 1)]);
         assert_eq!(g.add_label(c, "X"), Err(GraphError::Stale));
 
         let e = g.node(a).unwrap().out_edges()[0];
@@ -1171,6 +1241,20 @@ mod tests {
         assert!(g.edges_between(a, b, g.symbol("knows")).is_empty());
         assert_eq!(g.edges_between(a, b, None), [e]);
         assert_eq!(g.set_edge_type(e, None).unwrap(), Some("likes".into()));
+        assert_eq!(g.edge_types().collect::<Vec<_>>(), [(None, 1)]);
+        g.insert_edge(b, a, None, Some("knows"), 0).unwrap();
+        g.insert_edge(a, a, None, Some("knows"), 0).unwrap();
+        g.set_edge_type(e, Some("likes")).unwrap();
+        assert_eq!((g.edge_type_count("knows"), g.edge_type_count("likes"), g.edge_type_count("Admin")), (2, 1, 0));
+        assert_eq!(g.edge_types().collect::<Vec<_>>(), [(Some("knows"), 2), (Some("likes"), 1)]);
+        // Labels and types share symbols but not counts
+        g.add_label(a, "knows").unwrap();
+        assert_eq!(g.labels().collect::<Vec<_>>(), [("Admin", 1), ("knows", 1)]);
+        g.remove_edge(e).unwrap();
+        assert_eq!(g.edge_types().collect::<Vec<_>>(), [(Some("knows"), 2)]);
+        g.remove_node(a).unwrap();
+        assert_eq!(g.edge_types().count(), 0);
+        assert_eq!(g.edge_type_count("knows"), 0);
     }
 
     #[test]
@@ -1255,6 +1339,40 @@ mod tests {
             assert_eq!(a, b);
         }
         assert_eq!(g.memory_usage(), g.fixed_memory() + g.count_heap() + g.indexes.memory_usage());
+        check_label_and_type_counts(g);
+    }
+
+    /// `labels` and `edge_types` against a scan of every node and edge.
+    fn check_label_and_type_counts<N, E>(g: &Graph<N, E>) {
+        let mut labels: Vec<(&str, usize)> = Vec::new();
+        let mut types: Vec<(Option<&str>, usize)> = Vec::new();
+        fn bump<K: PartialEq>(list: &mut Vec<(K, usize)>, key: K) {
+            match list.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, n)) => *n += 1,
+                None => list.push((key, 1)),
+            }
+        }
+        for (_, n) in g.nodes() {
+            for &l in n.labels() {
+                bump(&mut labels, g.symbol_name(l));
+            }
+        }
+        for (e, _) in g.edges() {
+            bump(&mut types, g.edge_type_name(e));
+        }
+        let mut found: Vec<_> = g.labels().collect();
+        labels.sort();
+        found.sort();
+        assert_eq!(found, labels);
+        let mut found: Vec<_> = g.edge_types().collect();
+        types.sort();
+        found.sort();
+        assert_eq!(found, types);
+        for (ty, n) in types {
+            if let Some(ty) = ty {
+                assert_eq!(g.edge_type_count(ty), n);
+            }
+        }
     }
 
     #[test]
@@ -1283,7 +1401,8 @@ mod tests {
                 }
                 3 | 4 if !live.is_empty() => {
                     let (a, b) = (pick(&mut rng), pick(&mut rng));
-                    g.add_edge(a, b, Record::default()).unwrap();
+                    let ty = [None, Some("A"), Some("T1"), Some("T2")][rng.random_range(0..4)];
+                    g.insert_edge(a, b, None, ty, Record::default()).unwrap();
                 }
                 5 if !live.is_empty() => {
                     let a = pick(&mut rng);
@@ -1300,7 +1419,12 @@ mod tests {
                 }
                 7 if g.edge_count() > 0 => {
                     let edges: Vec<EdgeIx> = g.edges().map(|(e, _)| e).collect();
-                    g.remove_edge(edges[rng.random_range(0..edges.len())]).unwrap();
+                    let e = edges[rng.random_range(0..edges.len())];
+                    if rng.random_bool(0.3) {
+                        g.set_edge_type(e, [None, Some("B"), Some("T1")][rng.random_range(0..3)]).unwrap();
+                    } else {
+                        g.remove_edge(e).unwrap();
+                    }
                 }
                 8 if !live.is_empty() => {
                     let a = pick(&mut rng);
@@ -1314,6 +1438,9 @@ mod tests {
                 _ => {}
             }
             assert_eq!(g.heap, g.count_heap(), "step {step}");
+            if step % 10 == 0 {
+                check_label_and_type_counts(&g);
+            }
             if step % 50 == 0 {
                 check_counters(&g);
                 let copy = g.clone();

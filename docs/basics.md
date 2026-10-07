@@ -51,8 +51,11 @@ are kept when saving and loading, and when deriving graphs with `filter` or
 assert b.labels == ["Person"] and b.has_label("Person")
 a.add_label("Admin")
 assert [n.id for n in v.nodes_with_label("Admin")] == ["a"]
+assert v.labels()["Admin"] == 1          # every label, with its number of nodes
 
 assert e.type == "knows"
+assert v.edge_type_count("knows") >= 1   # counted as edges change, O(1)
+print(v.edge_types())                    # {type (None: untyped): number of edges}
 assert v.get_edge(e.id) == e             # look an edge up by id
 ```
 

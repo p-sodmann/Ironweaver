@@ -5,6 +5,7 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
 - **A directed property multigraph**, `Graph<N, E>`.
   - Nodes have unique string ids, sorted label sets (interned, with a label index) and a payload `N`.
   - Edges have persistent ids (never reused), an optional type and a payload `E`.
+  - `labels()` lists every label with its node count, and `edge_types()` / `edge_type_count()` count edges per type, from counters kept as the graph changes.
   - Handles (`NodeIx` / `EdgeIx`) never alias a removed node or edge.
 - **Changes as data.** `Op` values apply to a graph and return the ops that undo them, and `Graph::apply_all` applies a batch all-or-nothing. That's the base for a write-ahead log, replication or rollback.
 - **Filter expressions** (`Expr`): comparisons, membership and existence on attribute paths, labels and edge types, and `and` / `or` / `not`.
