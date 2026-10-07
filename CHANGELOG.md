@@ -102,6 +102,14 @@ a query layer and database foundations.
 - `Vertex.memory_usage(deep=False)` (and `Graph::memory_usage` in the
   core): bytes used by the structure, with `deep` also the attribute dicts
   and their values.
+- Payload memory in the core: payloads that implement the new `HeapSize`
+  trait (`Record`, `Value`, `()`) are counted in `Graph::memory_usage` once
+  `Graph::count_payloads()` turns it on (the `format` loaders do). It stays
+  O(1): the graph keeps the count as nodes, edges and payloads change, and
+  measures payloads handed out by `node_mut` / `nodes_mut` again until the
+  next change. `IndexBuild::memory_usage()` (O(1)) and
+  `RawProjection::memory_usage()` report what an index build in progress
+  and a collected projection hold.
 - **Ctrl+C stops long computations:** projection algorithms, batch
   shortest paths / distances, random walks, `Vertex.match`, `Node.paths`,
   `shortest_path` and traversals raise `KeyboardInterrupt` shortly after

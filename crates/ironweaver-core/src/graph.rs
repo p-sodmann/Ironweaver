@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::index::Indexes;
-use crate::{Direction, GraphError};
+use crate::{Direction, GraphError, HeapSize};
 
 /// Hasher for `NodeIx` / `EdgeIx` keys: a multiply-rotate mix of the two
 /// `u32`s, much cheaper than the default SipHash. Handles are not
@@ -370,6 +370,100 @@ pub struct Graph<N, E> {
     /// so `memory_usage` is O(1): each live node's id, labels and adjacency
     /// lists, the id index's keys and the label sets.
     heap: usize,
+    /// Heap bytes of the payloads, once counting is turned on (see
+    /// `count_payloads`).
+    payloads: Option<Box<Payloads<N, E>>>,
+}
+
+/// Bookkeeping for payload memory: the sizes of the payloads, kept up to
+/// date as nodes and edges come and go. A payload handed out mutably
+/// (`node_mut`, `nodes_mut`, ...) may change behind the graph's back: its
+/// size is taken out of the counter and the node or edge is marked dirty;
+/// `memory_usage` measures dirty payloads afresh, and the next change to
+/// the graph (`settle_payloads`) puts their sizes back into the counter.
+struct Payloads<N, E> {
+    node_size: fn(&N) -> usize,
+    edge_size: fn(&E) -> usize,
+    /// Heap bytes of the node payloads that are not dirty.
+    node_bytes: usize,
+    edge_bytes: usize,
+    dirty_nodes: IxSet<NodeIx>,
+    dirty_edges: IxSet<EdgeIx>,
+    /// Every node is dirty (after `nodes_mut`): `node_bytes` is 0.
+    all_nodes: bool,
+    all_edges: bool,
+}
+
+impl<N, E> Clone for Payloads<N, E> {
+    fn clone(&self) -> Self {
+        Payloads {
+            node_size: self.node_size,
+            edge_size: self.edge_size,
+            node_bytes: self.node_bytes,
+            edge_bytes: self.edge_bytes,
+            dirty_nodes: self.dirty_nodes.clone(),
+            dirty_edges: self.dirty_edges.clone(),
+            all_nodes: self.all_nodes,
+            all_edges: self.all_edges,
+        }
+    }
+}
+
+impl<N, E> std::fmt::Debug for Payloads<N, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Payloads")
+            .field("node_bytes", &self.node_bytes)
+            .field("edge_bytes", &self.edge_bytes)
+            .field("dirty_nodes", &self.dirty_nodes.len())
+            .field("dirty_edges", &self.dirty_edges.len())
+            .field("all_nodes", &self.all_nodes)
+            .field("all_edges", &self.all_edges)
+            .finish()
+    }
+}
+
+impl<N, E> Payloads<N, E> {
+    fn add_node(&mut self, data: &N) {
+        if !self.all_nodes {
+            self.node_bytes += (self.node_size)(data);
+        }
+    }
+
+    fn add_edge(&mut self, data: &E) {
+        if !self.all_edges {
+            self.edge_bytes += (self.edge_size)(data);
+        }
+    }
+
+    /// A node was removed (dirty or not).
+    fn remove_node(&mut self, ix: NodeIx, data: &N) {
+        if !self.all_nodes && !self.dirty_nodes.remove(&ix) {
+            self.node_bytes -= (self.node_size)(data);
+        }
+    }
+
+    fn remove_edge(&mut self, ix: EdgeIx, data: &E) {
+        if !self.all_edges && !self.dirty_edges.remove(&ix) {
+            self.edge_bytes -= (self.edge_size)(data);
+        }
+    }
+
+    /// A node's payload is handed out mutably.
+    fn touch_node(&mut self, ix: NodeIx, data: &N) {
+        if !self.all_nodes && self.dirty_nodes.insert(ix) {
+            self.node_bytes -= (self.node_size)(data);
+        }
+    }
+
+    fn touch_edge(&mut self, ix: EdgeIx, data: &E) {
+        if !self.all_edges && self.dirty_edges.insert(ix) {
+            self.edge_bytes -= (self.edge_size)(data);
+        }
+    }
+
+    fn is_settled(&self) -> bool {
+        !self.all_nodes && !self.all_edges && self.dirty_nodes.is_empty() && self.dirty_edges.is_empty()
+    }
 }
 
 impl<N: Clone, E: Clone> Clone for Graph<N, E> {
@@ -385,6 +479,7 @@ impl<N: Clone, E: Clone> Clone for Graph<N, E> {
             type_counts: self.type_counts.clone(),
             indexes: self.indexes.clone(),
             heap: 0,
+            payloads: self.payloads.clone(),
         };
         // Cloned strings and lists have other capacities
         g.recount();
@@ -462,6 +557,7 @@ impl<N, E> Graph<N, E> {
             type_counts: TypeCounts::default(),
             indexes: Indexes::default(),
             heap: 0,
+            payloads: None,
         }
     }
 
@@ -497,11 +593,16 @@ impl<N, E> Graph<N, E> {
     }
 
     fn insert_node(&mut self, id: String, data: N) -> Result<NodeIx, GraphError> {
+        self.settle_payloads();
         let (slot, generation) = self
             .nodes
             .insert(Node { id: id.clone(), labels: Vec::new(), out: Vec::new(), inc: Vec::new(), data }, "nodes")?;
         let ix = NodeIx { slot, generation };
         self.heap += id.capacity() + node_heap(self.node_ref_mut(ix));
+        if let Some(p) = &mut self.payloads {
+            let node = self.nodes.get(slot, generation).expect("just inserted");
+            p.add_node(&node.data);
+        }
         self.index.insert(id, ix);
         self.indexes.touch(ix);
         Ok(ix)
@@ -550,8 +651,13 @@ impl<N, E> Graph<N, E> {
         self.next_edge_id = self
             .next_edge_id
             .max(id.0.checked_add(1).ok_or(GraphError::InvalidArgument("edge id space exhausted".into()))?);
+        self.settle_payloads();
         let (slot, generation) = self.edges.insert(Edge { from, to, id, ty, data }, "edges")?;
         let ix = EdgeIx { slot, generation };
+        if let Some(p) = &mut self.payloads {
+            let edge = self.edges.get(slot, generation).expect("just inserted");
+            p.add_edge(&edge.data);
+        }
         self.edge_index.insert(id, slot, self.edges.len);
         self.type_counts.add(ty);
         Ok(ix)
@@ -735,6 +841,9 @@ impl<N, E> Graph<N, E> {
     pub fn node_mut(&mut self, ix: NodeIx) -> Option<&mut Node<N>> {
         let node = self.nodes.get_mut(ix.slot, ix.generation)?;
         self.indexes.touch(ix);
+        if let Some(p) = &mut self.payloads {
+            p.touch_node(ix, &node.data);
+        }
         Some(node)
     }
 
@@ -747,7 +856,11 @@ impl<N, E> Graph<N, E> {
     }
 
     pub fn edge_mut(&mut self, ix: EdgeIx) -> Option<&mut Edge<E>> {
-        self.edges.get_mut(ix.slot, ix.generation)
+        let edge = self.edges.get_mut(ix.slot, ix.generation)?;
+        if let Some(p) = &mut self.payloads {
+            p.touch_edge(ix, &edge.data);
+        }
+        Some(edge)
     }
 
     /// A node known to be live (listed in an edge or adjacency list).
@@ -799,10 +912,14 @@ impl<N, E> Graph<N, E> {
     pub(crate) fn try_remove_node(&mut self, ix: NodeIx) -> Result<Option<(String, N)>, GraphError> {
         let Some(node) = self.node(ix) else { return Ok(None) };
         self.check_node(ix, node)?;
+        self.settle_payloads();
         let node =
             self.nodes.remove(ix.slot, ix.generation).ok_or_else(|| internal("a node just looked up is gone"))?;
         let (key, _) = self.index.remove_entry(&node.id).ok_or_else(not_indexed)?;
         self.heap -= key.capacity() + node_heap(&node);
+        if let Some(p) = &mut self.payloads {
+            p.remove_node(ix, &node.data);
+        }
         self.indexes.remove(ix);
         for &label in &node.labels {
             self.unindex_label(label, ix);
@@ -814,6 +931,9 @@ impl<N, E> Graph<N, E> {
         for &e in &node.out {
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
+                if let Some(p) = &mut self.payloads {
+                    p.remove_edge(e, &edge.data);
+                }
                 self.type_counts.remove(edge.ty);
                 if let Some(to) = self.nodes.get_mut(edge.to.slot, edge.to.generation) {
                     if to.inc.len() == 1 {
@@ -833,6 +953,9 @@ impl<N, E> Graph<N, E> {
             // Self loops were already removed through the outgoing list.
             if let Some(edge) = self.edges.remove(e.slot, e.generation) {
                 self.edge_index.remove(edge.id);
+                if let Some(p) = &mut self.payloads {
+                    p.remove_edge(e, &edge.data);
+                }
                 self.type_counts.remove(edge.ty);
                 if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
                     if from.out.len() == 1 {
@@ -903,9 +1026,13 @@ impl<N, E> Graph<N, E> {
         if self.node(edge.from).is_none() || self.node(edge.to).is_none() {
             return Err(internal("an edge's endpoint is gone"));
         }
+        self.settle_payloads();
         let edge =
             self.edges.remove(ix.slot, ix.generation).ok_or_else(|| internal("an edge just looked up is gone"))?;
         self.edge_index.remove(edge.id);
+        if let Some(p) = &mut self.payloads {
+            p.remove_edge(ix, &edge.data);
+        }
         self.type_counts.remove(edge.ty);
         if let Some(from) = self.nodes.get_mut(edge.from.slot, edge.from.generation) {
             from.out.retain(|&x| x != ix);
@@ -937,14 +1064,146 @@ impl<N, E> Graph<N, E> {
     /// Approximate bytes used by the graph's structure: node and edge slots
     /// (including the payloads' inline size), ids, adjacency lists, labels,
     /// the id, edge-id and label indexes and the property indexes. Memory
-    /// that payloads own elsewhere (attribute maps, Python objects) is not
-    /// counted.
+    /// that payloads own elsewhere (attribute maps, strings) is counted
+    /// only once [`count_payloads`](Graph::count_payloads) turned that on
+    /// (the [`format`](crate::format) loaders do).
     ///
     /// O(1) (O(number of property indexes)): the parts that grow with the
     /// graph are counted as it changes, so this is cheap enough to call on
-    /// every write.
+    /// every write. Payloads handed out mutably since the graph last
+    /// changed (by [`node_mut`](Graph::node_mut), [`nodes_mut`](Graph::nodes_mut),
+    /// ...) are measured again, one by one.
     pub fn memory_usage(&self) -> usize {
-        self.fixed_memory() + self.heap + self.indexes.memory_usage()
+        self.fixed_memory() + self.heap + self.indexes.memory_usage() + self.payload_memory()
+    }
+
+    /// Count the memory payloads own (their [`HeapSize`]) in
+    /// [`memory_usage`](Graph::memory_usage) from now on. One pass over the
+    /// graph; after that the graph keeps the count as it changes, like the
+    /// rest of `memory_usage`. Calling it again does nothing.
+    ///
+    /// ```
+    /// use ironweaver_core::{Graph, Record, Value};
+    ///
+    /// let mut g = Graph::<Record, Record>::new();
+    /// g.add_node("a", Record::with_attr([("text", Value::from("x".repeat(1000)))])).unwrap();
+    /// let structure = g.memory_usage();
+    /// g.count_payloads();
+    /// assert!(g.memory_usage() >= structure + 1000);
+    /// ```
+    pub fn count_payloads(&mut self)
+    where
+        N: HeapSize,
+        E: HeapSize,
+    {
+        if self.payloads.is_none() {
+            self.payloads = Some(Box::new(Payloads {
+                node_size: N::heap_bytes,
+                edge_size: E::heap_bytes,
+                node_bytes: 0,
+                edge_bytes: 0,
+                dirty_nodes: IxSet::default(),
+                dirty_edges: IxSet::default(),
+                all_nodes: true,
+                all_edges: true,
+            }));
+            self.settle_payloads();
+        }
+    }
+
+    /// Whether [`memory_usage`](Graph::memory_usage) counts payloads (see
+    /// [`count_payloads`](Graph::count_payloads)).
+    pub fn counts_payloads(&self) -> bool {
+        self.payloads.is_some()
+    }
+
+    /// Heap bytes of the payloads (0 unless counted), and of the dirty sets.
+    fn payload_memory(&self) -> usize {
+        let Some(p) = &self.payloads else { return 0 };
+        use std::mem::size_of;
+        self.payload_bytes()
+            + size_of::<Payloads<N, E>>()
+            + hash_table_bytes(p.dirty_nodes.capacity(), size_of::<NodeIx>())
+            + hash_table_bytes(p.dirty_edges.capacity(), size_of::<EdgeIx>())
+    }
+
+    /// Heap bytes of the payloads, from the counters and the dirty payloads.
+    fn payload_bytes(&self) -> usize {
+        let Some(p) = &self.payloads else { return 0 };
+        let nodes = if p.all_nodes {
+            self.nodes().map(|(_, n)| (p.node_size)(&n.data)).sum()
+        } else {
+            let dirty = p.dirty_nodes.iter().filter_map(|&ix| self.node(ix));
+            p.node_bytes + dirty.map(|n| (p.node_size)(&n.data)).sum::<usize>()
+        };
+        let edges = if p.all_edges {
+            self.edges().map(|(_, e)| (p.edge_size)(&e.data)).sum()
+        } else {
+            let dirty = p.dirty_edges.iter().filter_map(|&ix| self.edge(ix));
+            p.edge_bytes + dirty.map(|e| (p.edge_size)(&e.data)).sum::<usize>()
+        };
+        nodes + edges
+    }
+
+    /// Heap bytes of the payloads, measured afresh (O(n)).
+    #[cfg(test)]
+    fn count_payload_bytes(&self) -> usize {
+        let Some(p) = &self.payloads else { return 0 };
+        self.nodes().map(|(_, n)| (p.node_size)(&n.data)).sum::<usize>()
+            + self.edges().map(|(_, e)| (p.edge_size)(&e.data)).sum::<usize>()
+    }
+
+    /// Measure the payloads handed out mutably since the last settle and
+    /// put their sizes back into the counters. O(number of them); called
+    /// by the changes that go through the graph (adding and removing nodes
+    /// and edges, [`apply`](Graph::apply)).
+    #[inline]
+    pub(crate) fn settle_payloads(&mut self) {
+        if self.payloads.as_ref().is_some_and(|p| !p.is_settled()) {
+            self.settle_dirty_payloads();
+        }
+    }
+
+    fn settle_dirty_payloads(&mut self) {
+        let Some(mut p) = self.payloads.take() else { return };
+        {
+            if p.all_nodes {
+                p.node_bytes = self.nodes().map(|(_, n)| (p.node_size)(&n.data)).sum();
+                p.all_nodes = false;
+            } else {
+                for ix in std::mem::take(&mut p.dirty_nodes) {
+                    if let Some(n) = self.node(ix) {
+                        p.node_bytes += (p.node_size)(&n.data);
+                    }
+                }
+            }
+            if p.all_edges {
+                p.edge_bytes = self.edges().map(|(_, e)| (p.edge_size)(&e.data)).sum();
+                p.all_edges = false;
+            } else {
+                for ix in std::mem::take(&mut p.dirty_edges) {
+                    if let Some(e) = self.edge(ix) {
+                        p.edge_bytes += (p.edge_size)(&e.data);
+                    }
+                }
+            }
+            p.dirty_nodes.shrink_to_fit();
+            p.dirty_edges.shrink_to_fit();
+        }
+        self.payloads = Some(p);
+    }
+
+    /// Recompute the payload counters from scratch.
+    fn recount_payloads(&mut self) {
+        if let Some(p) = &mut self.payloads {
+            p.all_nodes = true;
+            p.all_edges = true;
+            p.node_bytes = 0;
+            p.edge_bytes = 0;
+            p.dirty_nodes.clear();
+            p.dirty_edges.clear();
+        }
+        self.settle_payloads();
     }
 
     /// The parts of `memory_usage` read off capacities.
@@ -976,6 +1235,7 @@ impl<N, E> Graph<N, E> {
     fn recount(&mut self) {
         self.heap = self.count_heap();
         self.indexes.recount();
+        self.recount_payloads();
     }
 
     /// All nodes, in slot order.
@@ -987,6 +1247,11 @@ impl<N, E> Graph<N, E> {
     /// flushed).
     pub fn nodes_mut(&mut self) -> impl Iterator<Item = (NodeIx, &mut Node<N>)> + '_ {
         self.indexes.touch_all();
+        if let Some(p) = &mut self.payloads {
+            p.all_nodes = true;
+            p.node_bytes = 0;
+            p.dirty_nodes = IxSet::default();
+        }
         self.nodes.iter_mut().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
     }
 
@@ -1000,6 +1265,11 @@ impl<N, E> Graph<N, E> {
     }
 
     pub fn edges_mut(&mut self) -> impl Iterator<Item = (EdgeIx, &mut Edge<E>)> + '_ {
+        if let Some(p) = &mut self.payloads {
+            p.all_edges = true;
+            p.edge_bytes = 0;
+            p.dirty_edges = IxSet::default();
+        }
         self.edges.iter_mut().map(|(slot, generation, e)| (EdgeIx { slot, generation }, e))
     }
 
@@ -1338,7 +1608,8 @@ mod tests {
         for (a, b) in g.indexes.list_heaps().zip(fresh.list_heaps()) {
             assert_eq!(a, b);
         }
-        assert_eq!(g.memory_usage(), g.fixed_memory() + g.count_heap() + g.indexes.memory_usage());
+        assert_eq!(g.payload_bytes(), g.count_payload_bytes());
+        assert_eq!(g.memory_usage(), g.fixed_memory() + g.count_heap() + g.indexes.memory_usage() + g.payload_memory());
         check_label_and_type_counts(g);
     }
 
@@ -1382,6 +1653,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         let mut g: Graph<Record, Record> = Graph::new();
         g.create_index::<GraphError>(&["k".to_string()]).unwrap();
+        g.count_payloads();
         let mut ids: Vec<String> = Vec::new();
         for step in 0..4000 {
             let live: Vec<NodeIx> = g.node_indices().collect();
@@ -1432,12 +1704,37 @@ mod tests {
                 }
                 _ if !live.is_empty() => {
                     let a = pick(&mut rng);
-                    g.node_mut(a).unwrap().data.attr.insert("k".into(), Value::from(format!("v{}", step % 7)));
+                    let text = "v".repeat(step % 7);
+                    match rng.random_range(0..6) {
+                        0 => {
+                            g.node_mut(a).unwrap().data.attr.insert("k".into(), Value::from(text));
+                        }
+                        1 if g.edge_count() > 0 => {
+                            let e = g.edges().map(|(e, _)| e).nth(rng.random_range(0..g.edge_count())).unwrap();
+                            g.edge_mut(e).unwrap().data.meta.insert("m".into(), Value::from(text));
+                        }
+                        2 => {
+                            for (_, n) in g.nodes_mut().filter(|(ix, _)| ix.slot % 3 == 0) {
+                                n.data.meta.insert("m".into(), Value::from(text.clone()));
+                            }
+                        }
+                        3 => {
+                            for (_, e) in g.edges_mut().filter(|(ix, _)| ix.slot % 3 == 0) {
+                                e.data.attr.clear();
+                            }
+                        }
+                        _ => {
+                            let id = g.node(a).unwrap().id().to_owned();
+                            let value = rng.random_bool(0.8).then_some(Value::from(text));
+                            g.apply(crate::Op::SetNodeAttr { id, key: "k".into(), value }).unwrap();
+                        }
+                    }
                     g.flush_indexes().unwrap();
                 }
                 _ => {}
             }
             assert_eq!(g.heap, g.count_heap(), "step {step}");
+            assert_eq!(g.payload_bytes(), g.count_payload_bytes(), "step {step}");
             if step % 10 == 0 {
                 check_label_and_type_counts(&g);
             }
@@ -1453,5 +1750,50 @@ mod tests {
         }
         check_counters(&g);
         assert!(g.node_count() > 100);
+        g.settle_payloads();
+        check_counters(&g);
+        assert!(g.payloads.as_ref().unwrap().is_settled());
+    }
+
+    #[test]
+    fn memory_usage_counts_payloads_once_asked() {
+        use crate::{Record, Value};
+        let build = |text: &str| {
+            let mut g = Graph::<Record, Record>::new();
+            for i in 0..100 {
+                let rec = Record::with_attr([("text", Value::String(text.repeat(1000)))]);
+                g.add_node(format!("n{i}"), rec).unwrap();
+            }
+            g
+        };
+        let (mut empty, mut full) = (build(""), build("x"));
+        // Structure only, until asked
+        assert_eq!(empty.memory_usage(), full.memory_usage());
+        empty.count_payloads();
+        full.count_payloads();
+        assert!(full.counts_payloads());
+        assert_eq!(full.memory_usage() - empty.memory_usage(), 100 * 1000);
+
+        // A payload changed through node_mut is measured afresh, then settled
+        let a = full.node_ix("n0").unwrap();
+        full.node_mut(a).unwrap().data.attr.insert("text".into(), Value::from(""));
+        assert_eq!(full.payload_bytes() - empty.payload_bytes(), 99 * 1000);
+        full.add_node("extra", Record::default()).unwrap();
+        assert!(full.payloads.as_ref().unwrap().is_settled());
+        assert_eq!(full.payload_bytes(), full.count_payload_bytes());
+
+        // Ops count what they replace, and a replayed copy agrees
+        let mut replay = Graph::<Record, Record>::new();
+        replay.count_payloads();
+        for (_, n) in full.nodes() {
+            replay
+                .apply(crate::Op::AddNode { id: n.id().to_owned(), labels: Vec::new(), data: n.data.clone() })
+                .unwrap();
+        }
+        assert_eq!(replay.payload_bytes(), full.payload_bytes());
+        let value = Some(Value::from(""));
+        full.apply(crate::Op::SetNodeAttr { id: "n1".into(), key: "text".into(), value }).unwrap();
+        assert!(full.payloads.as_ref().unwrap().is_settled());
+        assert_eq!(full.payload_bytes(), replay.payload_bytes() - 1000);
     }
 }

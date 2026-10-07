@@ -798,6 +798,17 @@ impl IndexBuild {
         self.len() == 0
     }
 
+    /// Approximate bytes the build holds (the index so far and the nodes
+    /// read without a key). O(1): counted as it is filled. Once installed,
+    /// the index's share shows up in [`Graph::memory_usage`] instead.
+    pub fn memory_usage(&self) -> usize {
+        use std::mem::size_of;
+        size_of::<Self>()
+            + self.index.path.iter().map(|p| size_of::<String>() + p.capacity()).sum::<usize>()
+            + self.index.memory_usage()
+            + hash_table_bytes(self.unkeyed.capacity(), size_of::<NodeIx>())
+    }
+
     /// Record a node's key, read by the caller (`None`: the node has no
     /// indexable value). `graph` must be the graph the build was begun on;
     /// a stale `ix` is ignored. Reading a node again replaces its key.
@@ -1444,6 +1455,25 @@ mod tests {
     }
 
     #[test]
+    fn index_build_memory_grows_as_it_fills() {
+        let mut g = G::new();
+        let ix: Vec<NodeIx> = (0..1000)
+            .map(|i| g.add_node(format!("n{i}"), Record::with_attr([("x", Value::from(format!("key-{i}")))])).unwrap())
+            .collect();
+        let mut build = g.begin_index_build(&p("x")).unwrap();
+        let empty = build.memory_usage();
+        build.read::<_, _, GraphError>(&g, ix.iter().copied()).unwrap();
+        let full = build.memory_usage();
+        // At least each key twice (in the map and per node)
+        assert!(full > empty + 1000 * 2 * "key-0".len(), "{empty} {full}");
+        let before = g.memory_usage();
+        assert!(g.install_index(build).unwrap());
+        let installed = g.index_stats(&p("x")).unwrap().memory_bytes;
+        assert_eq!(g.memory_usage() - before, installed);
+        assert!(installed <= full);
+    }
+
+    #[test]
     fn index_builds_belong_to_their_graph() {
         let mut g = G::new();
         let a = g.add_node("a", Record::with_attr([("x", Value::Int(1))])).unwrap();
@@ -1455,6 +1485,7 @@ mod tests {
         build.insert(&g, a, Key::of(&Value::Int(1))).unwrap();
         build.insert(&g, b, Key::of(&Value::Int(2))).unwrap();
         assert_eq!((build.path(), build.len()), (p("x").as_slice(), 2));
+        assert!(build.memory_usage() > std::mem::size_of::<IndexBuild>());
         assert!(g.install_index(build).unwrap());
         assert!(!g.indexes_dirty());
         assert_eq!(g.find_nodes(&p("x"), &Value::Int(2)).unwrap().unwrap(), [b]);
