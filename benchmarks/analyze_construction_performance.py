@@ -40,6 +40,11 @@ def extract(raw, repeat=False):
     for path in sorted(raw.glob(prefix+'deletion*.json')):
         for r in json.loads(path.read_text())['results']:
             add('deletion',f"{r['shape']}/{r['edges']}",r['raw_pairs'],scale=1e-9)
+    for path in sorted(raw.glob(prefix+'binding-focus*.json')):
+        for n,pairs in json.loads(path.read_text())['cases'].items():
+            if not pairs: continue
+            for name in pairs[0]['baseline']['metrics']:
+                add('python-focus',name+'/'+n,[{revision:pair[revision]['metrics'][name] for revision in ('baseline','candidate')} for pair in pairs])
     for path in sorted(raw.glob(prefix+'suite*.json')):
         for case,pairs in json.loads(path.read_text())['cases'].items():
             if not pairs: continue
@@ -55,7 +60,7 @@ def short(name):
         .replace('Weakly connected components','WCC').replace('Strongly connected components','SCC')
         .replace('Communities (Leiden / Louvain)','Leiden').replace('Dijkstra from one node (weighted)','Dijkstra')
         .replace('Minimum spanning forest (weight)','MSF').replace('Loop shortest paths (control)','Loop paths')
-        .replace('None','full').replace('Some(3)','depth 3').replace('false','unreserved').replace('true','reserved'))
+        .replace('subgraph-small','edgeless copy (3 nodes)').replace('None','full').replace('Some(3)','depth 3').replace('false','unreserved').replace('true','reserved'))
 
 
 def plots(rows,raw,out):
@@ -71,11 +76,13 @@ def plots(rows,raw,out):
         ax.errorbar(val,y,xerr=[[max(0,val-lo)],[max(0,hi-val)]],fmt='D' if state=='regression' else 'o',mfc='white' if state in ('inconclusive','unchanged') else color,color=color,capsize=2.5,ms=4,lw=1)
     names=[('construction',f'{case}/{n}/threads=1') for n in (1000,20000,100000) for case in ('subgraph','subgraph-small')]
     names += [('construction','random/20000/threads=1'),('construction','nodes/20000/threads=1'),('construction','neighbors/20000/threads=1')]
+    names += [('construction','neighbors/1000/threads=1'),('deletion','parallel-out/4000'),('deletion','mixed/16000')]
     names += [('traversal','bfs/20000/random/None'),('traversal','dfs/20000/random/None')]
+    names += [('python-focus',f'{case}/{n}') for n in (1000,20000,100000) for case in ('filter-3-isolated','bfs-isolated')]
     names += [('networkx',f'networkx/20000/100000/{case}') for case in ('Build graph','BFS (full)','DFS traversal')]
     lookup={(r['suite'],r['name']):r for r in rows}
     picked=[lookup[k] for k in names if k in lookup]
-    fig,(ax,threads)=plt.subplots(1,2,figsize=(17,10),gridspec_kw={'width_ratios':[2.1,1]})
+    fig,(ax,threads)=plt.subplots(1,2,figsize=(18,12),gridspec_kw={'width_ratios':[2.1,1]})
     for y,row in enumerate(picked):
         s=selected(row)
         ax.plot([0,s['change']],[y,y],color='#d3d8df',lw=2)
@@ -100,10 +107,10 @@ def plots(rows,raw,out):
     threads.set_xlabel('Paired runtime change (%)\nFour independent graphs; frozen candidate')
     for axis in (ax,threads):
         axis.spines[['top','right']].set_visible(False);axis.grid(axis='x',alpha=.15)
-    fig.suptitle('Ironweaver — measured graph creation, traversal and concurrency',x=.02,ha='left',fontsize=18)
-    fig.text(.02,.025,'Pointwise 95% Student-t CIs on independent paired log ratios. Labels show medians of process medians.\nGray / hollow = inconclusive or exactly unchanged. † = independent repeat shown; primary and repeat remain in the CSV.\nConcurrency excludes node setup and graph destruction; it does not enable concurrent mutation of a Python graph.',fontsize=10)
+    fig.suptitle('Ironweaver — measured graph creation, traversal and concurrency (draft)',x=.02,ha='left',fontsize=18)
+    fig.text(.02,.025,'Pointwise 95% Student-t CIs on independent paired log ratios. Labels show medians of process summaries.\nGray / hollow = inconclusive or exactly unchanged. † = independent repeat shown; primary and repeat remain in the CSV.\nConfirmed neighbor/deletion regressions remain. Concurrency excludes node setup/destruction and does not enable Python graph mutation.',fontsize=10)
     fig.tight_layout(rect=(0,.1,1,.94));fig.savefig(out/'focused-comparison.png',dpi=180);plt.close(fig)
-    groups=[('construction', ['construction','deletion']),('traversal',['traversal']),('general',['networkx']),('libraries',['libraries']),('memory',['memory'])]
+    groups=[('construction', ['construction','python-focus','deletion']),('traversal',['traversal']),('general',['networkx']),('libraries',['libraries']),('memory',['memory'])]
     fig,axes=plt.subplots(1,5,figsize=(36,24),gridspec_kw={'width_ratios':[1,1.1,1.25,1.2,.9]})
     for axis,(title,suites) in zip(axes,groups):
         subset=[r for r in rows if r['suite'] in suites]
