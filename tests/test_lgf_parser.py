@@ -6,6 +6,7 @@ except Exception as e:  # pragma: no cover - handled via pytest skip
     pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
 from ironweaver.lgf_parser import parse_lgf, parse_lgf_file
+import pytest
 
 
 EXAMPLE = """\
@@ -18,6 +19,27 @@ n1 Person
 n2 Person
   name = Bob
 """
+
+
+@pytest.mark.parametrize("relationship", ["KNOWS", "has-synonym"])
+@pytest.mark.parametrize("target", ["person-2", "person-with-many-hyphens"])
+@pytest.mark.parametrize("separator", [" ", "\t"])
+def test_parse_lgf_inverse_with_hyphenated_target(relationship, target, separator):
+    graph = parse_lgf(
+        f"n1 Person\n"
+        f"  <-{relationship}-{separator}{target}\n"
+        f"    since = 2020\n"
+        f"{target} Person\n"
+    )
+
+    assert graph.node_count() == 2
+    source = graph.get_node(target)
+    assert len(source.edges) == 1
+    edge = source.edges[0]
+    assert edge.from_node.id == target
+    assert edge.to_node.id == "n1"
+    assert edge.attr["type"] == relationship
+    assert edge.attr["since"] == 2020
 
 
 def test_parse_lgf():
