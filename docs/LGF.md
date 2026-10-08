@@ -115,6 +115,9 @@ salary = 75000.50  # Float
 score = -5         # Negative numbers
 ```
 
+Integer literals, including those with a leading `+` or `-`, are parsed as
+Python integers and retain their exact value.
+
 #### Booleans
 ```lgf
 is_active = true
