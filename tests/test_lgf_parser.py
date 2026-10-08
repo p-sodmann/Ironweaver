@@ -42,6 +42,47 @@ def test_parse_lgf_inverse_with_hyphenated_target(relationship, target, separato
     assert edge.attr["since"] == 2020
 
 
+@pytest.mark.parametrize(
+    "literal", ["-42", "+42", "-0", "+0", "-9007199254740993", "+9007199254740993"]
+)
+@pytest.mark.parametrize("location", ["node", "edge", "inline_list", "multiline_list"])
+def test_parse_lgf_signed_integers(literal, location):
+    declarations = {
+        "node": f"  value = {literal}\n",
+        "edge": f"  -KNOWS-> n2\n    value = {literal}\n",
+        "inline_list": f"  value = [{literal}]\n",
+        "multiline_list": f"  value = [\n    {literal},\n  ]\n",
+    }
+    graph = parse_lgf("n1 Person\n" + declarations[location])
+    node = graph.get_node("n1")
+    value = node.edges[0].attr["value"] if location == "edge" else node.attr_get("value")
+    if location in {"inline_list", "multiline_list"}:
+        value = value[0]
+
+    assert value == int(literal)
+    assert type(value) is int
+
+
+@pytest.mark.parametrize(
+    "literal, expected",
+    [
+        ("42", 42),
+        ("-2.5", -2.5),
+        ("+2.5", 2.5),
+        ("1e3", 1000.0),
+        ('"-42"', "-42"),
+        ("true", True),
+        ("false", False),
+        ("Alice", "Alice"),
+    ],
+)
+def test_parse_lgf_scalar_types(literal, expected):
+    graph = parse_lgf(f"n1\n  value = {literal}\n")
+    value = graph.get_node("n1").attr_get("value")
+    assert value == expected
+    assert type(value) is type(expected)
+
+
 def test_parse_lgf():
     g = parse_lgf(EXAMPLE)
     assert isinstance(g, Vertex)
