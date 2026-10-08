@@ -53,6 +53,7 @@ def identity():
 
 
 SYNCHRONIZED = False
+MEASURE_ONLY = None
 
 
 def barrier(event, name, expected):
@@ -65,6 +66,8 @@ def barrier(event, name, expected):
 def measure(fn, repeats, setup=None, disable_gc=False, name=None, warmups=1):
     name = name or str(fn.__code__.co_firstlineno)
     barrier('ready', name, 'RUN')
+    if MEASURE_ONLY is not None and name not in MEASURE_ONLY:
+        repeats, warmups = 1, 0
     samples = []
     result = None
     for i in range(repeats + warmups):
@@ -95,6 +98,11 @@ def worker(case, repeats):
               "build": json.loads(build_path.read_text()) if build_path.exists() else None,
               "extension_sha256": hashlib.sha256(Path(extension.__file__).read_bytes()).hexdigest(),
               "metrics": {}, "excluded": []}
+    global MEASURE_ONLY
+    selection = os.environ.get('IRONWEAVER_MEASURE_ONLY')
+    selected = json.loads(Path(selection).read_text()).get(case) if selection else None
+    if selected:
+        MEASURE_ONLY = set(selected['names']) | {str(line) for line in selected.get('lines', [])}
     suite, *parts = case.split(':')
     if suite == 'networkx':
         import compare_networkx as bench
@@ -122,22 +130,29 @@ def worker(case, repeats):
         bench.best_of = timer
         report = bench.run_size(*map(int, parts), repeats, 42)
         for row in report.results:
-            samples = next(samples for median, samples, _ in records if median is row.ironweaver_s)
-            output['metrics'][row.name] = {"unit": "seconds", "samples": samples}
+            _, samples, line = next(record for record in records if record[0] is row.ironweaver_s)
+            output['metrics'][row.name] = {"unit": "seconds", "samples": samples, "line": line}
         loop_line = next(i for i, line in enumerate(Path(bench.__file__).read_text().splitlines(), 1)
                          if 't_loop, _ = best_of' in line)
         output['metrics']['Batch paths / individual calls'] = {
-            'unit': 'seconds', 'samples': next(samples for _, samples, line in records if line == loop_line)}
+            'unit': 'seconds', 'samples': next(samples for _, samples, line in records if line == loop_line), 'line': loop_line}
         output['reference_checks'] = 'all original run_size assertions completed'
     elif suite == 'libraries':
         import compare_libraries as bench
-        ds = bench.DATASETS[parts[0]]()
+        data = os.environ.get('IRONWEAVER_DATA')
+        if data:
+            with (Path(data) / (parts[0] + '.pickle')).open('rb') as f:
+                ds = pickle.load(f)  # frozen, locally generated original dataset
+        else:
+            ds = bench.DATASETS[parts[0]]()
         output['dataset'] = {'nodes': ds.n, 'edges': len(ds.edges),
                              'sha256': hashlib.sha256(repr(ds.edges).encode()).hexdigest()}
         _, graph, samples = measure(lambda: bench.build_ironweaver(ds), repeats, disable_gc=True, name='Build graph')
         output['metrics']['Build graph'] = {'unit': 'seconds', 'samples': samples}
         reused = bench.Projections(graph)
         for name, make, check, directed_only in bench.OPS:
+            if selected and not any(name + ' / ' + mode in selected['names'] for mode in ('fresh', 'reused')):
+                continue
             if directed_only and not ds.directed:
                 output['excluded'].append([name, 'directed-only operation on undirected dataset'])
                 continue
@@ -174,6 +189,8 @@ def worker(case, repeats):
             del graph
             bench.settle()
             for scenario in ('graph', 'graph_no_attrs', 'load_json', 'save_json'):
+                if selected and scenario not in selected['names']:
+                    continue
                 path = json_path if scenario == 'load_json' else str(Path(folder) / 'output.json')
                 barrier('ready', scenario, 'RUN')
                 runs = [bench.measure('ironweaver', scenario, nodes, edges, 42, path) for _ in range(repeats)]
@@ -182,6 +199,9 @@ def worker(case, repeats):
                 output['metrics'][scenario] = {'unit': 'bytes', 'samples': [r['bytes'] for r in runs]}
     else:
         raise ValueError(case)
+    if selected:
+        output['metrics'] = {name: metric for name, metric in output['metrics'].items() if name in selected['names']}
+        output['confirmation_selection'] = selected
     return output
 
 
@@ -209,6 +229,18 @@ def summarize(pairs):
 
 def run_pair(args, case, packages, env, pair_id):
     pair = {'order': ['baseline', 'candidate'] if pair_id % 2 == 0 else ['candidate', 'baseline']}
+    if args.serial:
+        with tempfile.TemporaryDirectory(prefix='ironweaver-serial-') as folder:
+            for revision in pair['order']:
+                path = Path(folder) / (revision + '.json')
+                command = [sys.executable, str(Path(__file__).resolve()), str(args.baseline), str(args.candidate),
+                           '--worker', case, '--repeats', str(args.repeats), '--output', str(path)]
+                result = subprocess.run(command, env=env | {'PYTHONPATH': str(packages[revision])},
+                                        capture_output=True, text=True)
+                if result.returncode:
+                    raise RuntimeError(result.stdout + result.stderr)
+                pair[revision] = json.loads(path.read_text())
+        return pair
     with tempfile.TemporaryDirectory(prefix='ironweaver-pair-') as folder:
         processes, paths, logs = {}, {}, {}
         try:
@@ -268,7 +300,11 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--worker')
     parser.add_argument('--reference-cache', type=Path)
+    parser.add_argument('--data', type=Path, help='Frozen original library datasets')
+    parser.add_argument('--measure-only', type=Path, help='Independent repeat selection: original names and Python source lines')
+    parser.add_argument('--no-prime', action='store_true', help='Reuse the valid local reference cache from the primary run')
     parser.add_argument('--synchronized', action='store_true')
+    parser.add_argument('--serial', action='store_true', help='Run each entire worker serially, including setup')
     args = parser.parse_args()
     if args.worker:
         global SYNCHRONIZED
@@ -280,6 +316,11 @@ def main():
     if args.pairs < 1 or args.repeats < 1:
         parser.error('pairs and repeats must be positive')
     env = os.environ.copy()
+    if args.measure_only:
+        assert args.serial, 'targeted repeats require serial workers'
+        env['IRONWEAVER_MEASURE_ONLY'] = str(args.measure_only.resolve())
+    if args.data:
+        env['IRONWEAVER_DATA'] = str(args.data.resolve())
     if args.reference_cache:
         args.reference_cache.mkdir(parents=True, exist_ok=True)
         env['IRONWEAVER_REFERENCE_CACHE'] = str(args.reference_cache.resolve())
@@ -292,7 +333,7 @@ def main():
     report = {'pairs': args.pairs, 'repeats': args.repeats, 'cases': {case: [] for case in cases}}
     expected_identity = None
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    if args.reference_cache:
+    if args.reference_cache and not args.no_prime:
         # Prime the NetworkX oracles before collecting any paired timings.
         # These are untimed reference computations, never Ironweaver workloads.
         for case in cases:
@@ -305,7 +346,7 @@ def main():
     for pair_id in range(args.pairs):
         # Reverse case order too, rather than always measuring one case late.
         for case in (cases if pair_id % 2 == 0 else list(reversed(cases))):
-            print(f'pair {pair_id + 1}/{args.pairs} {case}: interleaved operations', flush=True)
+            print(f'pair {pair_id + 1}/{args.pairs} {case}: ' + ('serial workers' if args.serial else 'interleaved operations'), flush=True)
             pair = run_pair(args, case, packages, env, pair_id)
             for revision in pair['order']:
                 run = pair[revision]
@@ -316,7 +357,7 @@ def main():
             builds = [pair[r]['build'] for r in ('baseline', 'candidate')]
             if any(builds):
                 assert all(builds), 'both builds need matching metadata'
-                for key in ('rustc', 'cargo_lock_sha256', 'flags', 'bindings_sha256'):
+                for key in ('rustc', 'cargo_lock_sha256', 'flags', 'bindings_sha256', 'rustflags'):
                     assert builds[0][key] == builds[1][key], ('build mismatch', key)
             report['cases'][case].append(pair)
             args.output.write_text(json.dumps(report, indent=2) + '\n')

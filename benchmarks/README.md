@@ -100,3 +100,42 @@ python benchmarks/confirm_revision_results.py /tmp/revision-builds/baseline /tmp
 The focused runner also accepts `--cases shape:size,...`, `--batch` and
 `--small-batch` for independent control repeats. Keep the initial complete
 inventory and every repeat's raw samples in the report.
+
+## Construction and subgraph revision controls
+
+The revision builder also freezes `construction_bench` and `traversal_bench`
+from the candidate into both builds. Core construction isolates timed work from
+node setup and graph destruction, except that subgraph-result destruction is
+included. Controls cover node insertion, duplicates, stale endpoints, neighbor
+iteration, self-loops, parallel/typed/explicit-ID edges and small subgraphs.
+
+```bash
+python benchmarks/compare_construction.py BUILD/baseline/construction_bench BUILD/candidate/construction_bench --output construction.json
+python benchmarks/compare_traversal_revisions.py BUILD/baseline/traversal_bench BUILD/candidate/traversal_bench --output traversal.json
+python benchmarks/compare_construction_threads.py BUILD/candidate/construction_bench --output threads.json
+```
+
+The thread control inserts edges into four independent Rust graphs, alternating
+one/two-thread process pairs. It does not imply that Python graph mutation
+releases the GIL or that a single graph can be mutated concurrently.
+`compare_revisions.py --serial` runs entire workers serially, including all
+preparation between timed operations. Finish builds and correctness checks
+before starting any benchmark runner. Preserve primary and independent repeat
+samples separately; confidence intervals are pointwise, not simultaneous.
+
+For the unchanged-binding edgeless filter/BFS control, use
+`compare_edgeless_bindings.py BUILD/baseline BUILD/candidate`. Its source graph
+is prepared outside timing, and samples batch 128 calls including result
+destruction. `serial_revision_controller.py` checkpoints each complete broad
+worker and pair; it reuses only complete pairs after interruption. Use it with
+the same `--data` and `--reference-cache` as the original runner.
+
+`analyze_construction_performance.py --raw RAW --out REPORT` computes paired
+Student-t intervals on process log ratios and produces the two PNG overviews.
+`repeat_construction_regressions.py --summary REPORT/summary.json` launches
+independent confirmations of every primary positive interval. The core
+confirmation repeats the full traversal context; selected general-operation
+confirmations preserve selected timing while running required references once.
+Primary and repeat estimates stay separate, and new repeat-only signals must
+remain explicit. Run all commands under one exclusive lock without overlapping
+builds, tests or benchmark workers.

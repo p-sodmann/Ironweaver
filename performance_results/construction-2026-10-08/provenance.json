@@ -1,0 +1,21 @@
+{
+  "boot": "b23aef2d-436e-486f-9149-06043aefefc3",
+  "baseline_ref": "c69ef5146c5865f2fd160a2df0a13b968d0255a3",
+  "candidate_ref": "4670e49302ad832e6fa9de15ea111f26357445ce",
+  "artifacts": {
+    "baseline": {
+      "bench_remove_node": "7be227e931935e635be6ce1d0ecaacdb4afde3da5ec830d8c7bea3a0b4ebd421",
+      "traversal_bench": "44e4f36fe3886f3a589a608ffc51e0f3b2fa57e204bc0c4bdd28700ebc4da340",
+      "construction_bench": "5035042ccdaafa27507a14339968cf28bd9544e953c6f995a5e0e2b06d2f4cd6"
+    },
+    "candidate": {
+      "bench_remove_node": "a6dffc3fc91b3d59176db494f906fbaee1f6fbb8a862a6ea412cd4faef2c297e",
+      "traversal_bench": "817bdabe7299cb0074e6487ce17aa57b47fcc89efd4ec621714828394254d1ed",
+      "construction_bench": "e547dafe9c24ea36b787cfb206b333aa77ddf7ea88701c777e4ff4b0f8512a9d"
+    }
+  },
+  "invalid_original_baseline": {
+    "bench_remove_node": "81685930329bac81daa61b816c519f16a6b2d62934022a2d74cce85dc2bbd1d0",
+    "traversal_bench": "c33d0ed080a61d8103862ae96c7cce5e6388e374b4d486fb228ee6d939a0023a"
+  }
+}

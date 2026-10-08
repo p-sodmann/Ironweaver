@@ -93,8 +93,9 @@ impl EdgeIndex {
     fn get(&self, id: EdgeId) -> Option<u32> {
         match self.dense.get(id.0 as usize) {
             Some(&s) if s != 0 => Some(s - 1),
-            Some(_) => None,
-            None => self.sparse.get(&id).copied(),
+            // A growing dense prefix can cover an id inserted sparsely.
+            // Empty dense entries must still consult that sparse mapping.
+            _ => self.sparse.get(&id).copied(),
         }
     }
 
@@ -117,8 +118,8 @@ impl EdgeIndex {
 
     fn remove(&mut self, id: EdgeId) {
         match self.dense.get_mut(id.0 as usize) {
-            Some(s) => *s = 0,
-            None => {
+            Some(s) if *s != 0 => *s = 0,
+            _ => {
                 self.sparse.remove(&id);
             }
         }
@@ -1337,7 +1338,11 @@ impl<N, E> Graph<N, E> {
             }
         }
         out.edges.slots.reserve_exact(n_edges);
-        out.edge_index.reserve(self.next_edge_id);
+        // An edgeless copy needs the persistent counter, but no id table.
+        // Avoid zeroing storage proportional to the source's edge-id range.
+        if n_edges != 0 {
+            out.edge_index.reserve(self.next_edge_id);
+        }
         for (slot, _, n) in out.nodes.iter_mut() {
             n.out.reserve_exact(out_deg[slot as usize] as usize);
             n.inc.reserve_exact(in_deg[slot as usize] as usize);
@@ -1552,6 +1557,40 @@ mod tests {
         assert_eq!(g.node_ix("z"), Some(a));
         assert!(!g.contains_node("a"));
         assert!(matches!(g.rename_node(a, "b"), Err(GraphError::DuplicateNode(_))));
+    }
+
+    #[test]
+    fn edgeless_subgraph_preserves_the_edge_id_counter() {
+        let (mut g, [a, b, c]) = triangle();
+        g.add_label(a, "kept").unwrap();
+        g.reserve_edge_ids(EdgeId(1_000_000));
+        let mut sub = g.induced_subgraph([a], |_| Ok::<_, ()>(()), |e| Ok(e.data)).unwrap();
+        assert_eq!(sub.node_count(), 1);
+        assert_eq!(sub.edge_count(), 0);
+        assert_eq!(sub.next_edge_id(), EdgeId(1_000_000));
+        let a = sub.node_ix("a").unwrap();
+        assert_eq!(sub.label_names(a).unwrap(), ["kept"]);
+        assert!(sub.edge_ix(EdgeId(0)).is_none());
+        let edge = sub.add_edge(a, a, 7).unwrap();
+        assert_eq!(sub.edge(edge).unwrap().id(), EdgeId(1_000_000));
+        assert_eq!(sub.edge_ix(EdgeId(1_000_000)), Some(edge));
+        assert_eq!(sub.next_edge_id(), EdgeId(1_000_001));
+        // An explicit id starts sparse, then lies inside a grown dense
+        // prefix. It must remain findable, reject duplicates, and remove.
+        let sparse = sub.insert_edge(a, a, Some(EdgeId(1500)), None, 8).unwrap();
+        for id in 0..400 {
+            sub.insert_edge(a, a, Some(EdgeId(id)), None, 9).unwrap();
+        }
+        sub.insert_edge(a, a, Some(EdgeId(1600)), None, 10).unwrap();
+        assert_eq!(sub.edge_ix(EdgeId(1500)), Some(sparse));
+        assert_eq!(sub.insert_edge(a, a, Some(EdgeId(1500)), None, 0), Err(GraphError::DuplicateEdge(1500)));
+        sub.remove_edge(sparse).unwrap();
+        assert!(sub.edge_ix(EdgeId(1500)).is_none());
+        assert_eq!(sub.edge_ix(EdgeId(1_000_000)), Some(edge));
+        assert_eq!(sub.heap, sub.count_heap());
+        // The source, including the edges omitted from the copy, is unchanged.
+        assert!(g.node(b).is_some() && g.node(c).is_some());
+        assert_eq!(g.edge_count(), 3);
     }
 
     #[test]

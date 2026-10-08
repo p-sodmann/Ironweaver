@@ -1,0 +1,26 @@
+{
+  "baseline/align64": {
+    "address": "00000000000486c0",
+    "mod64": 0,
+    "instructions": 1233,
+    "normalized_sha256": "21de75528815dd04fb379d88296f7e41c277e9454d5dc4d2389f0aae5ab825ad"
+  },
+  "baseline/cgu1": {
+    "address": "0000000000039420",
+    "mod64": 32,
+    "instructions": 5037,
+    "normalized_sha256": "19518f28954fa262593786ff544aef5cc4c6e4b789a5bd5a43c0229574c52990"
+  },
+  "candidate/align64": {
+    "address": "0000000000048740",
+    "mod64": 0,
+    "instructions": 1233,
+    "normalized_sha256": "21de75528815dd04fb379d88296f7e41c277e9454d5dc4d2389f0aae5ab825ad"
+  },
+  "candidate/cgu1": {
+    "address": "0000000000039420",
+    "mod64": 32,
+    "instructions": 5036,
+    "normalized_sha256": "e9bccc203cad36db199b5b34d3ccdcbefcc5f8eeeffbd7eeeb546caac8630e27"
+  }
+}
