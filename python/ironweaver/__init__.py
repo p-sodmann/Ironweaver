@@ -81,7 +81,7 @@ class NodeView:
     @property
     def type(self):
         """Shortcut for ``node.attr.get("type")``."""
-        return self._node.attr.get("type")
+        return self._node.attr_get("type")
 
     @property
     def labels(self) -> list:

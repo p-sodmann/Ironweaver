@@ -73,6 +73,26 @@ def test_lambda_filter_by_type():
     assert {n.id for n in result} == {"test_a", "test_b", "other_d"}
 
 
+def test_nodeview_type_matches_attribute_snapshot():
+    v = Vertex()
+    for index, attrs in enumerate(({}, {"type": None}, {"type": "A"}, {"type": 0})):
+        node = v.add_node(str(index), attrs, labels=["Person"])
+        assert NodeView(node).type == node.attr.get("type")
+
+
+def test_nodeview_type_tracks_attribute_updates():
+    v = Vertex()
+    node = v.add_node("n", {"type": "A", **{f"property_{i}": i for i in range(512)}})
+    view = NodeView(node)
+    assert view.type == "A"
+    node.attr_set("type", "B")
+    assert view.type == "B"
+    node.attr = {"type": None}
+    assert view.type is None
+    node.attr = {}
+    assert view.type is None
+
+
 def test_lambda_filter_by_attr():
     v = build_rich_graph()
     result = v.filter(lambda n: n.attr("score") < 0.8)
