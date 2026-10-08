@@ -73,3 +73,7 @@ A new positive core interval triggered an independent repeat of the entire 69-fi
 ![Corrected complete inventory](suite-regression-overview.png)
 
 Hollow gray marks are inconclusive. A dagger displays an independent repeat; primary and repeat remain separate in the CSV.
+
+## Follow-up code-placement diagnosis
+
+The original neighbor slowdown reproduced in two further independent runs. Matched 64-byte function alignment makes the revision gap inconclusive in both, while preserving the benchmark main's normalized instruction sequence. Alignment also slows the baseline; no production flag is adopted. This supports executable code placement as a cause of this benchmark's sensitivity, with the exact microarchitectural mechanism unresolved. See the [diagnostic report and raw evidence](../codegen-2026-10-08/README.md). The original screen and unresolved signals above remain unchanged.
