@@ -7,8 +7,10 @@ from ._ironweaver import Vertex
 
 def _parse_value(value: str):
     value = value.strip()
-    if value.isdigit():
+    try:
         return int(value)
+    except ValueError:
+        pass
     try:
         return float(value)
     except ValueError:
