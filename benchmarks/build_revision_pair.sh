@@ -39,6 +39,9 @@ for path in Path(sys.argv[1]).rglob('*.rs'):
 STAMP
   (
     cd "$source_dir"
+    # Keep dependency caches, but discard this package's examples and core
+    # artifacts so a partial/shared-target rebuild cannot freeze stale binaries.
+    cargo clean --release -p ironweaver-core
     maturin build --release --locked --interpreter "$(command -v python)" --out "$artifact_root/wheels-$revision"
     cargo build --release --locked -p ironweaver-core --examples
   )
@@ -47,7 +50,7 @@ STAMP
     cp "${CARGO_TARGET_DIR:-$source_dir/target}/release/examples/$example" "$artifact_root/$revision/$example"
   done
 done
-python - "$artifact_root" <<'PY'
+python - "$artifact_root" "$baseline_ref" "$candidate_ref" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -58,6 +61,12 @@ root = Path(sys.argv[1])
 for revision in ('baseline', 'candidate'):
     source = root / f'source-{revision}'
     metadata = {
+        'revision_ref': subprocess.check_output(['git', 'rev-parse', sys.argv[2 if revision == 'baseline' else 3]], text=True).strip(),
+        'clean_core_package_before_build': True,
+        'binaries': {name: hashlib.sha256((root / revision / name).read_bytes()).hexdigest()
+                     for name in ('bench_remove_node', 'traversal_bench', 'construction_bench')},
+        'benchmark_sources': {name: hashlib.sha256((source / 'crates/ironweaver-core/examples' / (name + '.rs')).read_bytes()).hexdigest()
+                              for name in ('bench_remove_node', 'traversal_bench', 'construction_bench')},
         'rustc': subprocess.check_output(['rustc', '-Vv'], text=True),
         'cargo_lock_sha256': hashlib.sha256((source / 'Cargo.lock').read_bytes()).hexdigest(),
         'flags': ['maturin build --release --locked', 'cargo build --release --locked'],

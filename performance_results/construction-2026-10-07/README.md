@@ -1,3 +1,5 @@
+> **SUPERSEDED CORRECTION (8 October):** The original baseline deletion and core traversal executables were stale/misidentified. All results for those two suites, including the claimed large deletion regressions, are invalid. Construction, Python and thread artifacts reproduce. See the [corrected report and root-cause investigation](../construction-2026-10-08/README.md). Original samples are retained for transparency.
+
 # Edgeless subgraph creation: measured performance report
 
 An induced subgraph with no edges now retains the source edge-ID counter without allocating its dense edge-ID table. This avoids allocation and zeroing proportional to the source ID range. The supporting lookup/removal fix keeps sparse IDs accessible when the dense prefix grows over them. Bindings, dependencies and advanced algorithm implementations are unchanged.

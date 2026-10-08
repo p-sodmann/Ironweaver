@@ -108,7 +108,7 @@ def plots(rows,raw,out):
     for axis in (ax,threads):
         axis.spines[['top','right']].set_visible(False);axis.grid(axis='x',alpha=.15)
     fig.suptitle('Ironweaver — measured graph creation, traversal and concurrency (draft)',x=.02,ha='left',fontsize=18)
-    fig.text(.02,.025,'Pointwise 95% Student-t CIs on independent paired log ratios. Labels show medians of process summaries.\nGray / hollow = inconclusive or exactly unchanged. † = independent repeat shown; primary and repeat remain in the CSV.\nConfirmed neighbor/deletion regressions remain. Concurrency excludes node setup/destruction and does not enable Python graph mutation.',fontsize=10)
+    fig.text(.02,.025,'Pointwise 95% Student-t CIs on independent paired log ratios. Labels show medians of process summaries.\nGray / hollow = inconclusive or exactly unchanged. † = independent repeat shown; primary and repeat remain in the CSV.\nRed marks retain slowdown signals; see the report. Concurrency excludes node setup/destruction and does not enable Python graph mutation.',fontsize=10)
     fig.tight_layout(rect=(0,.1,1,.94));fig.savefig(out/'focused-comparison.png',dpi=180);plt.close(fig)
     groups=[('construction', ['construction','python-focus','deletion']),('traversal',['traversal']),('general',['networkx']),('libraries',['libraries']),('memory',['memory'])]
     fig,axes=plt.subplots(1,5,figsize=(36,24),gridspec_kw={'width_ratios':[1,1.1,1.25,1.2,.9]})
@@ -125,7 +125,7 @@ def plots(rows,raw,out):
     legend=[Line2D([0],[0],marker='D' if s=='regression' else 'o',color=colors[s],mfc='white' if s=='inconclusive' else colors[s],lw=0,label=s.capitalize()) for s in ('improved','regression','inconclusive')]
     fig.legend(handles=legend,loc='upper right',ncols=3,frameon=False,fontsize=12)
     fig.suptitle(f'Full-suite regression overview — all {len(rows)} applicable revision workloads',x=.012,ha='left',fontsize=22)
-    fig.text(.012,.018,'All measurements from this run on one machine; matched compiler, lockfile, release flags, bindings, affinity and threads. Builds, tests and benchmark workers ran serially.\nPointwise 95% paired CIs; gray/hollow marks inconclusive or exactly unchanged results. † displays the independent repeat; primary and repeat are preserved separately.\nRuntime axes use symmetric log beyond ±20%. Memory intervals use paired absolute differences. Existing directed-only and exact-betweenness budget exclusions are retained.\nConcurrency thread scaling is an additional focused control, shown in the focused image. See README and summary.csv for sample counts, unresolved signals and limitations.',fontsize=11)
+    fig.text(.012,.018,'All retained measurements from this session on one machine; matched compiler, lockfile, release flags, bindings, affinity and threads. Builds, tests and benchmark workers ran serially.\nPointwise 95% paired CIs; gray/hollow marks inconclusive or exactly unchanged results. † displays the independent repeat; primary and repeat are preserved separately.\nRuntime axes use symmetric log beyond ±20%. Memory intervals use paired absolute differences. Existing directed-only and exact-betweenness budget exclusions are retained.\nConcurrency thread scaling is an additional focused control, shown in the focused image. See README and summary.csv for sample counts, unresolved signals and limitations.',fontsize=11)
     fig.tight_layout(rect=(0,.075,1,.965),w_pad=2);fig.savefig(out/'suite-regression-overview.png',dpi=170);plt.close(fig)
 
 
