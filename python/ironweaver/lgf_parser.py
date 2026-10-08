@@ -157,7 +157,9 @@ def parse_lgf(
             # Extract relationship and target from <-relationship- target format
             rest = stripped[2:]  # Remove '<-'
             if "-" in rest:
-                dash_pos = rest.rfind("-")  # Find the last dash
+                # The separator belongs to the relationship token; node ids
+                # after the whitespace may contain their own hyphens.
+                dash_pos = rest.split(maxsplit=1)[0].rfind("-")
                 if dash_pos > 0:  # Must have at least one character for relationship
                     relationship = rest[:dash_pos]
                     target = rest[dash_pos + 1:].strip()
