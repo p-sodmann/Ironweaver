@@ -1,0 +1,4 @@
+workload,seconds_per_call,iterations
+4096/4096/spread/common_neighbors,0.0050697483535353536,99
+4096/4096/spread/jaccard,0.0053360379894736845,95
+4096/4096/spread/adamic_adar,0.029045939555555553,18
