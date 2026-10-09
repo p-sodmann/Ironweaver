@@ -192,6 +192,37 @@ fn write_atomic_reports_a_failed_directory_sync() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn write_atomic_reports_a_failed_directory_sync_on_windows() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::process::Command;
+    let dir = std::env::temp_dir().join(format!("ironweaver-atomic-dir-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let user = format!("{}\\{}", std::env::var("USERDOMAIN").unwrap(), std::env::var("USERNAME").unwrap());
+    let icacls = |arg: &str, grant: &str| {
+        let status = Command::new("icacls").arg(&dir).arg(arg).arg(grant).status().unwrap();
+        assert!(status.success());
+    };
+    // Denying "write extended attributes" keeps creating and renaming files
+    // possible, but the directory can't be opened for writing to flush it
+    icacls("/deny", &format!("{user}:(WEA)"));
+    let path = dir.join("graph.json");
+    let result = format::write_atomic(&path, |out| std::io::Write::write_all(out, b"data"));
+    let writable = std::fs::OpenOptions::new().write(true).custom_flags(0x0200_0000).open(&dir).is_ok();
+    icacls("/remove:d", &user);
+    if writable {
+        result.unwrap();
+    } else {
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("syncing the directory"), "{err}");
+    }
+    // The rename itself happened; no temporary file is left
+    assert_eq!(std::fs::read(&path).unwrap(), b"data");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn equal_graphs_save_to_equal_bytes() {
     use format::{GraphWriter, RecordCodec};

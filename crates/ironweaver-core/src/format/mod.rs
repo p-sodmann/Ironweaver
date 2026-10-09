@@ -278,10 +278,11 @@ fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphE
 /// permissions are kept; a symlink at `path` is replaced, not written through.
 ///
 /// `Ok` means the new contents are on disk (fsynced), the rename is done,
-/// and, on Unix, the rename itself is durable: the directory holding `path`
-/// was fsynced too, so after a crash or power loss `path` holds the new
-/// file. Windows has no way to sync a directory; there the rename is
-/// done but not explicitly made durable.
+/// and the rename itself is durable: the directory holding `path` was
+/// fsynced too (on Windows: opened with `FILE_FLAG_BACKUP_SEMANTICS` and
+/// flushed with `FlushFileBuffers`), so after a crash or power loss `path`
+/// holds the new file. Durability is what the file system gives: FAT,
+/// exFAT and network shares may not keep that promise.
 ///
 /// If only that last step fails (the directory can't be opened or its fsync
 /// fails), the error is returned although `path` already names the new
@@ -317,13 +318,33 @@ pub fn write_atomic(
         let _ = fs::remove_file(&tmp);
         return result;
     }
-    // Make the rename itself durable (not possible on Windows)
-    #[cfg(unix)]
+    // Make the rename itself durable
     if let Some(dir) = path.parent() {
         let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
-        File::open(dir).and_then(|d| d.sync_all()).map_err(|e| {
+        sync_dir(dir).map_err(|e| {
             io::Error::new(e.kind(), format!("saved, but syncing the directory {} failed: {e}", dir.display()))
         })?;
     }
+    Ok(())
+}
+
+/// Flush a directory's entries (created, renamed, removed files) to disk.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    File::open(dir)?.sync_all()
+}
+
+/// Flush a directory's entries (created, renamed, removed files) to disk.
+/// A directory can only be opened with `FILE_FLAG_BACKUP_SEMANTICS`, and
+/// `FlushFileBuffers` (`sync_all`) needs write access.
+#[cfg(windows)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    fs::OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(dir)?.sync_all()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
