@@ -89,8 +89,39 @@ impl FromStr for Similarity {
     }
 }
 
+// Keep the search out of the merge loop's generated code: embedding both
+// loops in `common` hurts comparable-degree pairs in the release benchmark.
+#[inline(never)]
+fn common_by_search(u: &Undirected, short: &[u32], mut rest: &[u32], metric: Similarity) -> f64 {
+    let mut sum = 0.0;
+    for &v in short {
+        // Bound the search exponentially from the previous position:
+        // nearby matches stay cheap, while large gaps need no scan.
+        let mut end = 1usize;
+        while end < rest.len() && rest[end] < v {
+            end = end.saturating_mul(2);
+        }
+        let at = rest[..end.saturating_add(1).min(rest.len())].partition_point(|&w| w < v);
+        let found = rest.get(at) == Some(&v);
+        if found {
+            sum += metric.weight(u.degree(v));
+        }
+        rest = &rest[at + usize::from(found)..];
+    }
+    sum
+}
+
 /// Summed weights of the common neighbours of two sorted, distinct lists.
+#[inline]
 fn common(u: &Undirected, a: &[u32], b: &[u32], metric: Similarity) -> f64 {
+    let (short, long) = if a.len() < b.len() { (a, b) } else { (b, a) };
+    // Hub/leaf pairs need not scan the hub's entire row. Keep the linear
+    // merge for comparable degrees or a short prefix of the hub's row,
+    // where its sequential access is cheaper. The degree check also bounds
+    // the prefix index below, so the multiplication cannot overflow.
+    if !short.is_empty() && short.len() <= long.len() / 32 && short[short.len() - 1] > long[4 * short.len() - 1] {
+        return common_by_search(u, short, long, metric);
+    }
     let (mut i, mut j, mut sum) = (0, 0, 0.0);
     while i < a.len() && j < b.len() {
         match a[i].cmp(&b[j]) {
@@ -295,5 +326,59 @@ mod tests {
         assert!(most_similar(&p, None, 5, Similarity::PreferentialAttachment, 0.0).is_err());
         assert!(similarity(&p, &[(0, 7)], Similarity::Jaccard).is_err());
         assert!("cosine".parse::<Similarity>().is_err());
+    }
+
+    #[test]
+    fn common_matches_reference_for_unequal_rows() {
+        let edges: Vec<_> = (0..4096).map(|v| (v, v / 2)).collect();
+        let p = from_edges(4096, &edges, Direction::Out);
+        let u = Undirected::of(&p);
+        for len in [0, 1, 31, 32, 33, 127, 128, 129, 1024] {
+            let long: Vec<u32> = (0..len).map(|i| 2 * i).collect();
+            for short in [
+                vec![],
+                vec![0],
+                vec![2046],
+                vec![0, 2, 4, 6],
+                vec![1, 3, 2047],
+                vec![2047, 2048],
+                vec![0, 64, 1001, 2046],
+            ] {
+                for name in Similarity::NAMES {
+                    let metric: Similarity = name.parse().unwrap();
+                    let want = short
+                        .iter()
+                        .filter(|v| long.contains(v))
+                        .fold(0.0f64, |sum, &v| sum + metric.weight(u.degree(v)));
+                    // Both intersection methods must add weights in node order,
+                    // preserving even the floating-point bits in either orientation.
+                    assert_eq!(common(&u, &short, &long, metric).to_bits(), want.to_bits(), "{name} {len}");
+                    assert_eq!(common(&u, &long, &short, metric).to_bits(), want.to_bits(), "{name} {len} reversed");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hub_similarity_matches_brute_force() {
+        let mut edges: Vec<_> = (3..1027).map(|v| (0, v)).collect();
+        edges.extend([(1, 3), (1, 514), (1, 1026), (1, 514), (1, 1), (1027, 3), (1028, 1026), (1029, 1030)]);
+        for direction in [Direction::Out, Direction::In, Direction::Both] {
+            let p = from_edges(1031, &edges, direction);
+            let s = sets(&p);
+            let nodes = [0, 1, 2, 1027, 1028, 1029];
+            let pairs: Vec<_> = nodes.iter().flat_map(|&a| nodes.iter().map(move |&b| (a, b))).collect();
+            for name in Similarity::NAMES {
+                let metric: Similarity = name.parse().unwrap();
+                let got = similarity(&p, &pairs, metric).unwrap();
+                for (&(a, b), score) in pairs.iter().zip(got) {
+                    if a == b && metric == Similarity::AdamicAdar {
+                        continue; // The brute-force formula has 1/ln(1), while our contract uses zero.
+                    }
+                    let want = brute(&s, a as usize, b as usize, metric);
+                    assert!((score - want).abs() < 1e-12, "{direction:?} {name} {a} {b}: {score} vs {want}");
+                }
+            }
+        }
     }
 }

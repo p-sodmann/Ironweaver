@@ -1,0 +1,14 @@
+{
+  "base_commit": "9cec233619dbb34263f02c3275cec2beb207c732",
+  "binaries_sha256": {
+    "before": "811c02589347508d50c6275a55066aa767b65dd3a7e68b941da338201c59cc4c",
+    "after": "edb19f74c68d43de3c61149682bdaa63c9915050db33123b2e6c26b06189c564"
+  },
+  "cargo_lock_sha256": "8a88c8fe93618bb1741941a80608c7a75c627ed2fe60d2b70b25d7cd6272623a",
+  "pairs": 6,
+  "cpu": 0,
+  "rayon_threads": 1,
+  "sample_duration_ms": 500,
+  "filter": "4096/4096",
+  "build": "Rust 1.99.0, Cargo release profile, offline, identical Cargo.lock"
+}
