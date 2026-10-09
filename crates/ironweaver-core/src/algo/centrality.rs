@@ -105,12 +105,16 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
         });
         let dangling: f64 = (0..n).into_par_iter().filter(|&u| out_weight[u] <= 0.0).map(|u| x[u]).sum();
         let base = alpha * dangling + (1.0 - alpha);
+        // Resolve the lazy transpose once, rather than checking its OnceLock
+        // twice per node. Keeping this inside the loop preserves cancellation
+        // and zero-iteration behavior.
+        let incoming = p.inc();
         let next: Vec<f64> = (0..n as u32)
             .into_par_iter()
             .with_min_len(512)
             .map(|v| {
-                let from = p.in_neighbors(v);
-                let pulled: f64 = match p.in_weights(v) {
+                let from = incoming.neighbors(v);
+                let pulled: f64 = match incoming.weights(v) {
                     Some(w) => from.iter().zip(w).map(|(&u, &w)| share[u as usize] * w).sum(),
                     None => from.iter().map(|&u| share[u as usize]).sum(),
                 };
@@ -186,6 +190,61 @@ mod tests {
                     assert!((a - b).abs() < 1e-9);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn fixed_iterations_match_push_reference() {
+        // Cross the parallel chunk boundary and check fixed iteration counts.
+        // The independent reference pushes contributions along outgoing edges.
+        for threads in [1, 3] {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+            pool.install(|| {
+                for weighted in [false, true] {
+                    let p = random(7, 1301, 3900, Direction::Out, weighted);
+                    for alpha in [0.0, 0.85, 1.0] {
+                        for rounds in [0, 1, 2, 5, 20] {
+                            let mut jump = vec![0.0; p.node_count()];
+                            jump[0] = 0.25;
+                            jump[700] = 0.75;
+                            let opts = PageRank {
+                                alpha,
+                                personalization: Some(jump.clone()),
+                                max_iter: rounds,
+                                tol: 0.0,
+                            };
+                            let got = pagerank(&p, &opts).unwrap();
+                            let mut want = vec![1.0 / p.node_count() as f64; p.node_count()];
+                            for _ in 0..rounds {
+                                let mut next = vec![0.0; want.len()];
+                                for (u, &rank) in want.iter().enumerate() {
+                                    let neighbors = p.out_neighbors(u as u32);
+                                    let weights = p.out_weights(u as u32);
+                                    let total = weights.map_or(neighbors.len() as f64, |w| w.iter().sum());
+                                    if total == 0.0 {
+                                        for (v, &j) in jump.iter().enumerate() {
+                                            next[v] += alpha * rank * j;
+                                        }
+                                    } else {
+                                        for (i, &v) in neighbors.iter().enumerate() {
+                                            let weight = weights.map_or(1.0, |w| w[i]);
+                                            next[v as usize] += alpha * rank * weight / total;
+                                        }
+                                    }
+                                }
+                                for (v, &j) in jump.iter().enumerate() {
+                                    next[v] += (1.0 - alpha) * j;
+                                }
+                                want = next;
+                            }
+                            for (a, b) in got.iter().zip(&want) {
+                                assert!((a - b).abs() < 1e-12, "threads={threads}, weighted={weighted}, alpha={alpha}, rounds={rounds}: {a} vs {b}");
+                            }
+                            assert!((got.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+                        }
+                    }
+                }
+            });
         }
     }
 
