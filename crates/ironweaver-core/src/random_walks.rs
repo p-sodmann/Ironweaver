@@ -8,7 +8,7 @@
 // can run under a `Budget` (`plan_limited`).
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -275,7 +275,7 @@ impl Stratification {
         }
     }
 
-    fn sample_start<R: Rng>(&self, rng: &mut R) -> u32 {
+    fn sample_start<R: RngExt>(&self, rng: &mut R) -> u32 {
         let total = self.start_weights.total();
         self.start_weights.find(rng.random::<f64>() * total) as u32
     }
@@ -297,7 +297,7 @@ impl Scratch {
 }
 
 // Pick an index with probability proportional to its weight.
-fn weighted_pick_index<R: Rng>(weights: &[f64], rng: &mut R) -> usize {
+fn weighted_pick_index<R: RngExt>(weights: &[f64], rng: &mut R) -> usize {
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
         return 0;
@@ -314,7 +314,7 @@ fn weighted_pick_index<R: Rng>(weights: &[f64], rng: &mut R) -> usize {
 
 // Simple random walk that embraces randomness without backtracking.
 #[allow(clippy::too_many_arguments)]
-fn perform_walk<R: Rng>(
+fn perform_walk<R: RngExt>(
     index: &WalkIndex,
     start: u32,
     max_length: usize,

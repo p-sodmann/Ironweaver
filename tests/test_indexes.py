@@ -86,6 +86,25 @@ def test_filter_and_match_use_indexes_transparently():
     assert [m["p"].id for m in g.match("(p)-->(c)", where=where)] == ["cat"]
 
 
+@pytest.mark.parametrize("indexed", [False, True])
+def test_find_and_filter_preserve_order_after_slot_reuse(indexed):
+    g = people()
+    if indexed:
+        g.create_index("age")
+    g.remove_node("bob")
+    g.add_node("eve", {"age": 31}, labels=["Person"])
+    g["cat"].attr_set("age", 32)
+    g["acme"].attr_set("age", 31)
+
+    # Reusing bob's slot puts eve between ann and cat. Filtering must retain
+    # that order, and the full predicate must exclude the Company candidate.
+    equal = iw.attr("age") == 31
+    assert ids(g.find("age", 31)) == list(g.filter(where=equal).nodes) == ["ann", "eve", "acme"]
+    between = (iw.attr("age") >= 30) & (iw.attr("age") <= 35)
+    assert ids(g.find_range("age", 30, 35)) == list(g.filter(where=between).nodes) == ["ann", "eve", "cat", "acme"]
+    assert list(g.filter(where=between & iw.label("Person")).nodes) == ["ann", "eve", "cat"]
+
+
 def test_randomized_against_scans():
     rng = random.Random(3)
     values = [None, 0, 1, 1.0, 2.5, -3, "a", "b", True, False, dt.date(2020, 1, 1), b"x", [1], float("nan")]

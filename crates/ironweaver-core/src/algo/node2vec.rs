@@ -13,7 +13,7 @@
 // Neighbour tests are binary searches in the sorted neighbour lists.
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
 use super::{check_nodes, mix};

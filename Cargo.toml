@@ -1,6 +1,13 @@
 [workspace]
 members = ["crates/ironweaver-core"]
 
+# Shared versions live here; each crate opts into the features it needs.
+[workspace.dependencies]
+half = "2.2"
+rayon = "1.10"
+serde = "1.0"
+sonic-rs = "0.5"
+
 # The Python extension module: PyO3 bindings over `ironweaver-core`.
 [package]
 name = "ironweaver"
@@ -19,10 +26,10 @@ crate-type = ["cdylib"]
 [dependencies]
 ironweaver-core = { path = "crates/ironweaver-core", version = "0.2.0" }
 pyo3 = { version = "0.29", features = ["extension-module"] }
-rayon = "1.10"
-serde = "1.0"
-sonic-rs = "0.5"
-half = "2.2"
+rayon.workspace = true
+serde.workspace = true
+sonic-rs.workspace = true
+half.workspace = true
 
 # Release wheels (maturin build --profile dist): slower to build, faster to run
 [profile.dist]

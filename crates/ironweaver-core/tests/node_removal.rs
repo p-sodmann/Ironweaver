@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use ironweaver_core::{EdgeId, Graph, NodeIx};
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 fn check_removal(g: &mut Graph<(), usize>, removed: NodeIx) {
     let edges: Vec<_> = g.edges().map(|(ix, e)| (ix, e.id(), e.source(), e.target(), e.data)).collect();

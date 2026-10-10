@@ -814,7 +814,7 @@ mod tests {
     /// A random pattern text: node names from a small pool (so they
     /// repeat), anonymous nodes, labels, properties, edges of every shape.
     fn random_text(rng: &mut rand::rngs::StdRng) -> String {
-        use rand::Rng;
+        use rand::RngExt;
         let names = ["a", "b", "c", "d", "`x y`", "é_1"];
         let values = ["1", "-2", "0.5", "-1e-7", "true", "false", "'s'", "\"q\\\"x\"", "\"\\\\\"", "''"];
         fn pick(rng: &mut rand::rngs::StdRng, items: &[&'static str]) -> &'static str {
@@ -870,7 +870,7 @@ mod tests {
 
     #[test]
     fn display_round_trips_random_patterns() {
-        use rand::{Rng, SeedableRng};
+        use rand::{RngExt, SeedableRng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(7);
         let mut parsed = 0;
         for _ in 0..5000 {
