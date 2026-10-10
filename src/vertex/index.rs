@@ -70,29 +70,36 @@ fn handles(py: Python<'_>, vertex: &Py<Vertex>, found: Vec<NodeIx>) -> PyResult<
     found.into_iter().map(|ix| Node::handle(py, vertex, ix)).collect()
 }
 
-/// Nodes matching `expr`: through the index if there is one, else a scan.
+/// Ordered nodes matching `expr`, shared by find, find_range and filter(where=).
+/// Index candidates still need the full predicate, including dirty values.
+pub(super) fn select_nodes(vertex: &Vertex, expr: &Expr) -> PyResult<Vec<NodeIx>> {
+    let g = &vertex.graph;
+    let mut out = Vec::new();
+    let mut visit = |ix| -> PyResult<()> {
+        if expr.matches_node(g, ix)? {
+            out.push(ix);
+        }
+        Ok(())
+    };
+    match g.index_candidates(expr)? {
+        Some(candidates) => {
+            for ix in candidates {
+                visit(ix)?;
+            }
+        }
+        None => {
+            for ix in g.node_indices() {
+                visit(ix)?;
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn select(py: Python<'_>, vertex: &Py<Vertex>, expr: &Expr) -> PyResult<Vec<Py<Node>>> {
     let found = {
         let v = vertex.try_borrow(py)?;
-        let g = &v.graph;
-        let mut out = Vec::new();
-        match g.index_candidates(expr)? {
-            Some(candidates) => {
-                for ix in candidates {
-                    if expr.matches_node(g, ix)? {
-                        out.push(ix);
-                    }
-                }
-            }
-            None => {
-                for ix in g.node_indices() {
-                    if expr.matches_node(g, ix)? {
-                        out.push(ix);
-                    }
-                }
-            }
-        }
-        out
+        select_nodes(&v, expr)?
     };
     handles(py, vertex, found)
 }

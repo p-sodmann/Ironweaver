@@ -13,14 +13,14 @@ keywords = ["graph", "graph-algorithms", "network", "pagerank", "property-graph"
 categories = ["data-structures", "algorithms", "science"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-sonic-rs = "0.5"
+serde = { workspace = true, features = ["derive"] }
+sonic-rs.workspace = true
 serde_json = { version = "1", features = ["unbounded_depth"] }
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 crc32fast = "1"
 chrono = { version = "0.4", features = ["serde"] }
-half = { version = "2.2", features = ["serde"] }
-rand = "0.9"
-rayon = "1.10"
+half = { workspace = true, features = ["serde"] }
+rand = "0.10"
+rayon.workspace = true
 foldhash = "0.2"
 

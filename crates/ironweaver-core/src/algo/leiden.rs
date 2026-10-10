@@ -21,7 +21,7 @@
 
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 

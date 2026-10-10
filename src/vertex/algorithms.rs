@@ -4,7 +4,7 @@
 
 use ironweaver_core::random_walks::{plan, WalkOptions};
 use ironweaver_core::traversal;
-use ironweaver_core::{Direction, NodeIx};
+use ironweaver_core::Direction;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -48,17 +48,7 @@ pub fn filter(vertex: &Vertex, py: Python<'_>, kwargs: Option<&Bound<'_, PyDict>
             .get()
             .inner
             .clone();
-        let candidates: Vec<NodeIx> = match vertex.graph.index_candidates(&expr)? {
-            Some(c) => c,
-            None => vertex.graph.node_indices().collect(),
-        };
-        let mut matches = Vec::new();
-        for ix in candidates {
-            if expr.matches_node(&vertex.graph, ix)? {
-                matches.push(ix);
-            }
-        }
-        matches
+        super::index::select_nodes(vertex, &expr)?
     } else if let Some(ids) = filters.remove("ids") {
         by_ids(vertex, ids.extract(py)?)?
     } else if let Some(id) = filters.remove("id") {

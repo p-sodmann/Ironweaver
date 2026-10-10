@@ -1078,7 +1078,7 @@ mod tests {
     use super::*;
     use crate::{Date, Record};
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     type G = Graph<Record, Record>;
 

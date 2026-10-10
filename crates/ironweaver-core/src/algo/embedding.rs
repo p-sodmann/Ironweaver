@@ -8,7 +8,7 @@
 // similar vectors. No training: a few sparse matrix products, in parallel.
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
 use super::mix;

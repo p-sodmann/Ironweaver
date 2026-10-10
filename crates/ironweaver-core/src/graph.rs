@@ -1688,7 +1688,7 @@ mod tests {
     #[test]
     fn memory_counters_follow_every_change() {
         use crate::{Record, Value};
-        use rand::{Rng, SeedableRng};
+        use rand::{RngExt, SeedableRng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         let mut g: Graph<Record, Record> = Graph::new();
         g.create_index::<GraphError>(&["k".to_string()]).unwrap();
