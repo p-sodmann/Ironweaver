@@ -1,6 +1,69 @@
-//! Shared serde safeguards for values, expressions and query patterns.
+//! Shared serde safeguards and float encoding for values and graph documents.
 
 use std::cell::Cell;
+
+/// Serde helpers for [`Value::Float`](crate::Value::Float): JSON has no literals for NaN and the
+/// infinities, so human-readable formats write them as the strings `"NaN"`,
+/// `"Infinity"` and `"-Infinity"` (as the file format does, see
+/// `format::tagged::float`) and accept those strings as well as numbers.
+/// Binary formats store the float itself.
+pub(crate) mod float {
+    use serde::de::{self, Visitor};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::fmt;
+
+    /// A float payload for serializers that write their own tagged variant.
+    pub(crate) struct Float(pub f64);
+
+    impl Serialize for Float {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            serialize(&self.0, s)
+        }
+    }
+
+    pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+        if v.is_finite() || !s.is_human_readable() {
+            s.serialize_f64(*v)
+        } else if v.is_nan() {
+            s.serialize_str("NaN")
+        } else if *v > 0.0 {
+            s.serialize_str("Infinity")
+        } else {
+            s.serialize_str("-Infinity")
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+        if !d.is_human_readable() {
+            return f64::deserialize(d);
+        }
+        struct Float;
+        impl Visitor<'_> for Float {
+            type Value = f64;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a number, \"NaN\", \"Infinity\" or \"-Infinity\"")
+            }
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<f64, E> {
+                Ok(v)
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<f64, E> {
+                Ok(v as f64)
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<f64, E> {
+                Ok(v as f64)
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<f64, E> {
+                match v {
+                    "NaN" => Ok(f64::NAN),
+                    "Infinity" => Ok(f64::INFINITY),
+                    "-Infinity" => Ok(f64::NEG_INFINITY),
+                    _ => Err(E::invalid_value(de::Unexpected::Str(v), &self)),
+                }
+            }
+        }
+        d.deserialize_any(Float)
+    }
+}
 
 /// Run `f` one level deeper on the per-thread counter `depth`: the
 /// value inside `depth` containers is `depth + 1` levels deep, so this

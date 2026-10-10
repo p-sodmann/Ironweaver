@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use crate::serde_support::float;
 use crate::temporal::{self, Date, DateTime};
 
 /// An attribute value, as stored in graph documents.
@@ -22,7 +23,7 @@ use crate::temporal::{self, Date, DateTime};
 pub enum Value {
     String(String),
     Int(i64),
-    Float(#[serde(with = "non_finite")] f64),
+    Float(#[serde(with = "float")] f64),
     /// A float stored at half precision (`save_to_binary_f16`).
     Half(f16),
     Bool(bool),
@@ -38,60 +39,6 @@ pub enum Value {
     Date(Date),
     /// A date-time, with or without UTC offset (ISO 8601 in JSON).
     DateTime(DateTime),
-}
-
-/// Serde helpers for `Value::Float`: JSON has no literals for NaN and the
-/// infinities, so human-readable formats write them as the strings `"NaN"`,
-/// `"Infinity"` and `"-Infinity"` (as the file format does, see
-/// `format::tagged::float`) and accept those strings as well as numbers.
-/// Binary formats store the float itself.
-mod non_finite {
-    use serde::de::{self, Visitor};
-    use serde::{Deserialize, Deserializer, Serializer};
-    use std::fmt;
-
-    pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
-        if v.is_finite() || !s.is_human_readable() {
-            s.serialize_f64(*v)
-        } else if v.is_nan() {
-            s.serialize_str("NaN")
-        } else if *v > 0.0 {
-            s.serialize_str("Infinity")
-        } else {
-            s.serialize_str("-Infinity")
-        }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-        if !d.is_human_readable() {
-            return f64::deserialize(d);
-        }
-        struct Float;
-        impl Visitor<'_> for Float {
-            type Value = f64;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a number, \"NaN\", \"Infinity\" or \"-Infinity\"")
-            }
-            fn visit_f64<E: de::Error>(self, v: f64) -> Result<f64, E> {
-                Ok(v)
-            }
-            fn visit_i64<E: de::Error>(self, v: i64) -> Result<f64, E> {
-                Ok(v as f64)
-            }
-            fn visit_u64<E: de::Error>(self, v: u64) -> Result<f64, E> {
-                Ok(v as f64)
-            }
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<f64, E> {
-                match v {
-                    "NaN" => Ok(f64::NAN),
-                    "Infinity" => Ok(f64::INFINITY),
-                    "-Infinity" => Ok(f64::NEG_INFINITY),
-                    _ => Err(E::invalid_value(de::Unexpected::Str(v), &self)),
-                }
-            }
-        }
-        d.deserialize_any(Float)
-    }
 }
 
 /// Serde helpers for the contents of a list / dict value: count the nesting
