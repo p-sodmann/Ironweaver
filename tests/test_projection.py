@@ -7,7 +7,7 @@ import threading
 import pytest
 
 try:
-    from ironweaver import EdgeView, NodeView, Projection, Vertex
+    from ironweaver import EdgeView, NodeView, Projection, Vertex, attr, edge_type, label
 except Exception as e:  # pragma: no cover - module unavailable
     pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
 
@@ -140,6 +140,85 @@ def test_filters():
     with pytest.raises(TypeError):
         g.project(weight="weight")
     assert g.project(weight="weight", nodes=["a", "b", "c"]).edge_count() == 5
+
+
+@pytest.mark.parametrize("node_kind", ["none", "empty", "dict", "expr", "callable"])
+@pytest.mark.parametrize("edge_kind", ["none", "empty", "dict", "expr", "callable"])
+@pytest.mark.parametrize("direction", ["out", "in", "both"])
+def test_filter_forms_compose(node_kind, edge_kind, direction):
+    g = small()
+    for nid in "abc":
+        g[nid].add_label("Keep")
+    nodes = {
+        "none": None,
+        "empty": {},
+        "dict": {"kind": "k", "labels": ["Keep"]},
+        "expr": (attr("kind") == "k") & label("Keep"),
+        "callable": lambda n: n.attr("kind") == "k",
+    }
+    edges = {
+        "none": None,
+        "empty": {},
+        "dict": {"type": "x"},
+        "expr": edge_type("x"),
+        "callable": lambda e: e.type == "x",
+    }
+    p = g.project(node_filter=nodes[node_kind], edge_filter=edges[edge_kind], direction=direction)
+    expected_ids = list("abcd" if node_kind in ("none", "empty") else "abc")
+    expected_edges = [("a", "b"), ("b", "c"), ("c", "a")]
+    if edge_kind in ("none", "empty"):
+        expected_edges += [("a", "b"), ("a", "a")]
+    assert p.ids() == expected_ids
+    assert p.edge_count() == len(expected_edges)
+    for nid in expected_ids:
+        neighbors = []
+        for source, target in expected_edges:
+            if direction in ("out", "both") and source == nid:
+                neighbors.append(target)
+            if direction in ("in", "both") and target == nid:
+                neighbors.append(source)
+        assert p.neighbors(nid) == sorted(neighbors)
+
+
+def test_filter_callbacks_only_visit_selected_nodes_and_edges():
+    g = small()
+    seen = []
+
+    def node_ok(n):
+        assert isinstance(n, NodeView)
+        seen.append(("node", n.id))
+        return [True]  # Callable results use Python truthiness.
+
+    def edge_ok(e):
+        assert isinstance(e, EdgeView)
+        seen.append(("edge", e.from_node.id, e.to_node.id, e.type))
+        return [True]
+
+    p = g.project(nodes=["a", "b"], node_filter=node_ok, edge_filter=edge_ok, direction="both")
+    assert (p.ids(), p.edge_count()) == (["a", "b"], 3)
+    assert seen == [
+        ("node", "a"), ("node", "b"),
+        ("edge", "a", "b", "x"), ("edge", "a", "b", "y"), ("edge", "a", "a", "y"),
+    ]
+
+
+@pytest.mark.parametrize("slot", ["node_filter", "edge_filter"])
+@pytest.mark.parametrize("where", ["callback", "truthiness"])
+def test_filter_callback_errors_propagate_unchanged(slot, where):
+    failure = LookupError("filter failed")
+
+    class BadTruth:
+        def __bool__(self):
+            raise failure
+
+    def predicate(value):
+        if where == "callback":
+            raise failure
+        return BadTruth()
+
+    with pytest.raises(LookupError) as caught:
+        small().project(**{slot: predicate})
+    assert caught.value is failure
 
 
 def test_is_a_snapshot():

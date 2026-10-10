@@ -29,76 +29,70 @@ use crate::{Edge, Node, Vertex};
 /// A node or edge filter: attribute equality (a dict), an `Expr`
 /// (evaluated in Rust) or a callable taking the `Node` / `Edge` (Python's
 /// `project` wrapper passes views).
-pub(crate) struct Filter<'py> {
-    wanted: Vec<(Bound<'py, PyString>, Bound<'py, PyAny>)>,
-    callable: Option<Bound<'py, PyAny>>,
-    expr: Option<ironweaver_core::Expr>,
+pub(crate) enum Filter<'py> {
+    All,
+    Attributes(Vec<(Bound<'py, PyString>, Bound<'py, PyAny>)>),
+    Expr(ironweaver_core::Expr),
+    Callable(Bound<'py, PyAny>),
 }
 
 impl<'py> Filter<'py> {
     /// `None`, a dict (attribute equality), an `Expr` or a callable.
     pub(crate) fn parse(py: Python<'py>, spec: Option<&Bound<'py, PyAny>>, what: &str) -> PyResult<Self> {
-        let mut filter = Filter { wanted: Vec::new(), callable: None, expr: None };
         match spec {
-            None => {}
-            Some(s) if s.is_none() => {}
+            None => Ok(Self::All),
+            Some(s) if s.is_none() => Ok(Self::All),
             Some(s) => {
                 if let Ok(d) = s.cast::<PyDict>() {
+                    let mut wanted = Vec::new();
                     for (k, v) in d.iter() {
                         let key: String = k.extract()?;
-                        filter.wanted.push((PyString::intern(py, &key), v));
+                        wanted.push((PyString::intern(py, &key), v));
                     }
+                    Ok(Self::Attributes(wanted))
                 } else if let Ok(e) = s.cast::<PyExpr>() {
-                    filter.expr = Some(e.get().inner.clone());
+                    Ok(Self::Expr(e.get().inner.clone()))
                 } else if s.is_callable() {
-                    filter.callable = Some(s.clone());
+                    Ok(Self::Callable(s.clone()))
                 } else {
-                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    Err(pyo3::exceptions::PyTypeError::new_err(format!(
                         "{} must be a dict of attribute values, an Expr or a callable",
                         what
-                    )));
+                    )))
                 }
             }
         }
-        Ok(filter)
     }
 
-    fn is_empty(&self) -> bool {
-        self.wanted.is_empty() && self.callable.is_none() && self.expr.is_none()
+    fn needs_handle(&self) -> bool {
+        matches!(self, Self::Callable(_))
     }
+}
 
-    /// Whether every wanted attribute equals the value in `attrs`; the key
-    /// `reserved` ("labels" / "type") is answered by `field` instead.
-    fn attrs_match(
-        &self,
-        py: Python<'py>,
-        attrs: &PyAttrs,
-        reserved: &str,
-        field: impl Fn() -> PyResult<Option<Bound<'py, PyAny>>>,
-    ) -> PyResult<bool> {
-        for (key, expected) in &self.wanted {
-            let value = if key.to_str()? == reserved {
-                field()?
-            } else {
-                match attrs.dict(py) {
-                    Some(d) => d.get_item(key)?,
-                    None => None,
-                }
-            };
-            match value {
-                Some(value) if value.eq(expected)? => {}
-                _ => return Ok(false),
+/// Whether every wanted attribute equals the value in `attrs`; the key
+/// `reserved` ("labels" / "type") is answered by `field` instead.
+fn attrs_match<'py>(
+    py: Python<'py>,
+    wanted: &[(Bound<'py, PyString>, Bound<'py, PyAny>)],
+    attrs: &PyAttrs,
+    reserved: &str,
+    field: impl Fn() -> PyResult<Option<Bound<'py, PyAny>>>,
+) -> PyResult<bool> {
+    for (key, expected) in wanted {
+        let value = if key.to_str()? == reserved {
+            field()?
+        } else {
+            match attrs.dict(py) {
+                Some(d) => d.get_item(key)?,
+                None => None,
             }
-        }
-        Ok(true)
-    }
-
-    fn call(&self, arg: Py<PyAny>) -> PyResult<bool> {
-        match &self.callable {
-            Some(f) => f.call1((arg,))?.is_truthy(),
-            None => Ok(true),
+        };
+        match value {
+            Some(value) if value.eq(expected)? => {}
+            _ => return Ok(false),
         }
     }
+    Ok(true)
 }
 
 /// Everything `Vertex.project` takes besides the vertex.
@@ -141,7 +135,7 @@ pub(crate) fn collect(
                 .collect::<PyResult<_>>()?,
         ),
     };
-    let needs_handle = spec.node_filter.callable.is_some() || spec.edge_filter.callable.is_some();
+    let needs_handle = spec.node_filter.needs_handle() || spec.edge_filter.needs_handle();
     let handle = match handle {
         Some(h) => Some(h),
         None if needs_handle => {
@@ -158,40 +152,28 @@ pub(crate) fn collect(
             if keep.as_ref().is_some_and(|k| !k.contains(&ix)) {
                 return Ok(false);
             }
-            if nf.is_empty() {
-                return Ok(true);
+            match nf {
+                Filter::All => Ok(true),
+                Filter::Attributes(wanted) => Ok(attrs_match(py, wanted, &node.data.attr, "labels", || {
+                    crate::data::node_value(py, &vertex.graph, ix, "labels")
+                })?),
+                Filter::Expr(x) => Ok(x.matches_node(&vertex.graph, ix)?),
+                Filter::Callable(f) => {
+                    let h = handle.expect("callable filters have a Vertex handle");
+                    Ok(f.call1((Node::handle(py, h, ix)?,))?.is_truthy()?)
+                }
             }
-            let labels = || crate::data::node_value(py, &vertex.graph, ix, "labels");
-            if !nf.attrs_match(py, &node.data.attr, "labels", labels)? {
-                return Ok(false);
-            }
-            if let Some(x) = &nf.expr
-                && !x.matches_node(&vertex.graph, ix)?
-            {
-                return Ok(false);
-            }
-            Ok(match handle {
-                Some(h) if nf.callable.is_some() => nf.call(Node::handle(py, h, ix)?.into_any())?,
-                _ => true,
-            })
         },
-        |e, edge| {
-            if ef.is_empty() {
-                return Ok(true);
+        |e, edge| match ef {
+            Filter::All => Ok(true),
+            Filter::Attributes(wanted) => Ok(attrs_match(py, wanted, &edge.data.attr, "type", || {
+                crate::data::edge_value(py, &vertex.graph, e, "type")
+            })?),
+            Filter::Expr(x) => Ok(x.matches_edge(&vertex.graph, e)?),
+            Filter::Callable(f) => {
+                let h = handle.expect("callable filters have a Vertex handle");
+                Ok(f.call1((Edge::handle(py, h, e)?,))?.is_truthy()?)
             }
-            let ty = || crate::data::edge_value(py, &vertex.graph, e, "type");
-            if !ef.attrs_match(py, &edge.data.attr, "type", ty)? {
-                return Ok(false);
-            }
-            if let Some(x) = &ef.expr
-                && !x.matches_edge(&vertex.graph, e)?
-            {
-                return Ok(false);
-            }
-            Ok(match handle {
-                Some(h) if ef.callable.is_some() => ef.call(Edge::handle(py, h, e)?.into_any())?,
-                _ => true,
-            })
         },
     )?;
     Ok(raw)
