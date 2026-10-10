@@ -84,7 +84,7 @@ mod nested {
     use std::cell::Cell;
 
     use super::MAX_EXPR_DEPTH;
-    use crate::value::nested::enter_level;
+    use crate::serde_support::enter_level;
 
     thread_local! {
         // `And` / `Or` / `Not` entered on this thread
@@ -132,7 +132,7 @@ impl Expr {
     /// [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels deep). Prefer it to
     /// `serde_json::from_str`, which stops at 64 levels.
     pub fn from_json_str(json: &str) -> Result<Expr, crate::GraphError> {
-        crate::value::from_json_str(json)
+        crate::serde_support::from_json_str(json)
     }
 
     /// Whether the node matches.

@@ -32,6 +32,7 @@ pub mod projection;
 pub mod query;
 pub mod random_walks;
 pub mod record;
+mod serde_support;
 pub mod temporal;
 pub mod traversal;
 pub mod value;
