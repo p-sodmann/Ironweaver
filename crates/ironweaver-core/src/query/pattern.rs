@@ -90,7 +90,7 @@ impl Pattern {
     /// Read a pattern from its serde form in JSON, with filters as deep as
     /// [`Expr::from_json_str`] reads them.
     pub fn from_json_str(json: &str) -> Result<Pattern, GraphError> {
-        crate::value::from_json_str(json)
+        crate::serde_support::from_json_str(json)
     }
 
     /// Parse the text form (see the module comment).

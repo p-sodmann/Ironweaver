@@ -98,7 +98,7 @@ mod non_finite {
 /// depth (per thread) and refuse values deeper than `MAX_DEPTH`, counted
 /// like the file format: the outermost value is depth 1 and a container's
 /// items are one deeper, so an empty container counts like a scalar.
-pub(crate) mod nested {
+mod nested {
     use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::cell::Cell;
@@ -107,36 +107,11 @@ pub(crate) mod nested {
 
     use super::Value;
     use crate::format::MAX_DEPTH;
+    use crate::serde_support::enter_level;
 
     thread_local! {
         // Containers entered on this thread
         static DEPTH: Cell<usize> = const { Cell::new(0) };
-    }
-
-    /// Run `f` one level deeper on the per-thread counter `depth`: the
-    /// value inside `depth` containers is `depth + 1` levels deep, so this
-    /// fails with `err()` once `max` containers are open.
-    pub(crate) fn enter_level<T, E>(
-        depth: &'static std::thread::LocalKey<Cell<usize>>,
-        max: usize,
-        err: impl FnOnce() -> E,
-        f: impl FnOnce() -> Result<T, E>,
-    ) -> Result<T, E> {
-        struct Level(&'static std::thread::LocalKey<Cell<usize>>);
-        impl Drop for Level {
-            fn drop(&mut self) {
-                self.0.with(|c| c.set(c.get() - 1));
-            }
-        }
-        let open = depth.with(|c| {
-            c.set(c.get() + 1);
-            c.get()
-        });
-        let _level = Level(depth);
-        if open >= max {
-            return Err(err());
-        }
-        f()
     }
 
     fn message() -> String {
@@ -229,25 +204,12 @@ pub fn serialize_sorted<S: serde::Serializer>(map: &HashMap<String, Value>, s: S
     s.collect_map(sorted_entries(map))
 }
 
-/// Read the serde form of `T` from JSON with no recursion limit of the
-/// JSON parser's own: for types whose every level of nesting is counted by
-/// their serde impls (with a limit) and that refuse unknown fields, so
-/// nothing is skipped ([`Value`], [`Expr`](crate::Expr),
-/// [`Pattern`](crate::query::Pattern)). serde_json alone stops at 128 JSON
-/// levels, 64 levels of `{"List": [...]}`.
-pub(crate) fn from_json_str<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, crate::GraphError> {
-    let mut de = serde_json::Deserializer::from_str(json);
-    de.disable_recursion_limit();
-    let value = T::deserialize(&mut de).and_then(|v| de.end().map(|()| v));
-    value.map_err(|e| crate::GraphError::Format(e.to_string()))
-}
-
 impl Value {
     /// Read a value from its serde form in JSON (e.g. `{"Int": 30}`), up to
     /// [`MAX_DEPTH`](crate::format::MAX_DEPTH) levels deep. Prefer it to
     /// `serde_json::from_str`, which stops at 64 levels of lists / dicts.
     pub fn from_json_str(json: &str) -> Result<Value, crate::GraphError> {
-        from_json_str(json)
+        crate::serde_support::from_json_str(json)
     }
 
     /// The value as a float, for `Int`, `Float` and `Half`.
