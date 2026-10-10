@@ -40,17 +40,8 @@ pub mod tagged {
     pub fn float<S: Serializer>(s: S, v: f64, half: bool) -> Result<S::Ok, S::Error> {
         if half {
             s.serialize_newtype_variant(ENUM, HALF, "Half", &f16::from_f64(v))
-        } else if v.is_finite() || !s.is_human_readable() {
-            s.serialize_newtype_variant(ENUM, FLOAT, "Float", &v)
         } else {
-            let text = if v.is_nan() {
-                "NaN"
-            } else if v > 0.0 {
-                "Infinity"
-            } else {
-                "-Infinity"
-            };
-            s.serialize_newtype_variant(ENUM, FLOAT, "Float", text)
+            s.serialize_newtype_variant(ENUM, FLOAT, "Float", &crate::serde_support::float::Float(v))
         }
     }
 
