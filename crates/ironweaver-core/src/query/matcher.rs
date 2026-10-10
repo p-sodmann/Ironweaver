@@ -246,18 +246,18 @@ where
                     }
                     (None, Some(_)) => {
                         let rarest = self.pattern.nodes[v].labels.iter().min_by_key(|l| self.g.label_count(l));
-                        self.g.nodes_with_label(rarest.expect("has a label"))
-                    }
-                    (None, None) => {
-                        // Every node: read lazily, not copied
-                        let g = self.g;
-                        for ix in g.node_indices() {
-                            if !self.with_node(v, ix, i)? {
-                                return Ok(false);
-                            }
+                        let label = rarest.expect("has a label");
+                        // In a compact arena, a universal label has the same
+                        // candidates as an unlabelled scan, already in slot
+                        // order. Arenas with deleted slots keep the label index.
+                        if self.g.label_count(label) == self.g.node_count()
+                            && self.g.node_bound() == self.g.node_count()
+                        {
+                            return self.scan_all(v, i);
                         }
-                        return Ok(true);
+                        self.g.nodes_with_label(label)
                     }
+                    (None, None) => return self.scan_all(v, i),
                 };
                 for ix in candidates {
                     if !self.with_node(v, ix, i)? {
@@ -343,6 +343,17 @@ where
                 Ok(true)
             }
         }
+    }
+
+    /// Every live node in slot order, without materializing candidates.
+    fn scan_all(&mut self, v: usize, i: usize) -> Result<bool, X> {
+        let g = self.g;
+        for ix in g.node_indices() {
+            if !self.with_node(v, ix, i)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Bind pattern edge `k` to the trail `used[base..]` (from `u`, which
@@ -547,6 +558,72 @@ mod tests {
             .collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn universal_labels_preserve_scan_order_and_limits() {
+        let mut g = G::new();
+        let mut ix: Vec<_> = (0..8)
+            .map(|i| {
+                let n = g.add_node(format!("n{i}"), Record::with_attr([("group", Value::Int(i % 2))])).unwrap();
+                g.add_label(n, "Person").unwrap();
+                n
+            })
+            .collect();
+        for u in 0..8 {
+            g.insert_edge(ix[u], ix[(u + 1) % 8], None, Some("KNOWS"), Record::default()).unwrap();
+        }
+        // A reused slot must keep slot order, rather than insertion or id order.
+        g.remove_node(ix[4]).unwrap();
+        ix[4] = g.add_node("n8", Record::with_attr([("group", Value::Int(1))])).unwrap();
+        g.add_label(ix[4], "Person").unwrap();
+        g.insert_edge(ix[3], ix[4], None, Some("KNOWS"), Record::default()).unwrap();
+        g.insert_edge(ix[4], ix[5], None, Some("KNOWS"), Record::default()).unwrap();
+        g.insert_edge(ix[0], ix[1], None, Some("KNOWS"), Record::default()).unwrap();
+        g.insert_edge(ix[0], ix[0], None, Some("KNOWS"), Record::default()).unwrap();
+        let labeled = Pattern::parse("(a:Person {group: 1})-[:KNOWS]->(b)-[:KNOWS]->(c)").unwrap();
+        let plain = Pattern::parse("(a {group: 1})-[:KNOWS]->(b)-[:KNOWS]->(c)").unwrap();
+        let want = find_matches::<_, _, GraphError>(&g, &plain, None).unwrap();
+        let starts: Vec<_> = want.iter().map(|m| g.node(m.nodes[0]).unwrap().id()).collect();
+        assert_eq!(starts, ["n1", "n3", "n8", "n5", "n7", "n7", "n7"]);
+        for indexed in [false, true] {
+            if indexed {
+                g.create_index::<GraphError>(&["group".into()]).unwrap();
+            }
+            assert_eq!(find_matches::<_, _, GraphError>(&g, &labeled, None).unwrap(), want);
+            for budget in [
+                Budget::UNLIMITED,
+                Budget::UNLIMITED.max_visited(0).truncate(),
+                Budget::UNLIMITED.max_visited(6).truncate(),
+                Budget::UNLIMITED.max_edges(3).truncate(),
+                Budget::UNLIMITED.max_results(2).truncate(),
+            ] {
+                let got = find_matches_limited::<_, _, GraphError>(&g, &labeled, budget).unwrap();
+                let reference = find_matches_limited::<_, _, GraphError>(&g, &plain, budget).unwrap();
+                assert_eq!(got, reference, "indexed={indexed}, budget={budget:?}");
+            }
+        }
+        // A second, rarer label must still restrict the candidate set.
+        for &u in &[ix[1], ix[4], ix[7]] {
+            g.add_label(u, "Selected").unwrap();
+        }
+        let rare = Pattern::parse("(a:Person:Selected)-[:KNOWS]->(b)-[:KNOWS]->(c)").unwrap();
+        let got = find_matches::<_, _, GraphError>(&g, &rare, None).unwrap();
+        let subset: Vec<_> = want.iter().filter(|m| [ix[1], ix[4], ix[7]].contains(&m.nodes[0])).cloned().collect();
+        assert_eq!(got, subset);
+        // A deleted slot must preserve ordered results and work counters.
+        g.remove_node(ix[6]).unwrap();
+        let all = Pattern::parse("(a:Person)").unwrap();
+        let plain = Pattern::parse("(a)").unwrap();
+        assert_eq!(
+            find_matches_limited::<_, _, GraphError>(&g, &all, Budget::UNLIMITED).unwrap(),
+            find_matches_limited::<_, _, GraphError>(&g, &plain, Budget::UNLIMITED).unwrap()
+        );
+        // Removing one label must restore the restricted scan and its counters.
+        g.remove_label(ix[5], "Person").unwrap();
+        let got = find_matches_limited::<_, _, GraphError>(&g, &all, Budget::UNLIMITED).unwrap();
+        assert_eq!(got.visited, g.node_count() - 1);
+        assert!(got.value.iter().all(|m| m.nodes[0] != ix[5]));
     }
 
     #[test]

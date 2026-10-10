@@ -1,0 +1,92 @@
+[
+  {
+    "nodes": 100000,
+    "case": "bounded-core-100",
+    "medians_us": {
+      "before": 2454.6503398640543,
+      "after": 562.2932757897543
+    },
+    "improvement_percent": 77.0927342824357,
+    "triplet_improvements_percent": [
+      75.23876228635439,
+      76.70944603866081,
+      77.14443629374034,
+      77.13254178219042
+    ]
+  },
+  {
+    "nodes": 100000,
+    "case": "db-two-hops-100",
+    "medians_us": {
+      "before": 31075.98025,
+      "after": 29463.742818181818
+    },
+    "improvement_percent": 5.188050123754929,
+    "triplet_improvements_percent": [
+      12.743379609843586,
+      -0.043104487385714485,
+      5.9925077452506414,
+      2.3991583825169194
+    ]
+  },
+  {
+    "nodes": 100000,
+    "case": "rare-two-hops-100",
+    "medians_us": {
+      "before": 74.93988744137567,
+      "after": 77.3258376847754
+    },
+    "improvement_percent": -3.1838188244760923,
+    "triplet_improvements_percent": [
+      -8.833233764265414,
+      -9.792188949242075,
+      -2.348459584838669,
+      2.9909311213972667
+    ]
+  },
+  {
+    "nodes": 100000,
+    "case": "sparse-arena-100",
+    "medians_us": {
+      "before": 29.208445407576853,
+      "after": 27.645937922202762
+    },
+    "improvement_percent": 5.349505814399713,
+    "triplet_improvements_percent": [
+      2.5285610300490147,
+      6.446646286549296,
+      -8.488522769094708,
+      6.179611832132704
+    ]
+  },
+  {
+    "nodes": 100000,
+    "case": "unlabeled-two-hops-100",
+    "medians_us": {
+      "before": 28977.313863636366,
+      "after": 29459.425227272724
+    },
+    "improvement_percent": -1.6637545008661325,
+    "triplet_improvements_percent": [
+      -3.94784273206763,
+      1.8266609073901652,
+      -1.7676214209219054,
+      -4.133789653731035
+    ]
+  },
+  {
+    "nodes": 1000000,
+    "case": "db-two-hops-100",
+    "medians_us": {
+      "before": 54964.14508333334,
+      "after": 35455.873555555554
+    },
+    "improvement_percent": 35.4927225706877,
+    "triplet_improvements_percent": [
+      36.04999261199492,
+      32.87340670634459,
+      35.96088018006789,
+      39.658471433778075
+    ]
+  }
+]
