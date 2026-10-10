@@ -1,0 +1,39 @@
+PageRank validation, 2026-10-09
+
+Toolchain: rustc 1.99.0 (b940084d7 2026-09-28)
+Source baseline: upstream main 227552f54d255ade792d7d6d5a4a91883e93e67b
+Baseline source tree: 5c15c6c9614e2f37e5e86a72aab15013049cad29
+
+Before: cargo test -p ironweaver-core --offline (including added reference test)
+test result: ok. 111 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.17s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+After: cargo test -p ironweaver-core --offline
+test result: ok. 111 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.71s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+After: maturin develop --release --offline: passed
+After: pytest -q: 876 passed in 17.46s
+cargo fmt --all --check: passed
+cargo clippy --workspace --all-targets --offline -- -D warnings: passed
+git diff --check: passed
+
+Frozen release harness SHA-256:
+before: 54f7bf657fe16fe60e98c4a672c2e885e3e9c0f2ec2b6d5e3aaa60a82b77f3fb
+after: bb1ecc55f067643760de8d441b45d879068a0227a62eba49e3de94925b9ce72b
+
+Benchmark validation: paired before/after fingerprints and iteration counts match for all cases at 100,000 and 1,000 nodes, one and three workers.

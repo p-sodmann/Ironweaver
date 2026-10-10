@@ -33,7 +33,7 @@ const NONE: u32 = u32::MAX;
 /// Adjacency in CSR layout: the neighbours of node `u` are
 /// `to[start[u]..start[u + 1]]`, with weights at the same positions.
 #[derive(Clone, Debug, Default)]
-struct Csr {
+pub(crate) struct Csr {
     start: Vec<u32>,
     to: Vec<u32>,
     weight: Option<Vec<f64>>,
@@ -44,11 +44,11 @@ impl Csr {
         self.start[u as usize] as usize..self.start[u as usize + 1] as usize
     }
 
-    fn neighbors(&self, u: u32) -> &[u32] {
+    pub(crate) fn neighbors(&self, u: u32) -> &[u32] {
         &self.to[self.row(u)]
     }
 
-    fn weights(&self, u: u32) -> Option<&[f64]> {
+    pub(crate) fn weights(&self, u: u32) -> Option<&[f64]> {
         let row = self.row(u);
         self.weight.as_ref().map(|w| &w[row])
     }
@@ -276,7 +276,7 @@ impl Projection {
     }
 
     /// The adjacency against the projection's edges.
-    fn inc(&self) -> &Csr {
+    pub(crate) fn inc(&self) -> &Csr {
         if self.direction == Direction::Both {
             return &self.out;
         }
