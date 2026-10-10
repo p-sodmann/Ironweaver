@@ -49,7 +49,6 @@ pub fn project(
 /// Validate the shared options (same rules and messages as
 /// `shortest_path`): the projection spec and whether the method uses weights.
 fn options<'py>(
-    py: Python<'py>,
     method: Option<&str>,
     weight: Option<String>,
     default_weight: Option<f64>,
@@ -65,8 +64,7 @@ fn options<'py>(
     let cost = edge_cost(method, weight, default_weight).map_err(graph_error)?;
     check_max_cost(max_cost).map_err(graph_error)?;
     let direction = Direction::parse(direction).map_err(graph_error)?;
-    let no_filter = || Filter::parse(py, None, "");
-    let spec = Spec { direction, cost, nodes: None, node_filter: no_filter()?, edge_filter: no_filter()? };
+    let spec = Spec { direction, cost, nodes: None, node_filter: Filter::All, edge_filter: Filter::All };
     Ok((spec, method.weighted))
 }
 
@@ -96,7 +94,7 @@ pub fn shortest_paths(
     max_cost: Option<f64>,
     direction: Option<&str>,
 ) -> PyResult<Py<PyList>> {
-    let (spec, weighted) = options(py, method, weight, default_weight, max_cost, direction)?;
+    let (spec, weighted) = options(method, weight, default_weight, max_cost, direction)?;
     let pairs: Vec<(NodeIx, NodeIx)> = pairs
         .iter()
         .map(|(s, t)| Ok((lookup(vertex, s, "Root")?, lookup(vertex, t, "Target")?)))
@@ -121,7 +119,7 @@ pub fn distances(
     max_cost: Option<f64>,
     direction: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
-    let (spec, weighted) = options(py, method, weight, default_weight, max_cost, direction)?;
+    let (spec, weighted) = options(method, weight, default_weight, max_cost, direction)?;
     let sources: Vec<NodeIx> = sources.iter().map(|s| lookup(vertex, s, "Root")).collect::<PyResult<_>>()?;
     let targets: Option<Vec<NodeIx>> =
         targets.map(|ts| ts.iter().map(|t| lookup(vertex, t, "Target")).collect::<PyResult<_>>()).transpose()?;
