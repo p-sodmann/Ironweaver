@@ -277,11 +277,11 @@ fn records(doc: &LoadGraph<'_>) -> Result<(Graph<Record, Record>, Attrs), GraphE
 /// (and removes the temporary file when it can). An existing file's
 /// permissions are kept; a symlink at `path` is replaced, not written through.
 ///
-/// `Ok` means the new contents are on disk (fsynced), the rename is done,
-/// and, on Unix, the rename itself is durable: the directory holding `path`
-/// was fsynced too, so after a crash or power loss `path` holds the new
-/// file. Windows has no way to sync a directory; there the rename is
-/// done but not explicitly made durable.
+/// On Unix and Windows, `Ok` means the new contents were synced, the rename
+/// is done, and the directory holding `path` was synced after it. Durability
+/// after a crash or power loss depends on the filesystem's guarantees (in
+/// particular, FAT, exFAT and network shares may not make the rename durable).
+/// On other platforms, only the file contents are synced.
 ///
 /// If only that last step fails (the directory can't be opened or its fsync
 /// fails), the error is returned although `path` already names the new
@@ -317,11 +317,19 @@ pub fn write_atomic(
         let _ = fs::remove_file(&tmp);
         return result;
     }
-    // Make the rename itself durable (not possible on Windows)
-    #[cfg(unix)]
+    // Sync the directory entry after the rename.
+    #[cfg(any(unix, windows))]
     if let Some(dir) = path.parent() {
         let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
-        File::open(dir).and_then(|d| d.sync_all()).map_err(|e| {
+        #[cfg(unix)]
+        let directory = File::open(dir);
+        #[cfg(windows)]
+        let directory = {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            fs::OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(dir)
+        };
+        directory.and_then(|d| d.sync_all()).map_err(|e| {
             io::Error::new(e.kind(), format!("saved, but syncing the directory {} failed: {e}", dir.display()))
         })?;
     }

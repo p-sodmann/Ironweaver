@@ -192,6 +192,38 @@ fn write_atomic_reports_a_failed_directory_sync() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn write_atomic_reports_a_failed_directory_sync_on_windows() {
+    use std::process::Command;
+
+    let identity = Command::new("whoami").output().unwrap();
+    assert!(identity.status.success(), "whoami failed: {identity:?}");
+    let user = String::from_utf8(identity.stdout).unwrap();
+    let user = user.trim();
+    let dir = std::env::temp_dir().join(format!("ironweaver-atomic-dir-windows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Deny extended-attribute writes on the directory only (not inherited
+    // by children). Files can still be created and renamed, but the
+    // directory cannot be opened with GENERIC_WRITE to sync it.
+    let deny = Command::new("icacls").arg(&dir).arg("/deny").arg(format!("{user}:(WEA)")).output().unwrap();
+    assert!(deny.status.success(), "icacls /deny failed: {deny:?}");
+    let path = dir.join("graph.json");
+    let result = format::write_atomic(&path, |out| std::io::Write::write_all(out, b"data"));
+    // Restore the ACL before any assertions, even if the save failed early.
+    let restore = Command::new("icacls").arg(&dir).arg("/remove:d").arg(user).output().unwrap();
+    assert!(restore.status.success(), "icacls /remove:d failed: {restore:?}");
+    let content = std::fs::read(&path);
+    let entries = std::fs::read_dir(&dir).unwrap().count();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("syncing the directory"), "{err}");
+    assert!(err.to_string().contains(&dir.display().to_string()), "{err}");
+    assert_eq!(content.unwrap(), b"data");
+    assert_eq!(entries, 1);
+}
+
 #[test]
 fn equal_graphs_save_to_equal_bytes() {
     use format::{GraphWriter, RecordCodec};
