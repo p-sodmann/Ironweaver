@@ -192,6 +192,38 @@ fn write_atomic_reports_a_failed_directory_sync() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn write_atomic_reports_a_failed_directory_sync_on_windows() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+
+    let dir = std::env::temp_dir().join(format!("ironweaver-atomic-dir-windows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Deny write sharing on the directory itself. Creating and renaming
+    // children still works, but opening the directory for syncing fails.
+    let guard = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(&dir)
+        .unwrap();
+    let path = dir.join("graph.json");
+    let result = format::write_atomic(&path, |out| std::io::Write::write_all(out, b"data"));
+    drop(guard);
+    let content = std::fs::read(&path).unwrap();
+    let entries = std::fs::read_dir(&dir).unwrap().count();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("syncing the directory"), "{err}");
+    assert!(err.to_string().contains(&dir.display().to_string()), "{err}");
+    assert_eq!(content, b"data");
+    assert_eq!(entries, 1);
+}
+
 #[test]
 fn equal_graphs_save_to_equal_bytes() {
     use format::{GraphWriter, RecordCodec};

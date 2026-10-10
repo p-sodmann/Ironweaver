@@ -96,3 +96,6 @@ jobs:
           python -m pip install -e .
       # Includes tests/test_docs_examples.py (README, llms.txt, docs/*.md)
       - run: python -m pytest -q
+      - name: Windows atomic-save regression tests
+        if: runner.os == 'Windows'
+        run: cargo test -p ironweaver-core --test format_safety write_atomic

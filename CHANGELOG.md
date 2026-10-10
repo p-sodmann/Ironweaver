@@ -181,10 +181,10 @@ a query layer and database foundations.
   removed node or edge can never resolve to a new one.
 
 - Saving is atomic (temporary file, fsync, rename); loading refuses values
-  nested deeper than 100 levels and checks the binary checksum. On Unix the
-  directory is fsynced after the rename, and `format::write_atomic` returns
-  an error if that fails (it was ignored), so `Ok` means the rename is
-  durable.
+  nested deeper than 100 levels and checks the binary checksum. On Unix and
+  Windows the directory is fsynced after the rename, and
+  `format::write_atomic` returns an error if that fails (it was ignored), so
+  `Ok` means the rename is durable within the filesystem's guarantees.
 - Saves are deterministic: attribute maps of core `Record`s (and dict
   values) are written sorted by key, in files and in serde output (op
   logs), so equal graphs with equal slot order save to equal bytes (apart
