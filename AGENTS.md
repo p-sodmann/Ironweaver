@@ -229,9 +229,9 @@ Below is a quick guide to notable functions and where to find them.
   - `pattern.rs`: `Pattern` / `NodePattern` / `EdgePattern` (serde),
     `Pattern::parse` (Cypher-like text: labels, types, `*min..max`,
     `{key: value}`), `add_filter`, `bind_ids`; `Display` / `to_text`
-    write text that parses back to an equal pattern (`TextWriter` picks an
-    order that reproduces the node numbering; a random test checks the
-    round trip) and mark what text can't express in `<...>`.
+    delegate text rendering to the private `pattern/text.rs` module, whose
+    `TextWriter` picks an order that reproduces the node numbering (a random
+    test checks the round trip) and marks what text can't express in `<...>`.
   - `matcher.rs`: `for_each_match` / `find_matches` (backtracking; plan
     from the most selective node; edges distinct per match, nodes may
     repeat; variable-length edges streamed), their `*_limited` variants,
@@ -297,8 +297,10 @@ Below is a quick guide to notable functions and where to find them.
 - **projection.rs** – the `Projection` class (queries and analytics
   methods release the GIL),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
-  core `RawProjection`), batch method selection and result conversion shared
-  with `vertex/batch.rs`.
+  core `RawProjection`) and batch method selection shared with
+  `vertex/batch.rs`. Result conversion lives in **projection/results.rs**:
+  batch paths / distances, per-node values, embedding rows and groups /
+  walks (with a shared node-id string cache).
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
   `NodeView` / `EdgeView`.
 - **interrupt.rs** – Ctrl+C: `released(py, size, f)` runs GIL-free work on
