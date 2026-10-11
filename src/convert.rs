@@ -35,6 +35,20 @@ fn py_err<E: serde::ser::Error>(e: PyErr) -> E {
     ironweaver_core::format::ser_error(e)
 }
 
+enum IntegerValue {
+    Int(i64),
+    Float(f64),
+}
+
+/// Keep integers exact within i64; otherwise retain their magnitude as a
+/// float. Integers beyond f64's range still raise Python's OverflowError.
+fn integer_value(value: &Bound<'_, PyInt>) -> PyResult<IntegerValue> {
+    match value.extract::<i64>() {
+        Ok(n) => Ok(IntegerValue::Int(n)),
+        Err(_) => Ok(IntegerValue::Float(value.extract::<f64>()?)),
+    }
+}
+
 /// A plain Python value (dict/list/str/number/bool/None) written as ordinary
 /// JSON. Used to turn a graph *dict* into JSON bytes, which then go through
 /// the same fast loader as JSON text.
@@ -56,9 +70,9 @@ impl Serialize for PlainPy<'_, '_> {
         } else if let Ok(b) = v.cast::<PyBool>() {
             s.serialize_bool(b.is_true())
         } else if let Ok(i) = v.cast::<PyInt>() {
-            match i.extract::<i64>() {
-                Ok(n) => s.serialize_i64(n),
-                Err(_) => s.serialize_f64(i.extract::<f64>().map_err(py_err)?),
+            match integer_value(i).map_err(py_err)? {
+                IntegerValue::Int(n) => s.serialize_i64(n),
+                IntegerValue::Float(f) => s.serialize_f64(f),
             }
         } else if let Ok(f) = v.cast::<PyFloat>() {
             match f.value() {
@@ -125,10 +139,9 @@ impl Serialize for PyValue<'_, '_> {
         } else if let Ok(b) = v.cast::<PyBool>() {
             tagged::bool(s, b.is_true())
         } else if let Ok(i) = v.cast::<PyInt>() {
-            match i.extract::<i64>() {
-                Ok(n) => tagged::int(s, n),
-                // Out of i64 range: keep the magnitude as a float
-                Err(_) => tagged::float(s, i.extract::<f64>().map_err(py_err)?, half),
+            match integer_value(i).map_err(py_err)? {
+                IntegerValue::Int(n) => tagged::int(s, n),
+                IntegerValue::Float(f) => tagged::float(s, f, half),
             }
         } else if let Ok(f) = v.cast::<PyFloat>() {
             tagged::float(s, f.value(), half)
@@ -325,9 +338,9 @@ pub fn to_value(v: &Bound<'_, PyAny>) -> PyResult<ironweaver_core::Value> {
         } else if let Ok(b) = v.cast::<PyBool>() {
             Value::Bool(b.is_true())
         } else if let Ok(i) = v.cast::<PyInt>() {
-            match i.extract::<i64>() {
-                Ok(n) => Value::Int(n),
-                Err(_) => Value::Float(i.extract::<f64>()?),
+            match integer_value(i)? {
+                IntegerValue::Int(n) => Value::Int(n),
+                IntegerValue::Float(f) => Value::Float(f),
             }
         } else if let Ok(f) = v.cast::<PyFloat>() {
             Value::Float(f.value())

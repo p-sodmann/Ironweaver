@@ -149,3 +149,79 @@ def test_non_finite_floats_in_json(tmp_path):
         back = iw.Vertex.load_from_json(loaded)["n"].attr
         assert back["inf"] == float("inf") and back["ninf"] == float("-inf") and back["nan"] != back["nan"]
         assert str(back["zero"]) == "-0.0"
+
+
+INTEGER_CASES = [
+    pytest.param(-(2**63), int, id="i64-min"),
+    pytest.param(2**63 - 1, int, id="i64-max"),
+    pytest.param(-(2**63) - 1, float, id="below-i64"),
+    pytest.param(2**63, float, id="above-i64"),
+    pytest.param(2**63 + 1, float, id="rounded-above-i64"),
+    pytest.param(-(10**100), float, id="large-negative"),
+    pytest.param(10**100, float, id="large-positive"),
+    pytest.param(False, bool, id="false"),
+    pytest.param(True, bool, id="true"),
+]
+
+
+@pytest.mark.parametrize("value,kind", INTEGER_CASES)
+def test_integer_conversion_round_trips(value, kind, tmp_path):
+    g = iw.Vertex()
+    g.add_node("n", {"value": value})
+    want = kind(value)
+    doc = json.loads(g.save_to_json())
+    tag = {int: "Int", float: "Float", bool: "Bool"}[kind]
+    assert doc["nodes"]["n"]["attr"]["value"] == {tag: want}
+    for loaded in (iw.Vertex.load_from_json(g.save_to_json()), iw.Vertex.load_from_json(doc)):
+        got = loaded["n"].attr["value"]
+        assert type(got) is kind and got == want
+    for method in ("save_to_binary", "save_to_binary_f16"):
+        path = str(tmp_path / f"{method}.bin")
+        getattr(g, method)(path)
+        got = iw.Vertex.load_from_binary(path)["n"].attr["value"]
+        # Out-of-range integers follow the same half-precision path as floats.
+        expected = want if kind is not float or method == "save_to_binary" else float("-inf" if value < 0 else "inf")
+        assert type(got) is kind and got == expected
+
+
+@pytest.mark.parametrize("value,kind", INTEGER_CASES)
+def test_integer_conversion_in_graph_dicts(value, kind):
+    g = iw.Vertex()
+    g.add_node("n")
+    doc = json.loads(g.save_to_json())
+    tag = {int: "Int", float: "Float", bool: "Bool"}[kind]
+    # Pass the original Python int through the plain graph-dict serializer,
+    # rather than a Float already converted by save_to_json.
+    doc["nodes"]["n"]["attr"]["value"] = {tag: value}
+    got = iw.Vertex.load_from_json(doc)["n"].attr["value"]
+    assert type(got) is kind and got == kind(value)
+
+
+@pytest.mark.parametrize("value,kind", INTEGER_CASES)
+def test_integer_conversion_in_expressions(value, kind):
+    want = kind(value)
+    assert repr(iw.attr("value") == value) == repr(iw.attr("value") == want)
+    assert repr(iw.attr("value").is_in([value])) == repr(iw.attr("value").is_in([want]))
+    g = iw.Vertex()
+    g.add_node("n", {"value": want})
+    assert list(g.filter(where=iw.attr("value") == value).nodes) == ["n"]
+
+
+@pytest.mark.parametrize("value", [10**500, -(10**500)], ids=["positive", "negative"])
+def test_integer_conversion_overflow(value, tmp_path):
+    message = "int too large to convert to float"
+    with pytest.raises(OverflowError, match=message):
+        iw.attr("value") == value
+    with pytest.raises(OverflowError, match=message):
+        iw.attr("value").is_in([value])
+    g = iw.Vertex()
+    g.add_node("n", {"value": value})
+    with pytest.raises(RuntimeError, match=message):
+        g.save_to_json()
+    for method in ("save_to_binary", "save_to_binary_f16"):
+        with pytest.raises(RuntimeError, match=message):
+            getattr(g, method)(str(tmp_path / f"{method}.bin"))
+    doc = json.loads(iw.Vertex().save_to_json())
+    doc["meta"]["value"] = {"Float": value}
+    with pytest.raises(RuntimeError, match=message):
+        iw.Vertex.load_from_json(doc)
