@@ -17,7 +17,8 @@ use std::collections::HashSet;
 use super::Vertex;
 use crate::errors::graph_error;
 use crate::interrupt;
-use crate::projection::{self, distances_to_py, paths_to_py, resolve_batch_method, Filter, Projection, Spec};
+use crate::projection::results::{distances_to_py, paths_to_py};
+use crate::projection::{self, resolve_batch_method, Filter, Projection, Spec};
 
 /// `Vertex.project(...)`.
 #[allow(clippy::too_many_arguments)]
