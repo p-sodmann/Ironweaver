@@ -61,7 +61,9 @@ CI (`.github/workflows/ci.yml`) also runs `cargo fmt --all --check`,
 (ignored advisories, with reasons, are in `.cargo/audit.toml`), a check that
 the core does not depend on pyo3, and builds with the latest stable Rust (the minimum
 supported version is 1.99, `rust-version` in both Cargo.toml files; raise it
-when a newer std API or language feature is worth using), rustdoc with
+when a newer std API or language feature is worth using). A separate minimum
+Rust job reads both manifests, checks that their versions agree, builds the
+workspace and runs the core tests with that toolchain. CI also runs rustdoc with
 `-D warnings` plus `cargo package` for the core (its README is the crate
 docs, so its example runs as a doctest), and pytest on Python 3.9-3.14
 (Linux) plus macOS and Windows. Run fmt and clippy before pushing.

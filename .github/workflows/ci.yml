@@ -45,6 +45,39 @@ jobs:
             exit 1
           fi
 
+  msrv:
+    name: Minimum supported Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Read the minimum Rust version from both crates
+        id: msrv
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import tomllib
+
+          manifests = [Path("Cargo.toml"), Path("crates/ironweaver-core/Cargo.toml")]
+          versions = [tomllib.loads(path.read_text())["package"]["rust-version"] for path in manifests]
+          if versions[0] != versions[1]:
+              raise SystemExit(f"Both crates must declare the same rust-version: {versions}")
+          version = versions[0]
+          if version.count(".") == 1:
+              version += ".0"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"rust-version={version}\n")
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.msrv.outputs.rust-version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
+      - run: cargo test -p ironweaver-core
+
   docs-rs:
     name: Core API docs (rustdoc)
     runs-on: ubuntu-latest
