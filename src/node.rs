@@ -5,14 +5,14 @@ use ironweaver_core::{Direction, NodeIx};
 use pyo3::class::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyList, PyString};
 use pyo3::{PyTraverseError, PyVisit};
 use std::hash::{Hash, Hasher};
 
 use crate::data::{node_value, AttrMap, EdgeData, NodeData, PyAttrs, PyGraph, PyObjects};
 use crate::errors::Error;
 use crate::interrupt;
-use crate::vertex::callbacks::fire;
+use crate::vertex::callbacks::{fire_update, value_changed};
 use crate::vertex::subgraph::build_subgraph;
 use crate::{Edge, Vertex};
 
@@ -421,10 +421,7 @@ impl Node {
             v.graph.node(this.ix).ok_or_else(stale)?;
             node_value(py, &v.graph, this.ix, &key)?
         };
-        let changed = match &old {
-            Some(o) => !o.rich_compare(value.bind(py), CompareOp::Eq)?.is_truthy()?,
-            None => true,
-        };
+        let changed = value_changed(old.as_ref(), value.bind(py))?;
         if key == "labels" {
             let labels: Vec<String> = value
                 .extract(py)
@@ -440,17 +437,7 @@ impl Node {
 
         if changed {
             let callbacks = this.vertex.try_borrow(py)?.on_node_update_callbacks.clone_ref(py);
-            let args = PyTuple::new(
-                py,
-                [
-                    this.vertex.clone_ref(py).into_any(),
-                    slf.clone().into_any().unbind(),
-                    key.into_pyobject(py)?.into_any().unbind(),
-                    value,
-                    old.unwrap_or_else(|| py.None()),
-                ],
-            )?;
-            fire(callbacks.bind(py), args)?;
+            fire_update(callbacks.bind(py), &this.vertex, slf.clone().into_any().unbind(), key, value, old)?;
         }
         Ok(())
     }
