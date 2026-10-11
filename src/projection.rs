@@ -11,7 +11,7 @@
 
 use ironweaver_core::algo;
 use ironweaver_core::batch::{self, DensePath};
-use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind};
+use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind, PathMethod};
 use ironweaver_core::projection::RawProjection;
 use ironweaver_core::{Direction, NodeIx};
 use pyo3::exceptions::PyValueError;
@@ -212,20 +212,22 @@ impl Projection {
 
     /// `method=None` picks dijkstra on a weighted projection, bfs otherwise.
     fn uses_weights(&self, method: Option<&str>) -> PyResult<bool> {
-        resolved_weighted(method, self.inner.is_weighted())
+        Ok(resolve_batch_method(method, self.inner.is_weighted())?.weighted)
     }
 }
 
-/// Whether a batch query with `method` uses weights (`dijkstra`) or hop
-/// counts (`bfs`); `None` picks by `weighted`.
-pub(crate) fn resolved_weighted(method: Option<&str>, weighted: bool) -> PyResult<bool> {
+/// Resolve a batch method, rejecting algorithms unavailable for batch queries.
+/// `None` picks Dijkstra when `weighted`, BFS otherwise. Vertex queries pass
+/// whether a weight attribute was given; Projection queries pass whether
+/// the snapshot has weights.
+pub(crate) fn resolve_batch_method(method: Option<&str>, weighted: bool) -> PyResult<&'static PathMethod> {
     let m = resolve(method, weighted, &[]).map_err(graph_error)?;
     if m.kind == MethodKind::AStar {
         return Err(PyValueError::new_err(
             "method 'astar' is not available for batch queries; use 'bfs' or 'dijkstra'",
         ));
     }
-    Ok(m.weighted)
+    Ok(m)
 }
 
 /// A cost as Python sees it: an int for hop counts, a float otherwise.

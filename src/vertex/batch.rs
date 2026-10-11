@@ -7,7 +7,7 @@
 // so it can't change.
 
 use ironweaver_core::batch;
-use ironweaver_core::pathfinding::{check_max_cost, edge_cost, resolve, MethodKind};
+use ironweaver_core::pathfinding::{check_max_cost, edge_cost};
 use ironweaver_core::{Direction, NodeIx};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use super::Vertex;
 use crate::errors::graph_error;
 use crate::interrupt;
-use crate::projection::{self, distances_to_py, paths_to_py, Filter, Projection, Spec};
+use crate::projection::{self, distances_to_py, paths_to_py, resolve_batch_method, Filter, Projection, Spec};
 
 /// `Vertex.project(...)`.
 #[allow(clippy::too_many_arguments)]
@@ -55,12 +55,7 @@ fn options<'py>(
     max_cost: Option<f64>,
     direction: Option<&str>,
 ) -> PyResult<(Spec<'py>, bool)> {
-    let method = resolve(method, weight.is_some(), &[]).map_err(graph_error)?;
-    if method.kind == MethodKind::AStar {
-        return Err(PyValueError::new_err(
-            "method 'astar' is not available for batch queries; use 'bfs' or 'dijkstra'",
-        ));
-    }
+    let method = resolve_batch_method(method, weight.is_some())?;
     let cost = edge_cost(method, weight, default_weight).map_err(graph_error)?;
     check_max_cost(max_cost).map_err(graph_error)?;
     let direction = Direction::parse(direction).map_err(graph_error)?;
