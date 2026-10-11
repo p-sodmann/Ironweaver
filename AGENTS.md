@@ -108,6 +108,10 @@ Below is a quick guide to notable functions and where to find them.
   `edges_mut` mark them dirty and `settle_payloads` (on add / remove and
   after `apply`) counts them again. Code that adds or drops payloads
   outside those paths must update it too.
+- **graph/edge_index.rs** – private `EdgeIndex`: dense id-to-slot table
+  with a sparse fallback for large explicit ids; owns its capacity setup,
+  growth, lookup, removal, reservation and heap accounting. `Graph` uses
+  its methods without reading the storage fields.
 - **index.rs** – node property indexes owned by `Graph` (`BTreeMap<Key,
   Posting>` + each node's key): `create_index` / `create_index_with_keys`,
   `find_nodes`, `find_nodes_in_range`, `index_stats` (O(1) sizes),
