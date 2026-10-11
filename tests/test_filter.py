@@ -1,15 +1,11 @@
-try:  # pragma: no cover - optional build step
-    from ironweaver import Vertex, NodeView
-    from ironweaver.filter.predicates import (
-        attr_contains,
-        attr_equals,
-        p_and,
-        p_not,
-        p_or,
-    )
-except Exception as e:  # pragma: no cover - optional build step
-    import pytest
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Vertex, NodeView
+from ironweaver.filter.predicates import (
+    attr_contains,
+    attr_equals,
+    p_and,
+    p_not,
+    p_or,
+)
 
 
 def build_graph():

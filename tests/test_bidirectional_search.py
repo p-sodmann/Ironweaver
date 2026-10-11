@@ -7,10 +7,7 @@ import pytest
 
 nx = pytest.importorskip("networkx")
 
-try:
-    from ironweaver import Edge, Node, Vertex
-except Exception as e:  # pragma: no cover - module unavailable
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Edge, Node, Vertex
 
 TYPES = ("a", "b")
 

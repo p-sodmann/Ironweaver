@@ -3,10 +3,7 @@ import json
 import pytest
 
 
-try:
-    from ironweaver import Vertex
-except Exception as e:  # pragma: no cover - optional build step
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Vertex
 
 
 def linear_graph():

@@ -1,14 +1,4 @@
-import os
-import sys
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, ROOT)
-
-try:
-    from ironweaver import Vertex
-except Exception as e:  # pragma: no cover - optional build step
-    import pytest
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Vertex
 
 
 def build_vertex(edges):

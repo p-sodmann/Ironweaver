@@ -11,7 +11,6 @@ import sys
 import pytest
 
 pytest.importorskip("networkx")
-pytest.importorskip("ironweaver")
 
 # The benchmark reads the process RSS from /proc (Linux) or via psutil
 if not os.path.exists("/proc/self/status"):
