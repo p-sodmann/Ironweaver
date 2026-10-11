@@ -36,6 +36,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::LocalKey;
 
 use crate::GraphError;
 
@@ -64,6 +65,27 @@ thread_local! {
     static POLL: RefCell<Option<Rc<dyn Fn() -> bool>>> = const { RefCell::new(None) };
     static POLLS: Cell<u32> = const { Cell::new(0) };
     static PROGRESS: RefCell<Option<Progress>> = const { RefCell::new(None) };
+}
+
+/// Install one thread-local context without keeping its cell borrowed while
+/// user code runs. Nested guards restore their predecessors on return or unwind.
+struct Restore<T: 'static> {
+    key: &'static LocalKey<RefCell<Option<T>>>,
+    previous: Option<T>,
+}
+
+impl<T> Restore<T> {
+    fn install(key: &'static LocalKey<RefCell<Option<T>>>, value: T) -> Self {
+        let previous = key.with(|cell| cell.borrow_mut().replace(value));
+        Self { key, previous }
+    }
+}
+
+impl<T> Drop for Restore<T> {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        self.key.with(|cell| *cell.borrow_mut() = previous);
+    }
 }
 
 /// What loops check: the current token's flag (or nothing).
@@ -220,17 +242,10 @@ pub fn progress() -> Report {
 /// cancelled (before or while `f` ran; whatever `f` returned is dropped),
 /// else `f`'s result.
 pub fn run<T>(token: &Token, f: impl FnOnce() -> T) -> Result<T, GraphError> {
-    struct Restore(Option<Token>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let previous = self.0.take();
-            CURRENT.with(|c| *c.borrow_mut() = previous);
-        }
-    }
     if token.is_cancelled() {
         return Err(GraphError::Interrupted);
     }
-    let _restore = Restore(CURRENT.with(|c| c.borrow_mut().replace(token.clone())));
+    let _restore = Restore::install(&CURRENT, token.clone());
     let out = f();
     if token.is_cancelled() {
         Err(GraphError::Interrupted)
@@ -242,28 +257,14 @@ pub fn run<T>(token: &Token, f: impl FnOnce() -> T) -> Result<T, GraphError> {
 /// [`run`] with a poll hook on this thread: sequential code calling
 /// [`Stop::poll`] runs `hook` now and then, and stops if it returns true.
 pub fn run_polling<T>(token: &Token, hook: Rc<dyn Fn() -> bool>, f: impl FnOnce() -> T) -> Result<T, GraphError> {
-    struct Restore(Option<Rc<dyn Fn() -> bool>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let previous = self.0.take();
-            POLL.with(|p| *p.borrow_mut() = previous);
-        }
-    }
-    let _restore = Restore(POLL.with(|p| p.borrow_mut().replace(hook)));
+    let _restore = Restore::install(&POLL, hook);
     run(token, f)
 }
 
 /// [`run`] reporting progress to `progress`: algorithms that report it
 /// (see [`progress`]) update it while `f` runs.
 pub fn run_with_progress<T>(token: &Token, progress: &Progress, f: impl FnOnce() -> T) -> Result<T, GraphError> {
-    struct Restore(Option<Progress>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let previous = self.0.take();
-            PROGRESS.with(|p| *p.borrow_mut() = previous);
-        }
-    }
-    let _restore = Restore(PROGRESS.with(|p| p.borrow_mut().replace(progress.clone())));
+    let _restore = Restore::install(&PROGRESS, progress.clone());
     run(token, f)
 }
 
