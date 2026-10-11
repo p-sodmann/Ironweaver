@@ -35,7 +35,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: version
         name: Versions in Cargo.toml, the core crate and the tag agree
         run: |
@@ -71,7 +71,7 @@ jobs:
           - { target: x86_64, libc: musllinux, manylinux: musllinux_1_2, runner: ubuntu-latest }
           - { target: aarch64, libc: musllinux, manylinux: musllinux_1_2, runner: ubuntu-24.04-arm }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
         with:
           # Runner images can lag a release behind; rust-version needs current stable
@@ -95,7 +95,7 @@ jobs:
           - { target: x86_64, runner: macos-15-intel }
           - { target: aarch64, runner: macos-15 }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: |
@@ -121,7 +121,7 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: |
@@ -147,7 +147,7 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
         with:
           # Runner images can lag a release behind; rust-version needs current stable
@@ -169,7 +169,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
         python: ["3.9", "3.14"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
@@ -197,7 +197,7 @@ jobs:
     needs: sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -236,7 +236,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo publish -p ironweaver-core
         env:
@@ -250,7 +250,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v5
         with:
           pattern: "{wheels-*,sdist}"
