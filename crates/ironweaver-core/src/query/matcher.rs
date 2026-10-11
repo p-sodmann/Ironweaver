@@ -53,24 +53,33 @@ enum Step {
     Expand { edge: usize, forward: bool },
 }
 
-/// Pattern constraints resolved against the graph.
-struct Compiled {
-    labels: Vec<Vec<Symbol>>,
-    ids: Vec<Option<IxSet<NodeIx>>>,
-    /// `None`: any type.
-    types: Vec<Option<Vec<Symbol>>>,
+/// Constraints for one pattern node, resolved against the graph.
+struct NodeConstraints {
+    labels: Vec<Symbol>,
+    ids: Option<IxSet<NodeIx>>,
     /// Candidates for a node's filter from property indexes (slot order).
-    indexed: Vec<Option<Vec<NodeIx>>>,
+    indexed: Option<Vec<NodeIx>>,
+}
+
+/// Constraints for one pattern edge, resolved against the graph.
+struct EdgeConstraints {
+    /// `None`: any type; an empty vector only permits zero-hop paths.
+    types: Option<Vec<Symbol>>,
+}
+
+/// Pattern constraints resolved against the graph, in pattern order.
+struct Compiled {
+    nodes: Vec<NodeConstraints>,
+    edges: Vec<EdgeConstraints>,
 }
 
 /// Resolve labels, types and ids; `None` if the pattern can't match (an
 /// unknown label, no known type among an edge's types, no known id).
 fn compile<N, E>(g: &Graph<N, E>, pattern: &Pattern) -> Option<Compiled> {
-    let mut labels = Vec::new();
-    let mut ids = Vec::new();
+    let mut nodes = Vec::new();
     for n in &pattern.nodes {
-        labels.push(n.labels.iter().map(|l| g.symbol(l)).collect::<Option<Vec<_>>>()?);
-        ids.push(match &n.ids {
+        let labels = n.labels.iter().map(|l| g.symbol(l)).collect::<Option<Vec<_>>>()?;
+        let ids = match &n.ids {
             None => None,
             Some(list) => {
                 let set: IxSet<NodeIx> = list.iter().filter_map(|id| g.node_ix(id)).collect();
@@ -79,11 +88,12 @@ fn compile<N, E>(g: &Graph<N, E>, pattern: &Pattern) -> Option<Compiled> {
                 }
                 Some(set)
             }
-        });
+        };
+        nodes.push(NodeConstraints { labels, ids, indexed: None });
     }
-    let mut types = Vec::new();
+    let mut edges = Vec::new();
     for e in &pattern.edges {
-        types.push(if e.types.is_empty() {
+        let types = if e.types.is_empty() {
             None
         } else {
             let known: Vec<Symbol> = e.types.iter().filter_map(|t| g.symbol(t)).collect();
@@ -91,9 +101,10 @@ fn compile<N, E>(g: &Graph<N, E>, pattern: &Pattern) -> Option<Compiled> {
                 return None;
             }
             Some(known)
-        });
+        };
+        edges.push(EdgeConstraints { types });
     }
-    Some(Compiled { labels, ids, types, indexed: vec![None; pattern.nodes.len()] })
+    Some(Compiled { nodes, edges })
 }
 
 fn plan<N, E>(g: &Graph<N, E>, pattern: &Pattern, compiled: &Compiled) -> Vec<Step> {
@@ -101,7 +112,7 @@ fn plan<N, E>(g: &Graph<N, E>, pattern: &Pattern, compiled: &Compiled) -> Vec<St
         let n = &pattern.nodes[i];
         let by_label = n.labels.iter().map(|l| g.label_count(l)).min().unwrap_or(usize::MAX);
         let by_id = n.ids.as_ref().map_or(usize::MAX, Vec::len);
-        if let Some(c) = &compiled.indexed[i] {
+        if let Some(c) = &compiled.nodes[i].indexed {
             // Index candidates are (nearly) the exact answer
             return c.len().min(by_label).min(by_id);
         }
@@ -171,10 +182,11 @@ where
 {
     fn node_ok(&self, v: usize, ix: NodeIx) -> Result<bool, X> {
         let Some(node) = self.g.node(ix) else { return Ok(false) };
-        if !self.compiled.labels[v].iter().all(|&l| node.has_label(l)) {
+        let constraints = &self.compiled.nodes[v];
+        if !constraints.labels.iter().all(|&l| node.has_label(l)) {
             return Ok(false);
         }
-        if self.compiled.ids[v].as_ref().is_some_and(|ids| !ids.contains(&ix)) {
+        if constraints.ids.as_ref().is_some_and(|ids| !ids.contains(&ix)) {
             return Ok(false);
         }
         match &self.pattern.nodes[v].filter {
@@ -184,7 +196,7 @@ where
     }
 
     fn edge_ok(&self, k: usize, e: EdgeIx) -> Result<bool, X> {
-        if let Some(types) = &self.compiled.types[k] {
+        if let Some(types) = &self.compiled.edges[k].types {
             let ty = self.g.edge_ref(e).edge_type();
             if !ty.is_some_and(|t| types.contains(&t)) {
                 return Ok(false);
@@ -230,9 +242,10 @@ where
         };
         match step {
             Step::Scan(v) => {
-                let by_index = self.compiled.indexed[v].as_ref();
+                let constraints = &self.compiled.nodes[v];
+                let by_index = constraints.indexed.as_ref();
                 let by_label = || self.pattern.nodes[v].labels.iter().map(|l| self.g.label_count(l)).min();
-                let candidates: Vec<NodeIx> = match (&self.compiled.ids[v], self.pattern.nodes[v].labels.first()) {
+                let candidates: Vec<NodeIx> = match (&constraints.ids, self.pattern.nodes[v].labels.first()) {
                     (None, _) if by_index.is_some_and(|c| by_label().is_none_or(|l| c.len() <= l)) => {
                         by_index.expect("checked").clone()
                     }
@@ -446,13 +459,13 @@ where
     }
     let Some(mut compiled) = compile(g, pattern) else { return Ok(meter) };
     if !g.index_paths().is_empty() {
-        for (i, n) in pattern.nodes.iter().enumerate() {
+        for (n, constraints) in pattern.nodes.iter().zip(&mut compiled.nodes) {
             if let Some(f) = &n.filter {
                 let found = g.index_candidates(f)?;
                 if found.as_ref().is_some_and(Vec::is_empty) {
                     return Ok(meter);
                 }
-                compiled.indexed[i] = found;
+                constraints.indexed = found;
             }
         }
     }
@@ -675,6 +688,76 @@ mod tests {
         let Bound::Path(edges) = &m[0].edges[0] else { panic!("a path") };
         let sources: Vec<&str> = edges.iter().map(|&e| g.node(g.edge(e).unwrap().source()).unwrap().id()).collect();
         assert_eq!(sources, ["ann", "bob"]);
+    }
+
+    #[test]
+    fn bound_id_estimates_preserve_disconnected_match_order() {
+        let g = graph();
+        let mut p = Pattern::parse("(a), (b)").unwrap();
+        // Unknown ids do not match, but still contribute to the planner's
+        // estimate. `b` is therefore scanned first (two ids versus three).
+        p.bind_ids("a", vec!["ann".into(), "bob".into(), "unknown".into()]).unwrap();
+        p.bind_ids("b", vec!["cat".into(), "dan".into()]).unwrap();
+        let want = vec![
+            Match { nodes: vec![g.node_ix("ann").unwrap(), g.node_ix("cat").unwrap()], edges: vec![] },
+            Match { nodes: vec![g.node_ix("bob").unwrap(), g.node_ix("cat").unwrap()], edges: vec![] },
+            Match { nodes: vec![g.node_ix("ann").unwrap(), g.node_ix("dan").unwrap()], edges: vec![] },
+            Match { nodes: vec![g.node_ix("bob").unwrap(), g.node_ix("dan").unwrap()], edges: vec![] },
+        ];
+        assert_eq!(find_matches::<_, _, GraphError>(&g, &p, None).unwrap(), want);
+        assert_eq!(find_matches::<_, _, GraphError>(&g, &p, Some(2)).unwrap(), want[..2]);
+        let limited =
+            find_matches_limited::<_, _, GraphError>(&g, &p, Budget::UNLIMITED.max_visited(3).truncate()).unwrap();
+        assert_eq!(limited.value, want[..2]);
+        assert_eq!(limited.visited, 3);
+        assert!(limited.truncated);
+    }
+
+    #[test]
+    fn indexed_node_constraints_remain_distinct() {
+        let mut g = graph();
+        let mut p = Pattern::parse("(a:Person {age: 25}), (b:Person {age: 40}), (c:Company)").unwrap();
+        p.bind_ids("a", vec!["ann".into(), "bob".into(), "unknown".into()]).unwrap();
+        p.bind_ids("b", vec!["cat".into(), "dan".into()]).unwrap();
+        let expected = ["bob cat acme", "bob cat init"];
+        assert_eq!(rows_of(&g, &p), expected);
+        g.create_index::<GraphError>(&["age".into()]).unwrap();
+        assert_eq!(rows_of(&g, &p), expected);
+        // Nonempty index candidates still have to obey this node's ids.
+        p.bind_ids("a", vec!["ann".into()]).unwrap();
+        assert!(rows_of(&g, &p).is_empty());
+        // A filter whose index has no candidates stops the entire match.
+        let empty = Pattern::parse("(a {age: 100}), (b:Company)").unwrap();
+        let limited = find_matches_limited::<_, _, GraphError>(&g, &empty, Budget::UNLIMITED).unwrap();
+        assert!(limited.value.is_empty());
+        assert_eq!(limited.visited, 0);
+    }
+
+    #[test]
+    fn unknown_constraints_keep_zero_hop_paths() {
+        let g = graph();
+        for text in ["(a:Unknown)", "(a)-[:unknown]->(b)", "(a)-[:unknown*1..2]->(b)"] {
+            let p = Pattern::parse(text).unwrap();
+            let limited = find_matches_limited::<_, _, GraphError>(&g, &p, Budget::UNLIMITED).unwrap();
+            assert!(limited.value.is_empty(), "{text}");
+            assert_eq!(limited.visited, 0, "{text}");
+        }
+        for ids in [vec![], vec!["unknown".into()]] {
+            let mut p = Pattern::parse("(a)").unwrap();
+            p.bind_ids("a", ids).unwrap();
+            assert!(rows_of(&g, &p).is_empty());
+        }
+        for text in ["(a)-[p:unknown*0..0]->(b)", "(a)-[p:unknown*0..2]->(b)"] {
+            let mut p = Pattern::parse(text).unwrap();
+            p.bind_ids("a", vec!["ann".into()]).unwrap();
+            let ann = g.node_ix("ann").unwrap();
+            assert_eq!(
+                find_matches::<_, _, GraphError>(&g, &p, None).unwrap(),
+                vec![Match { nodes: vec![ann, ann], edges: vec![Bound::Path(vec![])] }],
+                "{text}"
+            );
+        }
+        assert_eq!(rows(&g, "(a)-[:unknown|knows]->(b)"), rows(&g, "(a)-[:knows]->(b)"));
     }
 
     #[test]
