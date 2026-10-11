@@ -295,8 +295,10 @@ Below is a quick guide to notable functions and where to find them.
 - **projection.rs** – the `Projection` class (queries and analytics
   methods release the GIL),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
-  core `RawProjection`), batch method selection and result conversion shared
-  with `vertex/batch.rs`.
+  core `RawProjection`) and batch method selection shared with
+  `vertex/batch.rs`. Result conversion lives in **projection/results.rs**:
+  batch paths / distances, per-node values, embedding rows and groups /
+  walks (with a shared node-id string cache).
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
   `NodeView` / `EdgeView`.
 - **interrupt.rs** – Ctrl+C: `released(py, size, f)` runs GIL-free work on
