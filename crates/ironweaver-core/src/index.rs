@@ -377,12 +377,14 @@ impl Range {
             })
         };
         let (lo, hi) = (bound(lo)?, bound(hi)?);
-        let value = |b: &Bound<Key>| match b {
-            Bound::Included(k) | Bound::Excluded(k) => Some(k.clone()),
-            Bound::Unbounded => None,
-        };
+        fn value(b: &Bound<Key>) -> Option<&Key> {
+            match b {
+                Bound::Included(k) | Bound::Excluded(k) => Some(k),
+                Bound::Unbounded => None,
+            }
+        }
         let (a, b) = (value(&lo), value(&hi));
-        let kind = match (&a, &b) {
+        let kind = match (a, b) {
             (Some(a), Some(b)) if !a.same_kind(b) => {
                 return Err(GraphError::InvalidArgument("range bounds must be of the same kind".into()))
             }
@@ -1376,6 +1378,73 @@ mod tests {
         assert_eq!(g.find_nodes(&path, &Value::Int(4)).unwrap().unwrap().len(), 1);
         assert!(g.drop_index(&path));
         assert!(g.index_paths().is_empty());
+    }
+
+    #[test]
+    fn string_and_byte_ranges_respect_endpoints() {
+        for values in [
+            [Value::from("a"), Value::from("b"), Value::from("c")],
+            [Value::Bytes(vec![0]), Value::Bytes(vec![1]), Value::Bytes(vec![2])],
+        ] {
+            let mut g = G::new();
+            let mut nodes = Vec::new();
+            for (i, value) in values.iter().enumerate() {
+                nodes.push(g.add_node(format!("n{i}"), Record::with_attr([("v", value.clone())])).unwrap());
+            }
+            // Open ranges must not cross into another key kind.
+            g.add_node("other", Record::with_attr([("v", Value::Int(1))])).unwrap();
+            let path = p("v");
+            g.create_index::<GraphError>(&path).unwrap();
+            let query = |lo, hi| g.find_nodes_in_range::<GraphError>(&path, lo, hi).unwrap().unwrap();
+            for lo_included in [false, true] {
+                for hi_included in [false, true] {
+                    let bound = |v, included| if included { Bound::Included(v) } else { Bound::Excluded(v) };
+                    let lo = bound(&values[0], lo_included);
+                    let hi = bound(&values[2], hi_included);
+                    let expected: Vec<_> = nodes
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .filter(|(i, _)| (*i != 0 || lo_included) && (*i != 2 || hi_included))
+                        .map(|(_, node)| node)
+                        .collect();
+                    assert_eq!(query(lo, hi), expected);
+                    let equal = bound(&values[1], lo_included);
+                    let equal_hi = bound(&values[1], hi_included);
+                    let expected = if lo_included && hi_included { vec![nodes[1]] } else { vec![] };
+                    assert_eq!(query(equal, equal_hi), expected);
+                    assert!(query(bound(&values[2], lo_included), bound(&values[0], hi_included)).is_empty());
+                }
+            }
+            assert_eq!(query(Bound::Included(&values[1]), Bound::Unbounded), nodes[1..]);
+            assert_eq!(query(Bound::Unbounded, Bound::Excluded(&values[1])), nodes[..1]);
+        }
+    }
+
+    #[test]
+    fn range_validation_preserves_numeric_precision_and_errors() {
+        // These differ despite rounding to the same f64.
+        let lower = Value::Float(9_007_199_254_740_992.0);
+        let upper = Value::Int(9_007_199_254_740_993);
+        let range = Range::new(Bound::Excluded(&lower), Bound::Included(&upper)).unwrap();
+        assert!(!range.empty);
+        assert!(!range.contains(&Key::of(&lower).unwrap()));
+        assert!(range.contains(&Key::of(&upper).unwrap()));
+        assert!(Range::new(Bound::Included(&upper), Bound::Included(&lower)).unwrap().empty);
+
+        let invalid = [Value::Float(f64::NAN), Value::None, Value::List(vec![]), Value::Dict(Default::default())];
+        for value in invalid {
+            for (lo, hi) in [(Bound::Included(&value), Bound::Unbounded), (Bound::Unbounded, Bound::Excluded(&value))] {
+                assert!(matches!(Range::new(lo, hi), Err(GraphError::InvalidArgument(message))
+                    if message.starts_with("range bounds must be scalar values (not NaN), got ")));
+            }
+        }
+        let string = Value::from("a");
+        let bytes = Value::Bytes(vec![0]);
+        assert!(matches!(Range::new(Bound::Included(&string), Bound::Excluded(&bytes)),
+            Err(GraphError::InvalidArgument(message)) if message == "range bounds must be of the same kind"));
+        assert!(matches!(Range::new(Bound::Unbounded, Bound::Unbounded),
+            Err(GraphError::InvalidArgument(message)) if message == "a range needs at least one bound"));
     }
 
     /// One random change: add, remove, relabel or set a node.
