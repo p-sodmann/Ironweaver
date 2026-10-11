@@ -6,8 +6,6 @@
 // borrowed mutably, then stored (`set_index_keys`). A node whose keys could
 // not be computed stays marked dirty, and lookups re-read it.
 
-use std::ops::Bound as Limit;
-
 use ironweaver_core::{CmpOp, Expr, Key, NodeIx, Value};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -136,21 +134,15 @@ pub fn find_range(
     let (low, high) = (bound(low)?, bound(high)?);
     let path = vec![name];
     // Validate the bounds (scalars of one kind) the way the index does
-    let check = |b: &Option<Value>, incl: bool| match b {
-        Some(v) if incl => Limit::Included(v.clone()),
-        Some(v) => Limit::Excluded(v.clone()),
-        None => Limit::Unbounded,
-    };
-    let (lo, hi) = (check(&low, low_in), check(&high, high_in));
-    let key = |b: &Limit<Value>| -> PyResult<Option<Key>> {
+    let key = |b: &Option<Value>| -> PyResult<Option<Key>> {
         match b {
-            Limit::Included(v) | Limit::Excluded(v) => Key::of(v).map(Some).ok_or_else(|| {
+            Some(v) => Key::of(v).map(Some).ok_or_else(|| {
                 PyValueError::new_err("range bounds must be numbers, strings, bools, bytes, dates or datetimes")
             }),
-            Limit::Unbounded => Ok(None),
+            None => Ok(None),
         }
     };
-    match (key(&lo)?, key(&hi)?) {
+    match (key(&low)?, key(&high)?) {
         (None, None) => return Err(PyValueError::new_err("find_range needs low or high")),
         (Some(a), Some(b)) if !a.same_kind(&b) => {
             return Err(PyValueError::new_err("low and high must be of the same kind"))
@@ -159,15 +151,11 @@ pub fn find_range(
     }
     let mut parts = Vec::new();
     let mut compare = |op, value: Value| parts.push(Expr::Compare { path: path.clone(), op, value });
-    match lo {
-        Limit::Included(v) => compare(CmpOp::Ge, v),
-        Limit::Excluded(v) => compare(CmpOp::Gt, v),
-        Limit::Unbounded => {}
+    if let Some(low) = low {
+        compare(if low_in { CmpOp::Ge } else { CmpOp::Gt }, low);
     }
-    match hi {
-        Limit::Included(v) => compare(CmpOp::Le, v),
-        Limit::Excluded(v) => compare(CmpOp::Lt, v),
-        Limit::Unbounded => {}
+    if let Some(high) = high {
+        compare(if high_in { CmpOp::Le } else { CmpOp::Lt }, high);
     }
     // Both halves narrow through the index; the tighter one is scanned
     let expr = if parts.len() == 1 { parts.pop().expect("one") } else { Expr::And(parts) };
