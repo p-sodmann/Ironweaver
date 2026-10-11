@@ -14,6 +14,10 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
+mod edge_index;
+
+use edge_index::EdgeIndex;
+
 use crate::index::Indexes;
 use crate::{Direction, GraphError, HeapSize};
 
@@ -76,60 +80,6 @@ pub struct NodeIx {
 pub struct EdgeIx {
     slot: u32,
     generation: u32,
-}
-
-/// Edge id -> edge slot. Ids come from a counter, so they are dense: most
-/// live in a flat table indexed by id (sequential, cache friendly, 4 bytes
-/// per id); ids far beyond the number of edges (explicit ids from replayed
-/// ops or hand-written files) go to a hash map, so memory stays bounded.
-#[derive(Clone, Debug, Default)]
-struct EdgeIndex {
-    /// `slot + 1` of the edge with id `i`, 0 for none.
-    dense: Vec<u32>,
-    sparse: IxMap<EdgeId, u32>,
-}
-
-impl EdgeIndex {
-    fn get(&self, id: EdgeId) -> Option<u32> {
-        match self.dense.get(id.0 as usize) {
-            Some(&s) if s != 0 => Some(s - 1),
-            // A growing dense prefix can cover an id inserted sparsely.
-            // Empty dense entries must still consult that sparse mapping.
-            _ => self.sparse.get(&id).copied(),
-        }
-    }
-
-    /// Record `id` -> `slot`. `edges` is the number of live edges (sizes the
-    /// dense table).
-    /// The caller checks that `id` is free.
-    fn insert(&mut self, id: EdgeId, slot: u32, edges: usize) {
-        let i = id.0 as usize;
-        let limit = (4 * edges).max(1024) as u64;
-        if i < self.dense.len() || id.0 < limit {
-            if i >= self.dense.len() {
-                let len = (i + 1).max(2 * self.dense.len());
-                self.dense.resize(len, 0);
-            }
-            self.dense[i] = slot + 1;
-        } else {
-            self.sparse.insert(id, slot);
-        }
-    }
-
-    fn remove(&mut self, id: EdgeId) {
-        match self.dense.get_mut(id.0 as usize) {
-            Some(s) if *s != 0 => *s = 0,
-            _ => {
-                self.sparse.remove(&id);
-            }
-        }
-    }
-
-    fn reserve(&mut self, ids: u64) {
-        if ids <= (u32::MAX as u64) && (ids as usize) > self.dense.len() {
-            self.dense.resize(ids as usize, 0);
-        }
-    }
 }
 
 /// Bytes of a hashbrown table with room for `capacity` entries: buckets
@@ -551,7 +501,7 @@ impl<N, E> Graph<N, E> {
             nodes: Arena::with_capacity(nodes),
             edges: Arena::with_capacity(edges),
             index: StrMap::with_capacity_and_hasher(nodes, Default::default()),
-            edge_index: EdgeIndex { dense: Vec::with_capacity(edges), sparse: IxMap::default() },
+            edge_index: EdgeIndex::with_capacity(edges),
             next_edge_id: 0,
             symbols: Symbols::default(),
             labeled: HashMap::new(),
@@ -1214,8 +1164,7 @@ impl<N, E> Graph<N, E> {
         total += self.nodes.slots.capacity() * size_of::<Slot<Node<N>>>() + self.nodes.free.capacity() * 4;
         total += self.edges.slots.capacity() * size_of::<Slot<Edge<E>>>() + self.edges.free.capacity() * 4;
         total += hash_table_bytes(self.index.capacity(), size_of::<(String, NodeIx)>());
-        total += self.edge_index.dense.capacity() * 4;
-        total += hash_table_bytes(self.edge_index.sparse.capacity(), size_of::<(EdgeId, u32)>());
+        total += self.edge_index.heap_bytes();
         total += self.symbols.name_bytes;
         total += self.symbols.names.capacity() * size_of::<Box<str>>();
         total += hash_table_bytes(self.symbols.index.capacity(), size_of::<(Box<str>, Symbol)>());
