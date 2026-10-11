@@ -1,7 +1,7 @@
 // Loading binary files from a reader: the same graphs as the slice-based
 // loader, the same errors for damaged files, whatever the read sizes.
 
-use std::io::Read;
+use std::io::{self, Read};
 
 use ironweaver_core::format::{self, LoadGraph};
 use ironweaver_core::{Attrs, Date, DateTime, Graph, GraphError, Record, Value};
@@ -20,6 +20,61 @@ impl Read for Trickle<'_> {
         let n = self.step.min(buf.len()).min(self.data.len());
         buf[..n].copy_from_slice(&self.data[..n]);
         self.data = &self.data[n..];
+        Ok(n)
+    }
+}
+
+/// Vary read sizes around the v2 framing and the streaming buffer boundaries,
+/// interrupting once before each successful read (including the final EOF).
+struct BoundaryReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+    step: usize,
+    boundaries: Vec<usize>,
+    interrupt_next: bool,
+    interrupted_at: Vec<usize>,
+    fail_at: Option<usize>,
+}
+
+impl<'a> BoundaryReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        // Header and trailer are 16 bytes; the payload buffer is 64 KiB.
+        let mut boundaries = vec![15, 16, 17];
+        for buffer_end in [16 + 64 * 1024, 16 + 2 * 64 * 1024] {
+            boundaries.extend([buffer_end - 1, buffer_end, buffer_end + 1]);
+        }
+        if data.len() >= 17 {
+            boundaries.extend([data.len() - 17, data.len() - 16, data.len() - 15]);
+        }
+        boundaries.push(data.len());
+        boundaries.retain(|&at| at <= data.len());
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        Self { data, pos: 0, step: 0, boundaries, interrupt_next: true, interrupted_at: Vec::new(), fail_at: None }
+    }
+}
+
+impl Read for BoundaryReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        if self.fail_at == Some(self.pos) {
+            return Err(io::Error::other(format!("injected read failure at byte {}", self.pos)));
+        }
+        if self.interrupt_next {
+            self.interrupt_next = false;
+            self.interrupted_at.push(self.pos);
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        let chunks = [17, 65_537, 1, 16, 65_535, 15, 65_536];
+        let boundary = self.boundaries.iter().copied().find(|&at| at > self.pos).unwrap_or(self.data.len());
+        let end = self.fail_at.map_or(boundary, |at| at.min(boundary));
+        let n = chunks[self.step % chunks.len()].min(buf.len()).min(end - self.pos);
+        buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+        self.pos += n;
+        self.step += 1;
+        self.interrupt_next = true;
         Ok(n)
     }
 }
@@ -143,6 +198,47 @@ fn reader_loads_what_the_slice_loader_loads() {
 }
 
 #[test]
+fn interrupted_reads_at_frame_and_buffer_boundaries_restore_the_same_state() {
+    let meta: Attrs = [("title".to_string(), Value::from("interrupted stream"))].into();
+    for n in [0, 5, 3000] {
+        let g = sample(n);
+        for half in [false, true] {
+            let bytes = format::to_binary(&g, &meta, half).unwrap();
+            let (want, want_meta) = format::from_binary(&bytes).unwrap();
+            let mut reader = BoundaryReader::new(&bytes);
+            let (got, got_meta) = format::from_binary_reader(&mut reader).unwrap();
+            assert_eq!(state(&got), state(&want));
+            assert_eq!(got_meta, want_meta);
+            assert_eq!(reader.pos, bytes.len());
+            assert!(reader.interrupted_at.contains(&0), "header read was not interrupted");
+            for boundary in &reader.boundaries {
+                assert!(reader.interrupted_at.contains(boundary), "no interruption at byte {boundary}");
+            }
+            if n == 3000 {
+                assert!(bytes.len() > 2 * 64 * 1024);
+            }
+        }
+    }
+}
+
+#[test]
+fn permanent_io_errors_preserve_the_reader_message() {
+    let bytes = format::to_binary(&sample(1000), &Attrs::new(), false).unwrap();
+    assert!(bytes.len() > 64 * 1024 + 32);
+    // A partial header, the first payload read, a later buffer fill, and trailer.
+    for at in [8, 16, 16 + 64 * 1024, bytes.len() - 8] {
+        let mut reader = BoundaryReader::new(&bytes);
+        reader.fail_at = Some(at);
+        let err = format::from_binary_reader(&mut reader).err().unwrap();
+        assert_eq!(reader.pos, at);
+        assert!(
+            matches!(err, GraphError::Format(ref message) if message == &format!("injected read failure at byte {at}")),
+            "{err}"
+        );
+    }
+}
+
+#[test]
 fn golden_files_load_from_a_reader() {
     let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/");
     for name in ["v2_graph.bin", "v2_graph_f16.bin"] {
@@ -162,8 +258,10 @@ fn damaged_files_fail_the_same_way() {
         let slice = format::from_binary(bytes).err().unwrap().to_string();
         let reader = format::from_binary_reader(bytes).err().unwrap().to_string();
         let trickle = format::from_binary_reader(Trickle { data: bytes, step: 3 }).err().unwrap().to_string();
+        let interrupted = format::from_binary_reader(BoundaryReader::new(bytes)).err().unwrap().to_string();
         assert!(reader.contains(want), "{want}: {reader}");
         assert_eq!(reader, trickle);
+        assert_eq!(reader, interrupted);
         if !want.is_empty() {
             assert!(slice.contains(want), "{want}: {slice}");
         }
