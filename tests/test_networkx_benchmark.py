@@ -11,7 +11,6 @@ import sys
 import pytest
 
 pytest.importorskip("networkx")
-pytest.importorskip("ironweaver")
 
 SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "benchmarks", "compare_networkx.py")
 

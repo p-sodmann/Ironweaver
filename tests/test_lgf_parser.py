@@ -1,9 +1,4 @@
-try:
-    from ironweaver import Vertex
-except Exception as e:  # pragma: no cover - handled via pytest skip
-    import pytest
-
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Vertex
 
 from ironweaver.lgf_parser import parse_lgf, parse_lgf_file
 import pytest

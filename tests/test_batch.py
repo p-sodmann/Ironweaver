@@ -7,10 +7,7 @@ import time
 
 import pytest
 
-try:
-    from ironweaver import Vertex
-except Exception as e:  # pragma: no cover - module unavailable
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import Vertex
 
 
 def diamond():

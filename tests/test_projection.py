@@ -6,10 +6,7 @@ import threading
 
 import pytest
 
-try:
-    from ironweaver import EdgeView, NodeView, Projection, Vertex, attr, edge_type, label
-except Exception as e:  # pragma: no cover - module unavailable
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
+from ironweaver import EdgeView, NodeView, Projection, Vertex, attr, edge_type, label
 
 
 def random_graph(seed, n=200, m=900):

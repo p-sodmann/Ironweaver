@@ -18,11 +18,6 @@ import types
 
 import pytest
 
-try:
-    import ironweaver  # noqa: F401
-except Exception as e:  # pragma: no cover - module unavailable
-    pytest.skip(f"ironweaver module unavailable: {e}", allow_module_level=True)
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Site pages generated from other files, without examples of their own
 GENERATED = {"api.md", "benchmarks.md", "changelog.md"}
