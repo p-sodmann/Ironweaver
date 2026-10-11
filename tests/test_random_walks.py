@@ -41,8 +41,10 @@ def test_allow_revisit():
     )
     assert no_revisit == [["n1", "n2", "n3"]]
 
+    # A finite random sample need not cover both branches. Fix the seed so this
+    # assertion exercises both outcomes reproducibly.
     with_revisit = v.random_walks(
-        "n1", 3, 10, min_length=3, allow_revisit=True, include_edge_types=False, edge_type_field=None
+        "n1", 3, 10, min_length=3, allow_revisit=True, include_edge_types=False, edge_type_field=None, seed=0
     )
     assert sorted(with_revisit) == sorted([["n1", "n2", "n1"], ["n1", "n2", "n3"]])
 

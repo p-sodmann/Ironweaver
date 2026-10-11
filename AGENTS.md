@@ -229,9 +229,9 @@ Below is a quick guide to notable functions and where to find them.
   - `pattern.rs`: `Pattern` / `NodePattern` / `EdgePattern` (serde),
     `Pattern::parse` (Cypher-like text: labels, types, `*min..max`,
     `{key: value}`), `add_filter`, `bind_ids`; `Display` / `to_text`
-    write text that parses back to an equal pattern (`TextWriter` picks an
-    order that reproduces the node numbering; a random test checks the
-    round trip) and mark what text can't express in `<...>`.
+    delegate text rendering to the private `pattern/text.rs` module, whose
+    `TextWriter` picks an order that reproduces the node numbering (a random
+    test checks the round trip) and marks what text can't express in `<...>`.
   - `matcher.rs`: `for_each_match` / `find_matches` (backtracking; plan
     from the most selective node; edges distinct per match, nodes may
     repeat; variable-length edges streamed), their `*_limited` variants,
