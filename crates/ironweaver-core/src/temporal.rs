@@ -70,6 +70,8 @@ impl std::str::FromStr for Date {
 /// `micros` counts from 1970-01-01T00:00 local. Two instants are equal when
 /// they are the same moment, whatever their offsets; an instant never
 /// equals (or compares with) a wall-clock time.
+/// Binary decoding requires an offset shorter than a day and a local
+/// timestamp within chrono's representable range.
 #[derive(Clone, Copy, Debug)]
 pub struct DateTime {
     pub micros: i64,
@@ -107,6 +109,8 @@ impl DateTime {
     }
 
     /// Wall-clock date and time (in the value's offset, if it has one).
+    /// Values built directly with an unrepresentable local timestamp use
+    /// chrono's earliest date-time, as they do when formatted.
     pub fn parts(self) -> Parts {
         let n = self.local();
         Parts {
@@ -120,9 +124,15 @@ impl DateTime {
         }
     }
 
+    fn checked_local(self) -> Option<NaiveDateTime> {
+        self.micros
+            .checked_add(self.offset.unwrap_or(0) as i64 * 1_000_000)
+            .and_then(ChronoDateTime::from_timestamp_micros)
+            .map(|d| d.naive_utc())
+    }
+
     fn local(self) -> NaiveDateTime {
-        let micros = self.micros + self.offset.unwrap_or(0) as i64 * 1_000_000;
-        ChronoDateTime::from_timestamp_micros(micros).map_or(NaiveDateTime::MIN, |d| d.naive_utc())
+        self.checked_local().unwrap_or(NaiveDateTime::MIN)
     }
 
     /// Order of two instants or two wall-clock times; `None` for a mix.
@@ -146,7 +156,8 @@ impl fmt::Display for DateTime {
             write!(f, ".{micros:06}")?;
         }
         if let Some(o) = self.offset {
-            let (sign, o) = if o < 0 { ('-', -o) } else { ('+', o) };
+            let sign = if o < 0 { '-' } else { '+' };
+            let o = o.unsigned_abs();
             write!(f, "{sign}{:02}:{:02}", o / 3600, o / 60 % 60)?;
             if o % 60 != 0 {
                 write!(f, ":{:02}", o % 60)?;
@@ -241,10 +252,14 @@ impl<'de> Deserialize<'de> for DateTime {
             s.parse().map_err(de::Error::custom)
         } else {
             let (micros, offset) = <(i64, Option<i32>)>::deserialize(d)?;
-            if offset.is_some_and(|o| o.abs() >= 86_400) {
-                return Err(de::Error::custom("UTC offset out of range"));
+            if offset.is_some_and(|o| FixedOffset::east_opt(o).is_none()) {
+                return Err(crate::format::de_error("UTC offset out of range"));
             }
-            Ok(DateTime { micros, offset })
+            let value = DateTime { micros, offset };
+            if value.checked_local().is_none() {
+                return Err(crate::format::de_error("date-time out of range"));
+            }
+            Ok(value)
         }
     }
 }
