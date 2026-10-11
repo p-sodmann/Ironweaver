@@ -152,10 +152,10 @@ Below is a quick guide to notable functions and where to find them.
 - **value.rs**, **record.rs** – `Value`, `Record` (payload for pure-Rust
   graphs), the `Attributes` trait, `Lookup`, and `lookup` (the attribute
   path rules on an `Attrs` map; `Record` uses it).
-- **serde_support.rs** – crate-private JSON reader and nesting guard shared
-  by values, expressions and patterns. Recursive types keep their own
-  depth counters and limits; the JSON reader relies on those limits and
-  on rejecting unknown fields.
+- **serde_support.rs** – crate-private JSON reader, nesting guard and float
+  codec shared by values, expressions, patterns and graph writers.
+  Recursive types keep their own depth counters and limits; the JSON
+  reader relies on those limits and on rejecting unknown fields.
 - **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS), their
   `*_limited` variants under a `Budget`, `bidirectional_bfs` (used by the
   `bfs` path method and `Node.bfs_search`).
