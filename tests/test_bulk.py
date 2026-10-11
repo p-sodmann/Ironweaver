@@ -93,3 +93,75 @@ def test_generators_and_large_batches():
     p = g.project()
     assert p.edge_count() == 1000 and p.neighbors("1") == ["7"]
     assert g["3"].edges[0].attr == {"i": 3}
+
+
+@pytest.mark.parametrize("removed", ["a", "b"])
+def test_add_edges_rechecks_endpoints_after_reading_generator(removed):
+    g = Vertex()
+    g.add_nodes(["a", "b", "c"])
+    seen = []
+    g.on_edge_add_callbacks.append(lambda v, e: seen.append(e.id))
+
+    def edges():
+        yield "a", "b"
+        g.remove_node(removed)
+        # Even a replacement with the same id must not revive the old handle.
+        g.add_node(removed)
+        yield "c", "c"
+
+    with pytest.raises(ValueError, match="a node was removed while the edges were being read"):
+        g.add_edges(edges())
+    assert g.project().edge_count() == 0
+    assert seen == []
+
+
+def test_node_callbacks_observe_complete_indexed_batch():
+    g = Vertex()
+    g.create_index("group")
+    seen = []
+
+    def added(v, n):
+        seen.append((n.id, [node.id for node in v.find("group", "new")]))
+        # Calling Python again must be safe after insertion and reindexing.
+        n.attr_set("observed", True)
+
+    g.on_node_add_callbacks.append(added)
+    assert g.add_nodes(["a", "b"], attrs={"group": ["new", "new"]}) == 2
+    assert seen == [("a", ["a", "b"]), ("b", ["a", "b"])]
+    assert all(g[node_id].attr_get("observed") is True for node_id in ["a", "b"])
+
+
+def test_edge_callbacks_observe_complete_typed_batch():
+    g = Vertex()
+    g.add_nodes(["a", "b"])
+    seen = []
+
+    def added(v, e):
+        edges = [edge for node in v for edge in node.edges]
+        seen.append((e.id, [(edge.id, edge.type) for edge in edges]))
+        e.attr_set("observed", True)
+
+    g.on_edge_add_callbacks.append(added)
+    assert g.add_edges([("a", "b"), ("b", "a")], attrs={"type": ["first", "second"]}) == 2
+    assert seen == [(0, [(0, "first"), (1, "second")]), (1, [(0, "first"), (1, "second")])]
+    assert all(edge.attr_get("observed") is True for node in g for edge in node.edges)
+
+
+@pytest.mark.parametrize("explicit_type, expected", [(None, ["column", "item"]), ("explicit", ["explicit", "explicit"])])
+def test_bulk_reserved_fields_and_column_precedence(explicit_type, expected):
+    g = Vertex()
+    assert g.add_nodes(
+        [("a", {"labels": ["item"], "value": "item"}), "b"],
+        labels=["shared"],
+        attrs={"labels": [["column"], None], "value": ["column", None]},
+    ) == 2
+    assert g["a"].attr == {"labels": ["shared", "item", "column"], "value": "column"}
+    assert g["b"].attr == {"labels": ["shared"]}
+    assert g.add_edges(
+        [("a", "b", {"type": "item", "value": "item"}), ("b", "a", {"type": "item"})],
+        type=explicit_type,
+        attrs={"type": ["column", None], "value": ["column", None]},
+    ) == 2
+    edges = [edge for node in g for edge in node.edges]
+    assert [edge.type for edge in edges] == expected
+    assert [edge.attr_get("value") for edge in edges] == ["column", None]
