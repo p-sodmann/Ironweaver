@@ -111,6 +111,20 @@ fn node_id(value: &Bound<'_, PyAny>) -> PyResult<String> {
     }
 }
 
+/// Owned item data collected before the insertion phase.
+struct PreparedNode {
+    id: String,
+    data: NodeData,
+    labels: Vec<String>,
+}
+
+struct PreparedEdge {
+    from: NodeIx,
+    to: NodeIx,
+    data: EdgeData,
+    edge_type: Option<String>,
+}
+
 /// `Vertex.add_nodes(nodes, *, labels=None, attrs=None)`: each item is an
 /// id or `(id, attrs)`; `attrs` columns add one value per item. Returns the
 /// number of nodes added.
@@ -126,7 +140,7 @@ pub fn add_nodes(
     let _gc = GcPause::new(py);
     let labels = labels.unwrap_or_default();
     let columns = Columns::parse(columns, "labels")?;
-    let mut items: Vec<(String, NodeData, Vec<String>)> = Vec::new();
+    let mut items: Vec<PreparedNode> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for item in nodes.try_iter()? {
         let item = item?;
@@ -150,7 +164,7 @@ pub fn add_nodes(
         if !seen.insert(id.clone()) || slf.try_borrow()?.graph.contains_node(&id) {
             return Err(PyValueError::new_err(format!("Node with id '{}' already exists", id)));
         }
-        items.push((id, NodeData::new(attr, PyAttrs::default()), own));
+        items.push(PreparedNode { id, data: NodeData::new(attr, PyAttrs::default()), labels: own });
     }
     if let Some(c) = &columns {
         c.check_len(items.len())?;
@@ -159,9 +173,9 @@ pub fn add_nodes(
     let (added, callbacks) = {
         let mut v = slf.try_borrow_mut()?;
         let mut added = Vec::with_capacity(count);
-        for (id, data, labels) in items {
-            let ix = v.graph.add_node(id, data).map_err(graph_error)?;
-            for label in &labels {
+        for item in items {
+            let ix = v.graph.add_node(item.id, item.data).map_err(graph_error)?;
+            for label in &item.labels {
                 v.graph.add_label(ix, label).map_err(graph_error)?;
             }
             added.push(ix);
@@ -192,7 +206,7 @@ pub fn add_edges(
     let py = slf.py();
     let _gc = GcPause::new(py);
     let columns = Columns::parse(columns, "type")?;
-    let mut items: Vec<(NodeIx, NodeIx, EdgeData, Option<String>)> = Vec::new();
+    let mut items: Vec<PreparedEdge> = Vec::new();
     {
         for item in edges.try_iter()? {
             let item = item?;
@@ -219,7 +233,7 @@ pub fn add_edges(
                 v.graph.node_ix(id).ok_or_else(|| PyValueError::new_err(format!("Node with id '{}' not found", id)))
             };
             let (from, to) = (lookup(&p[0])?, lookup(&p[1])?);
-            items.push((from, to, EdgeData::new(attr, PyAttrs::default()), ty));
+            items.push(PreparedEdge { from, to, data: EdgeData::new(attr, PyAttrs::default()), edge_type: ty });
         }
     }
     if let Some(c) = &columns {
@@ -229,12 +243,16 @@ pub fn add_edges(
     let (added, callbacks) = {
         let mut v = slf.try_borrow_mut()?;
         // Reading the iterable may have run code that removed a node
-        if items.iter().any(|(from, to, _, _)| v.graph.node(*from).is_none() || v.graph.node(*to).is_none()) {
+        if items.iter().any(|item| v.graph.node(item.from).is_none() || v.graph.node(item.to).is_none()) {
             return Err(PyValueError::new_err("a node was removed while the edges were being read"));
         }
         let mut added = Vec::with_capacity(count);
-        for (from, to, data, ty) in items {
-            added.push(v.graph.insert_edge(from, to, None, ty.as_deref(), data).map_err(graph_error)?);
+        for item in items {
+            added.push(
+                v.graph
+                    .insert_edge(item.from, item.to, None, item.edge_type.as_deref(), item.data)
+                    .map_err(graph_error)?,
+            );
         }
         (added, v.on_edge_add_callbacks.clone_ref(py))
     };
