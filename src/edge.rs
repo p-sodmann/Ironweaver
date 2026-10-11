@@ -9,7 +9,7 @@ use pyo3::{PyTraverseError, PyVisit};
 use std::hash::{Hash, Hasher};
 
 use crate::data::{edge_value, EdgeData, PyAttrs, PyObjects};
-use crate::vertex::callbacks::fire;
+use crate::vertex::callbacks::{fire_update, value_changed};
 use crate::{Node, Vertex};
 
 /// A directed edge from `from_node` to `to_node` with an `attr` dict.
@@ -233,10 +233,7 @@ impl Edge {
             v.graph.edge(this.ix).ok_or_else(stale)?;
             edge_value(py, &v.graph, this.ix, &key)?
         };
-        let changed = match &old {
-            Some(o) => !o.rich_compare(value.bind(py), CompareOp::Eq)?.is_truthy()?,
-            None => true,
-        };
+        let changed = value_changed(old.as_ref(), value.bind(py))?;
         if key == "type" {
             let ty: Option<String> = value
                 .extract(py)
@@ -251,17 +248,7 @@ impl Edge {
 
         if changed {
             let callbacks = this.vertex.try_borrow(py)?.on_edge_update_callbacks.clone_ref(py);
-            let args = PyTuple::new(
-                py,
-                [
-                    this.vertex.clone_ref(py).into_any(),
-                    slf.clone().into_any().unbind(),
-                    key.into_pyobject(py)?.into_any().unbind(),
-                    value,
-                    old.unwrap_or_else(|| py.None()),
-                ],
-            )?;
-            fire(callbacks.bind(py), args)?;
+            fire_update(callbacks.bind(py), &this.vertex, slf.clone().into_any().unbind(), key, value, old)?;
         }
         Ok(())
     }

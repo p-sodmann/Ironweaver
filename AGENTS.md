@@ -337,7 +337,10 @@ Below is a quick guide to notable functions and where to find them.
   `save_to_binary_f16`, `load_from_json`, `load_from_binary`.
 - **vertex/analysis.rs** – `get_metadata`, `memory_usage` (`deep`: getsizeof
   of attribute dicts and values, outside the borrow), `to_networkx`.
-- **vertex/callbacks.rs** – `fire` (runs a callback list).
+- **vertex/callbacks.rs** – `fire` (runs a callback list), `value_changed`
+  and `fire_update` (shared attribute comparison and update notification;
+  callers mutate and reindex first, then fetch callbacks without keeping a
+  graph borrow during Python calls).
 - **vertex/query.rs** – `match_pattern` (`Vertex.match`: `where` Exprs,
   `ids`, results as Node / Edge / list[Edge]) and `node_paths`
   (`Node.paths`, returns `Path`s).
