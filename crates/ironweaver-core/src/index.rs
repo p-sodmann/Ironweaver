@@ -463,52 +463,7 @@ impl<N, E> Graph<N, E> {
                 let values: Vec<Value> = values.iter().filter(|v| Key::of(v).is_some()).cloned().collect();
                 Some(if values.is_empty() { IndexPlan::Empty } else { IndexPlan::In { path: path.clone(), values } })
             }
-            Expr::And(items) => {
-                // Candidate plans in order of preference on equal estimates:
-                // combined ranges, then the rest, then open-ended ranges
-                // (often most of the graph)
-                let mut plans = Vec::new();
-                let mut combined: Vec<&[String]> = Vec::new();
-                for a in items {
-                    let Expr::Compare { path, op: lo_op @ (CmpOp::Gt | CmpOp::Ge), value: lo } = a else { continue };
-                    if !self.has_index(path) {
-                        continue;
-                    }
-                    for b in items {
-                        let Expr::Compare { path: p, op: hi_op @ (CmpOp::Lt | CmpOp::Le), value: hi } = b else {
-                            continue;
-                        };
-                        if p != path {
-                            continue;
-                        }
-                        let lo = if *lo_op == CmpOp::Ge { Bound::Included(lo) } else { Bound::Excluded(lo) };
-                        let hi = if *hi_op == CmpOp::Le { Bound::Included(hi) } else { Bound::Excluded(hi) };
-                        plans.push(range_plan(path, lo, hi));
-                        combined.push(path);
-                    }
-                }
-                let open_range =
-                    |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
-                for open in [false, true] {
-                    for item in items.iter().filter(|e| open_range(e) == open) {
-                        if let Expr::Compare { path, .. } = item
-                            && open
-                            && combined.contains(&path.as_slice())
-                        {
-                            continue;
-                        }
-                        plans.extend(self.index_plan(item));
-                    }
-                }
-                let mut best: Option<(IndexPlan, usize)> = None;
-                for plan in plans {
-                    let size = self.index_plan_estimate(&plan);
-                    if best.as_ref().is_none_or(|(_, b)| size < *b) {
-                        best = Some((plan, size));
-                    }
-                }
-                best.map(|(plan, _)| plan)
-            }
+            Expr::And(items) => self.smallest_index_plan(self.and_index_plans(items)),
             Expr::Or(items) => {
                 let mut plans = Vec::new();
                 for item in items {
@@ -525,6 +480,58 @@ impl<N, E> Graph<N, E> {
             }
             _ => None,
         }
+    }
+
+    /// Candidate plans for a conjunction, ordered by preference on ties:
+    /// combined ranges, then the rest, then open-ended ranges (often most
+    /// of the graph).
+    fn and_index_plans(&self, items: &[Expr]) -> Vec<IndexPlan> {
+        let mut plans = Vec::new();
+        let mut combined: Vec<&[String]> = Vec::new();
+        for a in items {
+            let Expr::Compare { path, op: lo_op @ (CmpOp::Gt | CmpOp::Ge), value: lo } = a else { continue };
+            if !self.has_index(path) {
+                continue;
+            }
+            for b in items {
+                let Expr::Compare { path: p, op: hi_op @ (CmpOp::Lt | CmpOp::Le), value: hi } = b else {
+                    continue;
+                };
+                if p != path {
+                    continue;
+                }
+                let lo = if *lo_op == CmpOp::Ge { Bound::Included(lo) } else { Bound::Excluded(lo) };
+                let hi = if *hi_op == CmpOp::Le { Bound::Included(hi) } else { Bound::Excluded(hi) };
+                plans.push(range_plan(path, lo, hi));
+                combined.push(path);
+            }
+        }
+        let open_range =
+            |e: &Expr| matches!(e, Expr::Compare { op: CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge, .. });
+        for open in [false, true] {
+            for item in items.iter().filter(|e| open_range(e) == open) {
+                if let Expr::Compare { path, .. } = item
+                    && open
+                    && combined.contains(&path.as_slice())
+                {
+                    continue;
+                }
+                plans.extend(self.index_plan(item));
+            }
+        }
+        plans
+    }
+
+    /// Keep the earliest plan when candidate estimates are equal.
+    fn smallest_index_plan(&self, plans: Vec<IndexPlan>) -> Option<IndexPlan> {
+        let mut best: Option<(IndexPlan, usize)> = None;
+        for plan in plans {
+            let size = self.index_plan_estimate(&plan);
+            if best.as_ref().is_none_or(|(_, b)| size < *b) {
+                best = Some((plan, size));
+            }
+        }
+        best.map(|(plan, _)| plan)
     }
 
     /// Estimated number of candidates `plan` finds, without reading
@@ -1542,5 +1549,120 @@ mod tests {
         assert_eq!(g.find_nodes(&p("pos.lat"), &Value::Int(2)).unwrap().unwrap().len(), 2);
         g.apply(crate::Op::RemoveNode { id: "b".into() }).unwrap();
         assert_eq!(g.find_nodes(&p("pos.lat"), &Value::Int(2)).unwrap().unwrap(), [g.node_ix("a").unwrap()]);
+    }
+
+    fn and_compare(path: &str, op: CmpOp, value: i64) -> Expr {
+        Expr::Compare { path: p(path), op, value: Value::Int(value) }
+    }
+
+    #[test]
+    fn and_plan_ties_keep_candidate_preference() {
+        let mut g = G::new();
+        let ix = g.add_node("only", Record::with_attr([("x", Value::Int(5)), ("y", Value::Int(5))])).unwrap();
+        g.add_label(ix, "L").unwrap();
+        for path in ["x", "y"] {
+            g.create_index::<GraphError>(&p(path)).unwrap();
+        }
+        let point = and_compare("y", CmpOp::Eq, 5);
+        let label = Expr::Label("L".into());
+        let open = and_compare("x", CmpOp::Ge, 0);
+        let upper = and_compare("x", CmpOp::Le, 10);
+        let range = IndexPlan::Range {
+            path: p("x"),
+            lower: Bound::Included(Value::Int(0)),
+            upper: Bound::Included(Value::Int(10)),
+        };
+        // A combined range takes precedence even when its bounds come last.
+        let e = Expr::And(vec![point.clone(), label.clone(), open.clone(), upper]);
+        assert_eq!(g.index_plan(&e), Some(range));
+        // The first non-open plan wins a tie, ahead of earlier open bounds.
+        let e = Expr::And(vec![open.clone(), label.clone(), point.clone()]);
+        assert_eq!(g.index_plan(&e), Some(IndexPlan::Label("L".into())));
+        let e = Expr::And(vec![open.clone(), point, label]);
+        assert_eq!(g.index_plan(&e), Some(IndexPlan::Point { path: p("y"), value: Value::Int(5) }));
+        // Open bounds keep their own input order when no other plan exists.
+        let e = Expr::And(vec![open, and_compare("y", CmpOp::Le, 10)]);
+        assert_eq!(
+            g.index_plan(&e),
+            Some(IndexPlan::Range { path: p("x"), lower: Bound::Included(Value::Int(0)), upper: Bound::Unbounded })
+        );
+    }
+
+    #[test]
+    fn and_plan_multiple_bounds_and_nested_contradictions() {
+        let mut g = G::new();
+        g.add_node("only", Record::with_attr([("x", Value::Int(5))])).unwrap();
+        g.create_index::<GraphError>(&p("x")).unwrap();
+        let bounds = vec![
+            and_compare("x", CmpOp::Ge, 0),
+            and_compare("x", CmpOp::Gt, 1),
+            and_compare("x", CmpOp::Le, 10),
+            and_compare("x", CmpOp::Lt, 9),
+        ];
+        // All four pairs have one candidate: keep the first lower/upper pair.
+        assert_eq!(
+            g.index_plan(&Expr::And(bounds)),
+            Some(IndexPlan::Range {
+                path: p("x"),
+                lower: Bound::Included(Value::Int(0)),
+                upper: Bound::Included(Value::Int(10)),
+            })
+        );
+        let impossible = Expr::And(vec![and_compare("x", CmpOp::Gt, 5), and_compare("x", CmpOp::Le, 5)]);
+        let e = Expr::And(vec![and_compare("x", CmpOp::Eq, 5), impossible]);
+        assert_eq!(g.index_plan(&e), Some(IndexPlan::Empty));
+        assert!(g.index_candidates(&e).unwrap().unwrap().is_empty());
+        // No usable indexed predicate remains a scan, including an empty And.
+        assert_eq!(g.index_plan(&Expr::And(vec![])), None);
+        assert_eq!(g.index_plan(&Expr::And(vec![and_compare("missing", CmpOp::Eq, 5)])), None);
+    }
+
+    #[test]
+    fn and_plan_matches_scan_before_and_after_mutations() {
+        let mut g = G::new();
+        for i in 0..8 {
+            g.add_node(format!("n{i}"), Record::with_attr([("x", Value::Int(i)), ("y", Value::Int(i % 2))])).unwrap();
+        }
+        for path in ["x", "y"] {
+            g.create_index::<GraphError>(&p(path)).unwrap();
+        }
+        let expressions = [
+            Expr::And(vec![
+                and_compare("x", CmpOp::Ge, 1),
+                and_compare("x", CmpOp::Gt, 2),
+                and_compare("x", CmpOp::Le, 6),
+                and_compare("x", CmpOp::Lt, 5),
+                and_compare("y", CmpOp::Eq, 1),
+            ]),
+            Expr::And(vec![
+                Expr::And(vec![and_compare("x", CmpOp::Ge, 2), and_compare("x", CmpOp::Le, 6)]),
+                and_compare("y", CmpOp::Eq, 0),
+            ]),
+            Expr::And(vec![and_compare("x", CmpOp::Gt, 5), and_compare("x", CmpOp::Lt, 3)]),
+        ];
+        let check = |g: &G| {
+            for e in &expressions {
+                let mut scanned: Vec<_> = g.node_indices().filter(|&ix| e.matches_node(g, ix).unwrap()).collect();
+                scanned.sort_unstable_by_key(|ix| ix.slot());
+                let candidates = g.index_candidates(e).unwrap().unwrap();
+                let matched: Vec<_> = candidates.into_iter().filter(|&ix| e.matches_node(g, ix).unwrap()).collect();
+                assert_eq!(matched, scanned, "{e:?}");
+            }
+        };
+        check(&g);
+        let moved = g.node_ix("n0").unwrap();
+        g.node_mut(moved).unwrap().data = Record::with_attr([("x", Value::Int(3)), ("y", Value::Int(1))]);
+        g.remove_node(g.node_ix("n3").unwrap());
+        g.add_node("replacement", Record::with_attr([("x", Value::Int(4)), ("y", Value::Int(0))])).unwrap();
+        assert!(g.indexes_dirty());
+        check(&g);
+        g.flush_indexes().unwrap();
+        check(&g);
+        for (_, node) in g.nodes_mut() {
+            node.data.attr.insert("y".into(), Value::Int(1));
+        }
+        check(&g);
+        g.flush_indexes().unwrap();
+        check(&g);
     }
 }
