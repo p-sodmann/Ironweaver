@@ -1,0 +1,70 @@
+# Version updates stay reviewable: weekly checks, at most three open PRs per
+# entry, and major upgrades outside the minor/patch groups. No automatic merge.
+version: 2
+updates:
+  # The root manifest covers both crates in the Cargo workspace.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      rust-patches:
+        patterns: ["*"]
+        update-types: [patch]
+      rust-minors:
+        patterns: ["*"]
+        # Pre-1.0 minor releases can break compatibility; review them separately.
+        exclude-patterns: [pyo3, sonic-rs, chrono, rand, foldhash, ironweaver-core]
+        update-types: [minor]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Includes build-system requirements and project optional dependencies.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Keep the supported build backend range from pyproject.toml.
+      - dependency-name: maturin
+        versions: [">=2.0"]
+
+  - package-ecosystem: pip
+    directory: "/docs"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      docs-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # These ranges mirror docs/requirements.txt. Remove or adjust them only
+    # after testing a deliberate compatibility change to those requirements.
+    ignore:
+      - dependency-name: mkdocs
+        versions: [">=2"]
+      - dependency-name: mkdocs-material
+        versions: [">=10"]
+      - dependency-name: mkdocstrings
+        versions: [">=2"]
+      # mkdocstrings 1.0.6 is incompatible with Highlight's md argument in 12.2.
+      - dependency-name: pymdown-extensions
+        versions: [">=12.2"]
