@@ -173,7 +173,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist
@@ -202,7 +202,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist
@@ -222,7 +222,7 @@ jobs:
     permissions:
       id-token: write  # trusted publishing: no API token needed
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: "{wheels-*,sdist}"
           path: dist
@@ -251,7 +251,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: "{wheels-*,sdist}"
           path: dist
