@@ -79,7 +79,7 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.libc }}-${{ matrix.target }}
           path: dist
@@ -111,7 +111,7 @@ jobs:
           rust-toolchain: stable
           target: ${{ matrix.target }}
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-macos-${{ matrix.target }}
           path: dist
@@ -137,7 +137,7 @@ jobs:
           rust-toolchain: stable
           target: x64
           args: --profile dist --out dist --interpreter ${{ env.PYTHONS }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-windows-x64
           path: dist
@@ -154,7 +154,7 @@ jobs:
           rust-toolchain: stable
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist
