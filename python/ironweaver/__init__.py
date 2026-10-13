@@ -346,7 +346,7 @@ def _filter(self, predicate=None, **kwargs):
         ]
 
         if not matching_ids:
-            return Vertex()
+            return Vertex(shuffle_seed=self.shuffle_seed)
 
         return self._original_filter(ids=matching_ids)
 

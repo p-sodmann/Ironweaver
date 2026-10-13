@@ -659,14 +659,14 @@ impl<N, E> Graph<N, E> {
         self.indexes.all_dirty || !self.indexes.dirty.is_empty()
     }
 
-    /// Nodes whose index entries may be stale, in slot order.
+    /// Nodes whose index entries may be stale, in configured node order.
     pub fn dirty_nodes(&self) -> Vec<NodeIx> {
         let mut out: Vec<NodeIx> = if self.indexes.all_dirty {
             self.node_indices().collect()
         } else {
             self.indexes.dirty.iter().copied().collect()
         };
-        out.sort_unstable_by_key(|ix| ix.slot());
+        self.order_node_indices(&mut out);
         out
     }
 
@@ -894,7 +894,7 @@ impl<N: Attributes, E> Graph<N, E> {
     }
 
     /// Nodes whose value at `path` equals `value` (numbers across int and
-    /// float), in slot order; `None` if `path` has no index. A non-scalar
+    /// float), in configured node order; `None` if `path` has no index. A non-scalar
     /// `value` finds nothing.
     pub fn find_nodes(&self, path: &[String], value: &Value) -> Result<Option<Vec<NodeIx>>, N::Error> {
         let Some(at) = self.indexes.position(path) else { return Ok(None) };
@@ -913,7 +913,7 @@ impl<N: Attributes, E> Graph<N, E> {
 
     /// Nodes whose value at `path` lies between the bounds (which must be
     /// scalars of the same kind: numbers, strings, dates, ...; values of
-    /// other kinds are never in range), in slot order; `None` if `path` has
+    /// other kinds are never in range), in configured node order; `None` if `path` has
     /// no index.
     pub fn find_nodes_in_range<X>(
         &self,
@@ -949,7 +949,7 @@ impl<N: Attributes, E> Graph<N, E> {
     }
 
     /// Nodes found by `collect` in index `at`, corrected for dirty nodes
-    /// (whose current key must satisfy `fits`), in slot order.
+    /// (whose current key must satisfy `fits`), in configured node order.
     fn lookup(
         &self,
         at: usize,
@@ -972,12 +972,12 @@ impl<N: Attributes, E> Graph<N, E> {
                 }
             }
         }
-        out.sort_unstable_by_key(|ix| ix.slot());
+        self.order_node_indices(&mut out);
         Ok(out)
     }
 
     /// A superset of the nodes matching `expr` found through indexes (and
-    /// the label index), in slot order; `None` if the indexes can't narrow
+    /// the label index), in configured node order; `None` if the indexes can't narrow
     /// it down. Check each candidate with `expr.matches_node`. The same as
     /// running [`Graph::index_plan`] with [`Graph::execute_index_plan`].
     pub fn index_candidates(&self, expr: &Expr) -> Result<Option<Vec<NodeIx>>, N::Error> {
@@ -987,11 +987,11 @@ impl<N: Attributes, E> Graph<N, E> {
         }
     }
 
-    /// The candidates of `plan`, in slot order (exact while nodes are
+    /// The candidates of `plan`, in configured node order (exact while nodes are
     /// dirty, like [`Graph::find_nodes`]). A lookup on a path without an
     /// index scans the nodes.
     pub fn execute_index_plan(&self, plan: &IndexPlan) -> Result<Vec<NodeIx>, N::Error> {
-        Ok(match plan {
+        let mut out = match plan {
             IndexPlan::Empty => Vec::new(),
             IndexPlan::Label(name) => self.nodes_with_label(name),
             IndexPlan::Point { path, value } => self.point_lookup(path, value)?,
@@ -1017,7 +1017,11 @@ impl<N: Attributes, E> Graph<N, E> {
                 }
                 sorted_unique(all)
             }
-        })
+        };
+        if self.shuffle_seed().is_some() {
+            self.order_node_indices(&mut out);
+        }
+        Ok(out)
     }
 
     fn point_lookup(&self, path: &[String], value: &Value) -> Result<Vec<NodeIx>, N::Error> {

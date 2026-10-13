@@ -10,6 +10,37 @@ from ironweaver import Vertex
 v = Vertex()
 ```
 
+### Testing callers for order dependence
+
+Default node iteration keeps the existing arena slot order: insertion order
+until removals allow new nodes to reuse freed slots. For tests, opt into
+reproducible unordered iteration with a nonnegative 64-bit seed:
+
+```python
+shuffled = Vertex(shuffle_seed=1234)
+shuffled.add_nodes([f"n{i}" for i in range(32)])
+assert shuffled.keys() != [f"n{i}" for i in range(32)]
+assert list(shuffled.nodes) == shuffled.keys()
+shuffled.set_shuffle_seed(None)  # restore default order
+assert shuffled.keys() == [f"n{i}" for i in range(32)]
+```
+
+`set_shuffle_seed(seed)` also enables it on an existing graph; `shuffle_seed`
+reports the current seed. The same seed and node ids produce the same order
+across processes, even if inserted differently. Try several seeds to expose
+missing sorts in deterministic callers. This is a testing aid, with no
+compatibility guarantee about a particular permutation; small graphs can have
+the same order under different seeds.
+
+The seed covers `keys()`, `nodes`, iteration, `repr`, `toJSON`, label and property
+lookups, pattern scans, and projections. Derived subgraphs inherit it, including
+traversal results; path metadata retains path order and adjacency lists retain
+edge insertion order. It is not stored in JSON or binary files: enable it again
+after loading. With it disabled, iteration does no allocation or sorting. With
+it enabled, each full node iteration uses O(n) temporary storage and O(n log n)
+sorting. Explicitly ordered APIs, such as topological sorts and path sequences,
+keep their semantic ordering.
+
 ### Adding nodes
 
 ```python

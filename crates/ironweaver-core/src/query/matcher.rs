@@ -254,7 +254,7 @@ where
                     }
                     (Some(ids), _) => {
                         let mut c: Vec<NodeIx> = ids.iter().copied().collect();
-                        c.sort_unstable_by_key(|ix| ix.slot());
+                        self.g.order_node_indices(&mut c);
                         c
                     }
                     (None, Some(_)) => {
