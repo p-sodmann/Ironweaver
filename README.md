@@ -643,3 +643,10 @@ Licensed under the MIT License. See the LICENSE file for details.
 **Note**: This library is designed for applications requiring high-performance graph operations. For simple use cases, NetworkX might be more appropriate. For complex, large-scale graph analysis, `IronWeaver` might provide significant performance advantages.
 Initially it was developed for the [Gustabor](https://gustabor.de) project.
 
+
+### Testing for node order dependence
+
+Use `Vertex(shuffle_seed=1234)` or `g.set_shuffle_seed(1234)` to reproduce
+unordered node iteration in tests. `g.set_shuffle_seed(None)` restores the
+default order. See [node iteration testing](docs/basics.md#testing-callers-for-order-dependence)
+for scope, cost, and persistence rules.

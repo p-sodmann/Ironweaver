@@ -7,6 +7,7 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
   - Edges have persistent ids (never reused), an optional type and a payload `E`.
   - `labels()` lists every label with its node count, and `edge_types()` / `edge_type_count()` count edges per type, from counters kept as the graph changes.
   - Handles (`NodeIx` / `EdgeIx`) never alias a removed node or edge.
+  - `set_shuffle_seed(Some(seed))` enables reproducible unordered node iteration for testing order-dependent callers; `None` restores default slot order without allocation or sorting. `shuffle_seed()` reports it. The same seed and node ids give the same order across insertion histories and processes, but a particular permutation is not a compatibility guarantee. Node iterators, label/property lookups and query scans follow it; clones and induced subgraphs inherit it. Path sequences and edge adjacency retain their semantic order. The setting is not serialized. Seeded full iteration uses O(n) temporary storage and O(n log n) sorting.
 - **Changes as data.** `Op` values apply to a graph and return the ops that undo them, and `Graph::apply_all` applies a batch all-or-nothing. That's the base for a write-ahead log, replication or rollback.
 - **Filter expressions** (`Expr`): comparisons, membership and existence on attribute paths, labels and edge types, and `and` / `or` / `not`.
 - **Analytics on a `Projection`**, a compact read-only CSR snapshot of (part of) a graph that is `Send + Sync` and can be shared across threads. Many of the algorithms run in parallel:

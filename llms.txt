@@ -342,3 +342,17 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 - [docs/basics.md](docs/basics.md), [docs/traversal.md](docs/traversal.md), [docs/filtering.md](docs/filtering.md), [docs/analytics.md](docs/analytics.md), [docs/patterns.md](docs/patterns.md), [docs/callbacks.md](docs/callbacks.md), [docs/LGF.md](docs/LGF.md)
 - [python/ironweaver/__init__.pyi](python/ironweaver/__init__.pyi): full typed API with docstrings
 - [AGENTS.md](AGENTS.md): source layout for working on the library itself
+
+## Testing node iteration order
+
+`Vertex(shuffle_seed=1234)` or `g.set_shuffle_seed(1234)` opts into reproducible
+unordered node iteration to catch callers missing an explicit sort. Seeds are
+unsigned 64-bit integers; `None` restores default slot order, without allocation
+or sorting. `g.shuffle_seed` reports the setting. The same seed and node ids
+have the same order across processes and insertion histories; try several seeds.
+The particular permutation is not a compatibility guarantee, and different seeds
+can coincide on small graphs. Full seeded iteration sorts with O(n) temporary
+storage and O(n log n) time. Node views, repr, label/property lookups, pattern scans
+and projections follow the setting. Derived subgraphs inherit it, while path
+sequences and edge adjacency keep their semantic order. Files do not store it;
+set it again after loading.

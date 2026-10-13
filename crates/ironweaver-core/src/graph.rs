@@ -300,11 +300,13 @@ impl<T> Arena<T> {
 /// A directed multigraph with string node ids, node labels, edge types and
 /// persistent edge ids.
 ///
-/// Iteration order is slot order: insertion order until nodes are removed,
-/// after which new nodes reuse the freed slots.
+/// Default iteration order is slot order: insertion order until nodes are removed,
+/// after which new nodes reuse the freed slots. `set_shuffle_seed` enables
+/// reproducible unordered node iteration for testing.
 #[derive(Debug)]
 pub struct Graph<N, E> {
     nodes: Arena<Node<N>>,
+    shuffle_seed: Option<u64>,
     edges: Arena<Edge<E>>,
     index: StrMap<String, NodeIx>,
     edge_index: EdgeIndex,
@@ -421,6 +423,7 @@ impl<N: Clone, E: Clone> Clone for Graph<N, E> {
     fn clone(&self) -> Self {
         let mut g = Graph {
             nodes: self.nodes.clone(),
+            shuffle_seed: self.shuffle_seed,
             edges: self.edges.clone(),
             index: self.index.clone(),
             edge_index: self.edge_index.clone(),
@@ -499,6 +502,7 @@ impl<N, E> Graph<N, E> {
     pub fn with_capacity(nodes: usize, edges: usize) -> Self {
         Graph {
             nodes: Arena::with_capacity(nodes),
+            shuffle_seed: None,
             edges: Arena::with_capacity(edges),
             index: StrMap::with_capacity_and_hasher(nodes, Default::default()),
             edge_index: EdgeIndex::with_capacity(edges),
@@ -736,13 +740,13 @@ impl<N, E> Graph<N, E> {
         untyped.into_iter().chain(typed.map(|(i, &count)| (Some(&*self.symbols.names[i]), count)))
     }
 
-    /// Nodes carrying `label`, in slot order.
+    /// Nodes carrying `label`, in configured node order.
     pub fn nodes_with_label(&self, label: &str) -> Vec<NodeIx> {
         let mut out: Vec<NodeIx> = match self.symbols.get(label).and_then(|s| self.labeled.get(&s)) {
             Some(set) => set.iter().copied().collect(),
             None => Vec::new(),
         };
-        out.sort_unstable_by_key(|ix| ix.slot);
+        self.order_node_indices(&mut out);
         out
     }
 
@@ -1188,9 +1192,41 @@ impl<N, E> Graph<N, E> {
         self.recount_payloads();
     }
 
-    /// All nodes, in slot order.
+    /// Enable reproducible unordered node iteration as a testing aid.
+    /// `None` restores the default slot order without allocation or sorting.
+    /// The exact permutation is not a compatibility guarantee. This setting
+    /// is copied to clones and induced subgraphs, but is not serialized.
+    pub fn set_shuffle_seed(&mut self, seed: Option<u64>) {
+        self.shuffle_seed = seed;
+    }
+
+    /// The optional seed used for node iteration.
+    pub fn shuffle_seed(&self) -> Option<u64> {
+        self.shuffle_seed
+    }
+
+    /// Sort live node handles into the graph's configured iteration order.
+    pub fn order_node_indices(&self, nodes: &mut [NodeIx]) {
+        if let Some(seed) = self.shuffle_seed {
+            nodes.sort_by_cached_key(|ix| {
+                let id = self.node(*ix).expect("ordered node handles must be live").id();
+                (iteration_key(seed, id), id)
+            });
+        } else {
+            nodes.sort_unstable_by_key(|ix| ix.slot());
+        }
+    }
+
+    /// All nodes, in the configured iteration order (slot order by default).
     pub fn nodes(&self) -> impl Iterator<Item = (NodeIx, &Node<N>)> + '_ {
-        self.nodes.iter().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
+        let slots = self.nodes.iter().map(|(slot, generation, n)| (NodeIx { slot, generation }, n));
+        if self.shuffle_seed.is_some() {
+            let mut nodes: Vec<_> = slots.collect();
+            nodes.sort_by_cached_key(|(_, n)| (iteration_key(self.shuffle_seed.expect("set"), n.id()), n.id()));
+            NodeOrder::Shuffled(nodes.into_iter())
+        } else {
+            NodeOrder::Slots(slots)
+        }
     }
 
     /// Every node, mutably (property indexes re-check them all until
@@ -1202,14 +1238,23 @@ impl<N, E> Graph<N, E> {
             p.node_bytes = 0;
             p.dirty_nodes = IxSet::default();
         }
-        self.nodes.iter_mut().map(|(slot, generation, n)| (NodeIx { slot, generation }, n))
+        let slots = self.nodes.iter_mut().map(|(slot, generation, n)| (NodeIx { slot, generation }, n));
+        if let Some(seed) = self.shuffle_seed {
+            let mut nodes: Vec<_> = slots.collect();
+            nodes.sort_unstable_by(|(_, a), (_, b)| {
+                iteration_key(seed, a.id()).cmp(&iteration_key(seed, b.id())).then_with(|| a.id().cmp(b.id()))
+            });
+            NodeOrder::Shuffled(nodes.into_iter())
+        } else {
+            NodeOrder::Slots(slots)
+        }
     }
 
     pub fn node_indices(&self) -> impl Iterator<Item = NodeIx> + '_ {
         self.nodes().map(|(ix, _)| ix)
     }
 
-    /// All edges, in slot order.
+    /// All edges, in configured node order.
     pub fn edges(&self) -> impl Iterator<Item = (EdgeIx, &Edge<E>)> + '_ {
         self.edges.iter().map(|(slot, generation, e)| (EdgeIx { slot, generation }, e))
     }
@@ -1252,6 +1297,7 @@ impl<N, E> Graph<N, E> {
         let mut out: Graph<N2, E2> = Graph::with_capacity(keep.size_hint().0, 0);
         // Same symbols, so labels and types copy without re-interning
         out.symbols = self.symbols.clone();
+        out.shuffle_seed = self.shuffle_seed;
         let mut map: IxMap<NodeIx, NodeIx> = IxMap::with_capacity_and_hasher(keep.size_hint().0, Default::default());
         let mut order: Vec<(NodeIx, NodeIx)> = Vec::with_capacity(keep.size_hint().0);
         for ix in keep {
@@ -1322,6 +1368,42 @@ fn internal(msg: &str) -> GraphError {
 
 fn not_indexed() -> GraphError {
     internal("a live node is missing from the id index")
+}
+
+// A concrete iterator keeps the default path allocation-free and statically
+// dispatched. Only the opt-in branch materializes and sorts the live nodes.
+enum NodeOrder<I, T> {
+    Slots(I),
+    Shuffled(std::vec::IntoIter<T>),
+}
+
+impl<I: Iterator<Item = T>, T> Iterator for NodeOrder<I, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::Slots(iter) => iter.next(),
+            Self::Shuffled(iter) => iter.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Slots(iter) => iter.size_hint(),
+            Self::Shuffled(iter) => iter.size_hint(),
+        }
+    }
+}
+
+// A fixed hash plus SplitMix64 finalization: independent of the process's
+// randomized hash tables, insertion order, arena slots and platform width.
+fn iteration_key(seed: u64, id: &str) -> u64 {
+    let mut key = 0xcbf29ce484222325u64;
+    for byte in id.bytes() {
+        key = (key ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+    }
+    key ^= seed;
+    key = (key ^ (key >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    key = (key ^ (key >> 27)).wrapping_mul(0x94d049bb133111eb);
+    key ^ (key >> 31)
 }
 
 #[cfg(test)]

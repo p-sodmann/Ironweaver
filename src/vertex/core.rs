@@ -94,8 +94,23 @@ impl Vertex {
 #[pymethods]
 impl Vertex {
     #[new]
-    fn new(py: Python<'_>) -> Self {
-        Vertex::with_graph(py, PyGraph::new())
+    #[pyo3(signature = (*, shuffle_seed=None))]
+    fn new(py: Python<'_>, shuffle_seed: Option<u64>) -> Self {
+        let mut graph = PyGraph::new();
+        graph.set_shuffle_seed(shuffle_seed);
+        Vertex::with_graph(py, graph)
+    }
+
+    /// Set a reproducible node iteration seed for testing, or None to restore
+    /// default order. Derived subgraphs inherit it; saved files do not.
+    #[pyo3(signature = (seed=None))]
+    fn set_shuffle_seed(&mut self, seed: Option<u64>) {
+        self.graph.set_shuffle_seed(seed);
+    }
+
+    #[getter]
+    fn shuffle_seed(&self) -> Option<u64> {
+        self.graph.shuffle_seed()
     }
 
     /// Create a graph from an ``{id: Node}`` mapping.
