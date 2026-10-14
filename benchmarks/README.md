@@ -151,3 +151,17 @@ projections agree. It needs numpy.
 ```bash
 python benchmarks/compare_from_arrays.py
 ```
+
+## A* on a projection
+
+`compare_astar.py` builds a 4-connected grid with `Projection.from_arrays`
+(about 180k tiles and 700k directed edges by default; entering a tile costs
+1, or 2 to 4 for a fraction `--rough` of the tiles; `--side`, `--obstacles`,
+`--trips`) and times `Projection.shortest_paths` per trip with "dijkstra"
+and with "astar" (Manhattan and Euclidean estimates), one call per trip and
+one batch call, checking that all costs agree. Set `RAYON_NUM_THREADS=1` to
+time a single thread. It needs numpy.
+
+```bash
+RAYON_NUM_THREADS=1 python benchmarks/compare_astar.py
+```

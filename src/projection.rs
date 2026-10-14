@@ -11,7 +11,7 @@
 
 use ironweaver_core::algo;
 use ironweaver_core::batch;
-use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind, PathMethod};
+use ironweaver_core::pathfinding::{resolve, Coords, EdgeCost, MethodKind, Metric, PathMethod};
 use ironweaver_core::projection::RawProjection;
 use ironweaver_core::{Direction, NodeIx};
 use pyo3::buffer::{Element, PyBuffer};
@@ -106,6 +106,8 @@ pub(crate) struct Spec<'py> {
     pub nodes: Option<Vec<String>>,
     pub node_filter: Filter<'py>,
     pub edge_filter: Filter<'py>,
+    /// Node coordinates to compile in (for A*).
+    pub coords: Option<Coords>,
 }
 
 /// The weight options of `project`: unweighted unless `weight` or
@@ -180,7 +182,10 @@ pub(crate) fn collect(
             }
         },
     )?;
-    Ok(raw)
+    match &spec.coords {
+        Some(coords) => raw.with_graph_coords::<_, _, Error>(&vertex.graph, coords).map_err(PyErr::from),
+        None => Ok(raw),
+    }
 }
 
 /// The items of a buffer (a numpy array) of `T` with `ndim` dimensions, in
@@ -287,23 +292,107 @@ impl Projection {
     }
 
     /// `method=None` picks dijkstra on a weighted projection, bfs otherwise.
-    fn uses_weights(&self, method: Option<&str>) -> PyResult<bool> {
-        Ok(resolve_batch_method(method, self.inner.is_weighted())?.weighted)
+    fn uses_weights(&self, method: Option<&str>, query: Query) -> PyResult<bool> {
+        Ok(resolve_batch_method(method, self.inner.is_weighted(), query, AStarArgs::default())?.method.weighted)
     }
 }
 
-/// Resolve a batch method, rejecting algorithms unavailable for batch queries.
-/// `None` picks Dijkstra when `weighted`, BFS otherwise. Vertex queries pass
-/// whether a weight attribute was given; Projection queries pass whether
-/// the snapshot has weights.
-pub(crate) fn resolve_batch_method(method: Option<&str>, weighted: bool) -> PyResult<&'static PathMethod> {
-    let m = resolve(method, weighted, &[]).map_err(graph_error)?;
-    if m.kind == MethodKind::AStar {
-        return Err(PyValueError::new_err(
-            "method 'astar' is not available for batch queries; use 'bfs' or 'dijkstra'",
-        ));
+/// What a batch query is for: A* needs one target per query.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Query {
+    /// `shortest_paths`: A* allowed.
+    Pairs,
+    /// `distances` (one source to every node): no A*.
+    Distances,
+    /// Other path-based algorithms (k shortest paths): no A*.
+    Other,
+}
+
+/// A* options as given: `heuristic`, `heuristic_scale` and whether
+/// `coords` was (Vertex queries only).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct AStarArgs<'a> {
+    pub heuristic: Option<&'a str>,
+    pub scale: Option<f64>,
+    pub coords: bool,
+}
+
+impl AStarArgs<'_> {
+    fn names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if self.heuristic.is_some() || self.scale.is_some() {
+            names.push("heuristic");
+        }
+        if self.coords {
+            names.push("coords");
+        }
+        names
     }
-    Ok(m)
+}
+
+/// A resolved batch method, with A*'s options for "astar".
+pub(crate) struct BatchMethod {
+    pub method: &'static PathMethod,
+    pub astar: Option<batch::AStar>,
+}
+
+/// Resolve a batch method. `None` picks A* if an A* option is given,
+/// Dijkstra when `weighted`, BFS otherwise. Vertex queries pass whether a
+/// weight attribute was given; Projection queries pass whether the snapshot
+/// has weights. A* is only for `Query::Pairs`; its options only for A*.
+pub(crate) fn resolve_batch_method(
+    method: Option<&str>,
+    weighted: bool,
+    query: Query,
+    args: AStarArgs<'_>,
+) -> PyResult<BatchMethod> {
+    let m = resolve(method, weighted, &args.names()).map_err(graph_error)?;
+    if m.kind != MethodKind::AStar {
+        if !args.names().is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "heuristic, heuristic_scale and coords are options of method 'astar', not '{}'",
+                m.name
+            )));
+        }
+        return Ok(BatchMethod { method: m, astar: None });
+    }
+    match query {
+        Query::Pairs => {}
+        Query::Distances => {
+            return Err(PyValueError::new_err(
+                "method 'astar' needs a target per query, so distances (one source to every node) \
+                 can't use it; use shortest_paths(...) for pairs, or 'dijkstra' / 'bfs' here",
+            ))
+        }
+        Query::Other => {
+            return Err(PyValueError::new_err("method 'astar' is not available here; use 'bfs' or 'dijkstra'"))
+        }
+    }
+    let metric = match args.heuristic {
+        None | Some("euclidean" | "manhattan") => Metric::parse(args.heuristic).map_err(graph_error)?,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!("unknown heuristic '{}'; use 'euclidean' or 'manhattan'", other)))
+        }
+    };
+    let astar = batch::AStar::new(metric, args.scale.unwrap_or(1.0)).map_err(graph_error)?;
+    Ok(BatchMethod { method: m, astar: Some(astar) })
+}
+
+/// Run a batch of shortest-path queries with `method` (GIL released).
+pub(crate) fn run_shortest_paths(
+    py: Python<'_>,
+    p: &ironweaver_core::Projection,
+    pairs: &[(u32, u32)],
+    method: &BatchMethod,
+    max_cost: Option<f64>,
+) -> PyResult<Py<PyList>> {
+    let weighted = method.method.weighted;
+    let results = interrupt::released(py, interrupt::size(p), || match &method.astar {
+        Some(astar) => batch::shortest_paths_astar(p, pairs, astar, max_cost),
+        None => batch::shortest_paths(p, pairs, weighted, max_cost),
+    })?
+    .map_err(graph_error)?;
+    paths_to_py(py, p, results, weighted)
 }
 
 fn parse_side(direction: Option<&str>) -> PyResult<bool> {
@@ -384,6 +473,12 @@ impl Projection {
         self.inner.is_weighted()
     }
 
+    /// Number of coordinates per node (for A*), 0 without coordinates.
+    #[getter]
+    fn coord_dim(&self) -> usize {
+        self.inner.coord_dim()
+    }
+
     /// Node ids, in the projection's order.
     fn ids(&self) -> Vec<&str> {
         self.inner.ids().iter().map(String::as_str).collect()
@@ -417,28 +512,31 @@ impl Projection {
 
     /// Shortest path for each (source_id, target_id) pair, in parallel.
     ///
-    /// `method`: "dijkstra" (weights; needs a weighted projection) or "bfs"
-    /// (edge count); None picks dijkstra on a weighted projection. Returns
-    /// one entry per pair: {"nodelist": [...], "cost": c}, or None if the
-    /// target is unreachable within `max_cost`.
-    #[pyo3(signature = (pairs, method=None, *, max_cost=None))]
+    /// `method`: "dijkstra" (weights; needs a weighted projection), "astar"
+    /// (weights and node coordinates) or "bfs" (edge count); None picks
+    /// astar if `heuristic` or `heuristic_scale` is given, dijkstra on a
+    /// weighted projection, bfs otherwise. A* estimates the remaining cost
+    /// as `heuristic_scale` (default 1) times the "euclidean" (default) or
+    /// "manhattan" distance to the target. Returns one entry per pair:
+    /// {"nodelist": [...], "cost": c}, or None if the target is unreachable
+    /// within `max_cost`.
+    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None))]
     fn shortest_paths(
         &self,
         py: Python<'_>,
         pairs: Vec<(String, String)>,
         method: Option<&str>,
         max_cost: Option<f64>,
+        heuristic: Option<&str>,
+        heuristic_scale: Option<f64>,
     ) -> PyResult<Py<PyList>> {
-        let weighted = self.uses_weights(method)?;
+        let args = AStarArgs { heuristic, scale: heuristic_scale, coords: false };
+        let method = resolve_batch_method(method, self.inner.is_weighted(), Query::Pairs, args)?;
         let dense: Vec<(u32, u32)> = pairs
             .iter()
             .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
             .collect::<PyResult<_>>()?;
-        let p = &self.inner;
-        let results =
-            interrupt::released(py, interrupt::size(p), || batch::shortest_paths(p, &dense, weighted, max_cost))?
-                .map_err(graph_error)?;
-        paths_to_py(py, p, results, weighted)
+        run_shortest_paths(py, &self.inner, &dense, &method, max_cost)
     }
 
     /// Cost from each source to every node it reaches within `max_cost`
@@ -452,7 +550,7 @@ impl Projection {
         method: Option<&str>,
         max_cost: Option<f64>,
     ) -> PyResult<Py<PyDict>> {
-        let weighted = self.uses_weights(method)?;
+        let weighted = self.uses_weights(method, Query::Distances)?;
         let sources: Vec<u32> = sources.iter().map(|s| self.index(s, "Root node")).collect::<PyResult<_>>()?;
         let targets: Option<HashSet<u32>> =
             targets.map(|ts| ts.iter().map(|t| self.index(t, "Target node")).collect::<PyResult<_>>()).transpose()?;
@@ -813,7 +911,7 @@ impl Projection {
         k: usize,
         method: Option<&str>,
     ) -> PyResult<Py<PyList>> {
-        let weighted = self.uses_weights(method)?;
+        let weighted = self.uses_weights(method, Query::Other)?;
         let (s, t) = (self.index(source, "Root node")?, self.index(target, "Target node")?);
         let p = &self.inner;
         let paths = interrupt::released(py, interrupt::size(p), || algo::k_shortest_paths(p, s, t, k, weighted))?

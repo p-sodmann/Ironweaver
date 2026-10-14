@@ -74,7 +74,8 @@ impl Coords {
         Ok(Coords::PerDimension(paths.iter().map(|p| split_path(p.as_ref())).collect()))
     }
 
-    fn describe(&self) -> String {
+    /// The paths as written (`'pos'` or `['x', 'y']`), for messages.
+    pub(crate) fn describe(&self) -> String {
         match self {
             Coords::Sequence(p) => format!("'{}'", show(p)),
             Coords::PerDimension(ps) => {

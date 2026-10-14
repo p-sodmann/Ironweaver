@@ -31,7 +31,7 @@ use rayon::prelude::*;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-use crate::pathfinding::EdgeCost;
+use crate::pathfinding::{Coords, EdgeCost};
 use crate::{Attributes, Direction, Edge, EdgeIx, Graph, GraphError, Node, NodeIx};
 
 const NONE: u32 = u32::MAX;
@@ -526,6 +526,52 @@ impl RawProjection {
         Ok(self)
     }
 
+    /// Attach coordinates read from the projected nodes of `g` (the graph
+    /// this was collected from) at `coords`. Every node needs coordinates
+    /// of the same length; missing or non-numeric ones are an error.
+    pub fn with_graph_coords<N, E, X>(self, g: &Graph<N, E>, coords: &Coords) -> Result<Self, X>
+    where
+        N: Attributes,
+        X: From<GraphError> + From<N::Error>,
+    {
+        if self.nodes.len() != self.ids.len() {
+            return Err(GraphError::InvalidArgument("this projection was not collected from a graph".into()).into());
+        }
+        let mut dim = 0;
+        let mut values = Vec::new();
+        for (u, &ix) in self.nodes.iter().enumerate() {
+            let node = g.node(ix).ok_or(GraphError::Stale)?;
+            let row = coords.read::<N, X>(node)?.ok_or_else(|| {
+                GraphError::InvalidArgument(format!(
+                    "node '{}' has no coordinates at coords={}",
+                    node.id(),
+                    coords.describe()
+                ))
+            })?;
+            if u == 0 {
+                dim = row.len();
+                values.reserve(dim * self.nodes.len());
+            } else if row.len() != dim {
+                return Err(GraphError::InvalidArgument(format!(
+                    "node '{}' has {} coordinates but node '{}' has {}",
+                    node.id(),
+                    row.len(),
+                    self.ids[0],
+                    dim
+                ))
+                .into());
+            }
+            values.extend_from_slice(&row);
+        }
+        if self.nodes.is_empty() {
+            dim = match coords {
+                Coords::PerDimension(paths) => paths.len(),
+                Coords::Sequence(_) => 1,
+            };
+        }
+        Ok(self.with_coords(dim, values)?)
+    }
+
     /// Sort the neighbour lists (in parallel where it pays off).
     pub fn finish(self) -> Projection {
         let RawProjection { direction, edge_count, start, mut adj, weighted, nodes, ids, dense, by_id, coords, .. } =
@@ -743,5 +789,34 @@ mod tests {
         assert!(raw().with_coords(0, vec![]).is_err());
         assert!(raw().with_coords(2, vec![0.0; 3]).is_err());
         assert!(raw().with_coords(1, vec![0.0, f64::INFINITY]).is_err());
+    }
+
+    #[test]
+    fn coordinates_from_the_graph() {
+        let mut g = G::new();
+        let at = |x: f64, y: f64| Record::with_attr([("x", Value::from(x)), ("y", Value::from(y))]);
+        let a = g.add_node("a", at(0.0, 1.0)).unwrap();
+        let b = g.add_node("b", at(2.0, 3.0)).unwrap();
+        g.add_edge(a, b, Record::default()).unwrap();
+        let xy = Coords::per_dimension(&["x", "y"]).unwrap();
+        let collect = |g: &G| {
+            Projection::collect::<_, _, GraphError>(
+                g,
+                Direction::Out,
+                &EdgeCost::Unit,
+                |_, _| Ok(true),
+                |_, _| Ok(true),
+            )
+            .unwrap()
+        };
+        let p = collect(&g).with_graph_coords::<_, _, GraphError>(&g, &xy).unwrap().finish();
+        assert_eq!((p.coord_dim(), p.coords(1)), (2, Some(&[2.0, 3.0][..])));
+        let err = |c: &Coords, g: &G| collect(g).with_graph_coords::<_, _, GraphError>(g, c).err().unwrap().to_string();
+        assert_eq!(
+            err(&Coords::per_dimension(&["x", "z"]).unwrap(), &g),
+            "node 'a' has no coordinates at coords=['x', 'z']"
+        );
+        g.add_node("c", Record::with_attr([("x", Value::from("left")), ("y", Value::from(0.0))])).unwrap();
+        assert!(err(&xy, &g).contains("must be a number"));
     }
 }

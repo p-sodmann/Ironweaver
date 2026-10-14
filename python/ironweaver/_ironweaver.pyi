@@ -164,6 +164,8 @@ class Projection:
     def direction(self) -> Literal["out", "in", "both"]: ...
     @property
     def weighted(self) -> bool: ...
+    @property
+    def coord_dim(self) -> int: ...
     def node_count(self) -> int: ...
     def edge_count(self) -> int: ...
     def __len__(self) -> int: ...
@@ -176,9 +178,11 @@ class Projection:
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]: ...
     def distances(
         self,
@@ -404,18 +408,22 @@ class Vertex:
         nodes: list[str] | None = ...,
         node_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
         edge_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
+        coords: str | list[str] | None = ...,
     ) -> Projection:
         """Patched in ironweaver/__init__.py: callables receive NodeView / EdgeView."""
         ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         weight: str | None = ...,
         default_weight: float | None = ...,
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
+        coords: str | list[str] | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]: ...
     def distances(
         self,

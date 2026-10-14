@@ -516,7 +516,7 @@ _setup_traversal_methods()
 # ---------------------------------------------------------------------------
 
 def _vertex_project(self, weight=None, default_weight=None, *, direction=None,
-                    nodes=None, node_filter=None, edge_filter=None):
+                    nodes=None, node_filter=None, edge_filter=None, coords=None):
     """Build a :class:`Projection`: a compact, read-only copy of (part of) the
     graph for analytics. See ``Vertex.project`` in the stubs for the options.
 
@@ -529,7 +529,8 @@ def _vertex_project(self, weight=None, default_weight=None, *, direction=None,
     if callable(edge_filter):
         edge_filter = _wrap_edge_filter(edge_filter)
     return self._original_project(weight, default_weight, direction=direction, nodes=nodes,
-                                  node_filter=node_filter, edge_filter=edge_filter)
+                                  node_filter=node_filter, edge_filter=edge_filter,
+                                  coords=coords)
 
 
 Vertex._original_project = Vertex.project

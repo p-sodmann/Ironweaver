@@ -107,8 +107,10 @@ def test_errors():
         g.shortest_paths([("zz", "a")])
     with pytest.raises(ValueError, match="Target node"):
         g.distances(["a"], ["zz"])
-    with pytest.raises(ValueError, match="astar"):
+    with pytest.raises(ValueError, match="has no coordinates"):
         g.shortest_paths([("a", "e")], "astar")
+    with pytest.raises(ValueError, match="needs a target"):
+        g.distances(["a"], method="astar")
     with pytest.raises(ValueError):
         g.shortest_paths([("a", "e")], "nope")
     with pytest.raises(ValueError):

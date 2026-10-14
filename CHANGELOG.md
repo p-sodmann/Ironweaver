@@ -70,6 +70,20 @@ a query layer and database foundations.
   takes about 60 ms instead of about 1.8 s through `add_nodes` /
   `add_edges` / `project`. In the core: `Projection::from_edges` and
   `RawProjection::with_coords` (node coordinates, for A*). (#114)
+- **A* on projections:** `Projection.shortest_paths(pairs, "astar",
+  heuristic="euclidean"|"manhattan", heuristic_scale=1.0)` reads node
+  coordinates compiled into the projection, by
+  `Vertex.project(coords=["x", "y"] | "pos")` or
+  `Projection.from_arrays(..., coords=...)`. With an admissible estimate
+  (no edge cheaper than `heuristic_scale` times the distance between its
+  ends) the costs equal Dijkstra's; nodes reached again more cheaply are
+  re-expanded, so the estimate need not be consistent. On a 180k-tile grid
+  (`benchmarks/compare_astar.py`) it is about 4-5x faster per trip than
+  projection Dijkstra on one thread. `Vertex.shortest_paths` takes
+  `"astar"` too (with `coords`, `heuristic`, `heuristic_scale`);
+  `distances` refuses it (one source to every node has no single target).
+  In the core: `batch::shortest_paths_astar`, `batch::AStar`,
+  `RawProjection::with_graph_coords`. (#113)
 - **Pattern matching:** `Vertex.match("(a:Person)-[k:KNOWS*1..3]->(b)")`,
   Cypher-like patterns with labels, types, variable lengths, property maps,
   `where=` expressions and fixed ids. `Node.paths(...)` lists

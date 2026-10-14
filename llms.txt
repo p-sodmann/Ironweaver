@@ -151,7 +151,7 @@ assert d["alice"]["acme"] == res[0]["cost"]
 assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
 ```
 
-`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction, coords, heuristic, heuristic_scale)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"`, plus `"astar"` for `shortest_paths` only (coords default `["x", "y"]`, every node needs them). Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
 
 Copy the graph once with `project` to run many batches (or other analytics) on it:
 
@@ -162,17 +162,28 @@ assert p.neighbors("bob", "in") == ["alice"] and p.degree("alice") == 2
 knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; undirected
 ```
 
-`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter)`:
+`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter, coords)`:
 
 - Unweighted unless `weight` or `default_weight` is given.
 - `direction` `"out"`/`"in"` (reversed)/`"both"` (undirected).
 - Filters take a dict (attribute equality) or a callable (NodeView / EdgeView).
+- `coords` (`"pos"` or `["x", "y"]`) compiles node coordinates in for A*; every kept node needs numeric ones (ValueError if missing, TypeError if not numbers).
 
 `Projection` methods:
 
-- `shortest_paths(pairs, method=None, *, max_cost)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means dijkstra if the projection is weighted, else bfs.
+- `shortest_paths(pairs, method=None, *, max_cost, heuristic, heuristic_scale)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means astar if `heuristic` / `heuristic_scale` is given, dijkstra if the projection is weighted, else bfs.
+- `"astar"` (shortest_paths only; weighted projection with coords): estimate = `heuristic_scale` (default 1) x `"euclidean"` (default) / `"manhattan"` distance to the target. Same costs as dijkstra if no edge costs less than scale x the distance between its ends (grid, cost >= 1 per tile: `heuristic="manhattan"`); several times faster on grids. Works on `"in"` / `"both"` projections.
 - `neighbors(id, direction="out"|"in")`, `degree(id, direction)`.
-- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `memory_usage()`.
+- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `coord_dim`, `memory_usage()`.
+
+```python
+grid = Vertex()
+for i in range(3):
+    grid.add_node(str(i), {"x": i, "y": 0})
+grid.add_edge("0", "1", {"cost": 1.0}); grid.add_edge("1", "2", {"cost": 1.0}); grid.add_edge("0", "2", {"cost": 5.0})
+gp = grid.project(weight="cost", coords=["x", "y"])
+assert gp.shortest_paths([("0", "2")], "astar", heuristic="manhattan") == [{"nodelist": ["0", "1", "2"], "cost": 2.0}]
+```
 
 Graph already in arrays? Build the projection without a Vertex (much faster, far less memory):
 
@@ -183,7 +194,7 @@ arr = Projection.from_arrays(["a", "b", "c"], np.array([0, 1]), np.array([1, 2])
 assert arr.shortest_paths([("a", "c")])[0]["cost"] == 3.0
 ```
 
-`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`: edge `k` is `ids[src[k]] -> ids[dst[k]]`; int64/int32 and float64/float32 arrays (buffer protocol) or sequences. Edges keep the given order: same results as a Vertex with the same nodes and edges added in that order. `coords` `(n, d)` are kept for A*. ValueError on duplicate ids, length mismatch, out-of-range indices, negative/NaN weights.
+`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`: edge `k` is `ids[src[k]] -> ids[dst[k]]`; int64/int32 and float64/float32 arrays (buffer protocol) or sequences. Edges keep the given order: same results as a Vertex with the same nodes and edges added in that order. `coords` `(n, d)` are node coordinates for `"astar"`. ValueError on duplicate ids, length mismatch, out-of-range indices, negative/NaN weights.
 
 Later graph changes don't affect it.
 

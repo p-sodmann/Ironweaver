@@ -438,7 +438,8 @@ class Projection:
         *src* / *dst* are 1-D numpy arrays of int64 or int32 (copied without a
         Python call per item) or sequences of ints; *weight* a 1-D float64 /
         float32 array or a sequence of numbers. *coords* (an ``(n, d)`` array or
-        n rows of d numbers) are node coordinates kept for A*. *direction*:
+        n rows of d numbers) are node coordinates, for ``shortest_paths(...,
+        "astar")``. *direction*:
         "out" (default), "in" (reversed) or "both" (undirected).
 
         Raises ValueError for duplicate ids, arrays of different lengths,
@@ -454,6 +455,10 @@ class Projection:
         ...
     @property
     def weighted(self) -> bool: ...
+    @property
+    def coord_dim(self) -> int:
+        """Number of coordinates per node (for A*); 0 without coordinates."""
+        ...
     def node_count(self) -> int: ...
     def edge_count(self) -> int:
         """Number of graph edges in the projection."""
@@ -474,12 +479,30 @@ class Projection:
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]:
-        """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "dijkstra"
-        on a weighted projection, "bfs" otherwise."""
+        """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "astar" if
+        *heuristic* or *heuristic_scale* is given, "dijkstra" on a weighted
+        projection, "bfs" otherwise.
+
+        "astar" needs a weighted projection with node coordinates
+        (``Vertex.project(coords=...)`` or ``from_arrays(coords=...)``). It
+        estimates the remaining cost as *heuristic_scale* (default 1.0) times
+        the *heuristic* distance ("euclidean", the default, or "manhattan")
+        between the node's and the target's coordinates. Costs equal
+        "dijkstra"'s when no edge costs less than *heuristic_scale* times the
+        distance between its ends (e.g. "manhattan" on a grid with unit steps
+        and costs of at least 1); a larger scale settles fewer nodes but may
+        return dearer paths.
+
+        Raises ValueError for an unknown method or heuristic, a negative or
+        non-finite *heuristic_scale*, A* options with another method, or
+        "astar" on a projection without weights or coordinates.
+        """
         ...
     def distances(
         self,
@@ -489,7 +512,8 @@ class Projection:
         *,
         max_cost: float | None = ...,
     ) -> dict[str, dict[str, float]]:
-        """Like :meth:`Vertex.distances`, on this projection."""
+        """Like :meth:`Vertex.distances`, on this projection ("astar" raises
+        ValueError: it needs one target per query)."""
         ...
     def weakly_connected_components(self) -> list[list[str]]:
         """Components ignoring edge direction: lists of ids, largest first."""
@@ -1033,6 +1057,7 @@ class Vertex:
         nodes: list[str] | None = ...,
         node_filter: dict[str, Any] | Callable[[NodeView], bool] | None = ...,
         edge_filter: dict[str, Any] | Callable[[EdgeView], bool] | None = ...,
+        coords: str | list[str] | None = ...,
     ) -> Projection:
         """A compact, read-only copy of (part of) the graph for analytics.
 
@@ -1040,18 +1065,26 @@ class Vertex:
         "in" reverses edges, "both" makes them undirected. *nodes* limits the
         projection to those ids; *node_filter* / *edge_filter* take a dict
         (attribute equality) or a callable receiving a NodeView / EdgeView.
-        Build once, then run many queries on it.
+        *coords* compiles node coordinates in for
+        ``shortest_paths(..., "astar")``: an attribute holding a sequence
+        (``"pos"``) or one attribute path per dimension (``["x", "y"]``);
+        every kept node needs them (ValueError if missing or of different
+        lengths, TypeError if not numbers). Build once, then run many
+        queries on it.
         """
         ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         weight: str | None = ...,
         default_weight: float | None = ...,
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
+        coords: str | list[str] | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]:
         """Shortest paths for many (source, target) pairs, in parallel.
 
@@ -1060,8 +1093,12 @@ class Vertex:
         :meth:`project` to reuse one for several batches). Returns one
         entry per pair: ``{"nodelist": [...], "cost": ...}`` (cost is the number
         of edges for "bfs"), or None if the target is unreachable. Methods
-        "bfs" and "dijkstra" only. Edge weights of the whole graph are validated
-        when the projection is built. For a single query use ``shortest_path``.
+        "bfs", "dijkstra" and "astar" (as in :meth:`Projection.shortest_paths`,
+        with node coordinates at *coords*, ``["x", "y"]`` by default; every
+        node needs them). ``method=None`` picks "astar" if *coords*,
+        *heuristic* or *heuristic_scale* is given. Edge weights (and
+        coordinates) of the whole graph are validated when the projection is
+        built. For a single query use ``shortest_path``.
         """
         ...
     def distances(
@@ -1077,7 +1114,8 @@ class Vertex:
     ) -> dict[str, dict[str, float]]:
         """``{source: {node: cost}}`` for every node each source reaches within
         *max_cost* (only *targets*, if given), computed in parallel like
-        ``shortest_paths``."""
+        ``shortest_paths``. Methods "bfs" and "dijkstra": "astar" needs one
+        target per query."""
         ...
     @deprecated("Use shortest_path(root, target, method=\"bfs\")")
     def shortest_path_bfs(

@@ -768,14 +768,19 @@ impl Vertex {
     ///     node_filter (dict | callable, optional): Keep nodes whose attributes
     ///         equal the dict's values / for which the callable is true.
     ///     edge_filter (dict | callable, optional): The same for edges between kept nodes.
+    ///     coords (str | list[str], optional): Node coordinates to compile in, for
+    ///         `shortest_paths(..., "astar")`: an attribute holding a sequence
+    ///         ("pos") or one attribute path per dimension (["x", "y"]). Every
+    ///         projected node needs them.
     ///
     /// Returns:
     ///     Projection
     ///
     /// Raises:
-    ///     ValueError: Unknown node id or direction, or a negative edge weight
-    ///     TypeError: A non-numeric edge weight, or a filter of the wrong type
-    #[pyo3(signature = (weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None))]
+    ///     ValueError: Unknown node id or direction, a negative edge weight, or a
+    ///         node without coordinates (or with a different number of them)
+    ///     TypeError: A non-numeric edge weight or coordinate, or a filter of the wrong type
+    #[pyo3(signature = (weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None, coords=None))]
     #[allow(clippy::too_many_arguments)]
     fn project(
         slf: &Bound<'_, Self>,
@@ -785,8 +790,18 @@ impl Vertex {
         nodes: Option<Vec<String>>,
         node_filter: Option<Bound<'_, PyAny>>,
         edge_filter: Option<Bound<'_, PyAny>>,
+        coords: Option<Bound<'_, PyAny>>,
     ) -> PyResult<crate::projection::Projection> {
-        batch::project(slf, weight, default_weight, direction, nodes, node_filter.as_ref(), edge_filter.as_ref())
+        batch::project(
+            slf,
+            weight,
+            default_weight,
+            direction,
+            nodes,
+            node_filter.as_ref(),
+            edge_filter.as_ref(),
+            coords.as_ref(),
+        )
     }
 
     /// Shortest paths for many (source, target) pairs, computed in parallel
@@ -798,23 +813,31 @@ impl Vertex {
     ///
     /// Args:
     ///     pairs (list[tuple[str, str]]): (source_id, target_id) pairs
-    ///     method (str, optional): "bfs" (fewest edges) or "dijkstra" (cheapest by
-    ///         weight). None picks "dijkstra" if weight is given, else "bfs".
+    ///     method (str, optional): "bfs" (fewest edges), "dijkstra" (cheapest by
+    ///         weight) or "astar" (cheapest, guided by node coordinates). None picks
+    ///         "astar" if coords, heuristic or heuristic_scale is given, "dijkstra"
+    ///         if weight is, else "bfs".
     ///     weight (str, optional): Edge attribute holding the cost. Defaults to "weight".
     ///     default_weight (float, optional): Cost of edges without it. Defaults to 1.0.
     ///     max_cost (float, optional): Ignore paths more expensive than this (for
     ///         "bfs": with more edges).
     ///     direction (str, optional): "out" (default), "in" or "both".
+    ///     coords (str | list[str], optional): "astar": where node coordinates live
+    ///         (as in `project`). Defaults to ["x", "y"]; every node needs them.
+    ///     heuristic (str, optional): "astar": "euclidean" (default) or "manhattan".
+    ///     heuristic_scale (float, optional): "astar": multiplies the distance
+    ///         (default 1.0). Paths are cheapest if no edge costs less than
+    ///         heuristic_scale times the distance between its ends.
     ///
     /// Returns:
     ///     list: One entry per pair, in order: {"nodelist": [...], "cost": ...}, or
     ///         None if the target is not reachable
     ///
     /// Raises:
-    ///     ValueError: Unknown node or method ("astar" is not available here), or a
-    ///         negative edge weight anywhere in the graph
-    ///     TypeError: A non-numeric edge weight anywhere in the graph
-    #[pyo3(signature = (pairs, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None))]
+    ///     ValueError: Unknown node or method, a negative edge weight anywhere in the
+    ///         graph, or (astar) a node without coordinates
+    ///     TypeError: A non-numeric edge weight or coordinate anywhere in the graph
+    #[pyo3(signature = (pairs, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None, coords=None, heuristic=None, heuristic_scale=None))]
     #[allow(clippy::too_many_arguments)]
     fn shortest_paths(
         &self,
@@ -825,8 +848,23 @@ impl Vertex {
         default_weight: Option<f64>,
         max_cost: Option<f64>,
         direction: Option<&str>,
+        coords: Option<Bound<'_, PyAny>>,
+        heuristic: Option<&str>,
+        heuristic_scale: Option<f64>,
     ) -> PyResult<Py<PyList>> {
-        batch::shortest_paths(self, py, pairs, method, weight, default_weight, max_cost, direction)
+        batch::shortest_paths(
+            self,
+            py,
+            pairs,
+            method,
+            weight,
+            default_weight,
+            max_cost,
+            direction,
+            coords.as_ref(),
+            heuristic,
+            heuristic_scale,
+        )
     }
 
     /// Costs from each source to every node it reaches, computed in parallel
@@ -837,13 +875,14 @@ impl Vertex {
     ///     sources (list[str]): Start node ids
     ///     targets (list[str], optional): Only report these nodes
     ///     method, weight, default_weight, max_cost, direction: As in `shortest_paths`
+    ///         ("bfs" or "dijkstra": "astar" needs a target per query)
     ///
     /// Returns:
     ///     dict: {source_id: {node_id: cost}} for every node reached within max_cost
     ///         (cost is the number of edges for "bfs"), including the source itself
     ///
     /// Raises:
-    ///     ValueError / TypeError: As in `shortest_paths`
+    ///     ValueError / TypeError: As in `shortest_paths`; ValueError for "astar"
     #[pyo3(signature = (sources, targets=None, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None))]
     #[allow(clippy::too_many_arguments)]
     fn distances(

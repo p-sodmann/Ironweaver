@@ -121,20 +121,26 @@ fn heuristic<'py>(
     let metric = Metric::parse(metric.as_deref()).map_err(graph_error)?;
     let coords = match coords {
         None => Coords::default(),
-        Some(v) => match v.cast::<PyString>() {
-            Ok(s) => Coords::sequence(&s.to_cow()?),
-            Err(_) => {
-                let paths: Vec<String> = v.extract().map_err(|_| {
-                    PyTypeError::new_err(
-                        "coords must be an attribute name holding a sequence (e.g. \"pos\") \
-                         or a list of attribute paths, one per dimension (e.g. [\"x\", \"y\"] or [\"pos.lat\", \"pos.lon\"])",
-                    )
-                })?;
-                Coords::per_dimension(&paths).map_err(graph_error)?
-            }
-        },
+        Some(v) => parse_coords(&v)?,
     };
     Ok(Heuristic::coords(&vertex.graph, target, metric, coords)?)
+}
+
+/// The `coords` option: an attribute name holding a sequence (`"pos"`) or
+/// a list of attribute paths, one per dimension (`["x", "y"]`).
+pub(crate) fn parse_coords(v: &Bound<'_, PyAny>) -> PyResult<Coords> {
+    match v.cast::<PyString>() {
+        Ok(s) => Ok(Coords::sequence(&s.to_cow()?)),
+        Err(_) => {
+            let paths: Vec<String> = v.extract().map_err(|_| {
+                PyTypeError::new_err(
+                    "coords must be an attribute name holding a sequence (e.g. \"pos\") \
+                     or a list of attribute paths, one per dimension (e.g. [\"x\", \"y\"] or [\"pos.lat\", \"pos.lon\"])",
+                )
+            })?;
+            Coords::per_dimension(&paths).map_err(graph_error)
+        }
+    }
 }
 
 /// Entry point behind `Vertex.shortest_path` (and the `shortest_path_bfs` /

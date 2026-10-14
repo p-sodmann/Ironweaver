@@ -446,15 +446,19 @@ methods = Vertex.path_methods() -> dict   # {name: description}
 # result.meta["nodelist"] contains the ordered path; raises ValueError if unreachable
 # shortest_path_bfs / shortest_path_dijkstra are deprecated: use method="bfs" / "dijkstra"
 paths = graph.shortest_paths(pairs: list[tuple[str, str]], method=None, *, weight=None,
-                             default_weight=None, max_cost=None, direction="out")
+                             default_weight=None, max_cost=None, direction="out",
+                             coords=None, heuristic=None, heuristic_scale=None)
 # -> [{"nodelist": [...], "cost": ...} or None, ...]; many queries in parallel, GIL released
+# method "bfs", "dijkstra" or "astar" (coords default ["x", "y"], heuristic "euclidean"|"manhattan")
 dist = graph.distances(sources: list[str], targets: list[str] = None, method=None, ...)
 # -> {source: {node: cost}}; "bfs" or "dijkstra" only
 proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes=None,
-                     node_filter=None, edge_filter=None) -> Projection
+                     node_filter=None, edge_filter=None, coords=None) -> Projection
+# coords=["x", "y"] | "pos" compiles node coordinates in for proj.shortest_paths(pairs, "astar")
 proj = Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction="out")
 # the same without a Vertex: edge k is ids[src[k]] -> ids[dst[k]] (numpy int64 / float64 arrays or lists)
-# compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None),
+# compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None,
+#   heuristic=None, heuristic_scale=None) ("astar" with coords: several times faster on grids),
 # proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
 # analytics (docs/analytics.md): proj.weakly_connected_components(), proj.strongly_connected_components(),
 # proj.topological_sort(), proj.find_cycle(), proj.degree_centrality("out"|"in"),

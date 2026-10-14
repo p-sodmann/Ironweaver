@@ -187,13 +187,17 @@ Below is a quick guide to notable functions and where to find them.
   `Projection::from_edges` makes a `RawProjection` from ids plus source /
   target / weight lists instead (no graph: no handles, edges in the order
   given; checks ids, lengths, indices, weights), and
-  `RawProjection::with_coords` attaches node coordinates (`coords`, for A*).
+  `RawProjection::with_coords` attaches node coordinates (`coords`, for A*;
+  `with_graph_coords` reads them from the graph at a `Coords` path).
   Both paths share the counting sort (`adjacency_rows`). The transposed
   adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
   lazily. New analytics algorithms take `&Projection` and dense `u32` node
   indices.
 - **batch.rs** – `shortest_paths` / `distances` on a `Projection`: many
-  queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS.
+  queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS;
+  `shortest_paths_astar` + `AStar` (metric, scale): A* reading the
+  projection's coordinates (no closed set: re-expands nodes, so admissible
+  estimates suffice; ties prefer larger g). `distances` has no A*.
 - **algo/** – analytics on a `Projection` (dense indices in, `Vec`s / groups
   out; the comment in `mod.rs` is the recipe for adding one). Tests compare
   against brute-force references (`algo::testing` graphs); Python tests in
@@ -307,8 +311,9 @@ Below is a quick guide to notable functions and where to find them.
   methods release the GIL; `from_arrays` reads numpy arrays through the
   buffer protocol, `PyBuffer`, so numpy is not a dependency),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
-  core `RawProjection`) and batch method selection shared with
-  `vertex/batch.rs`. Result conversion lives in **projection/results.rs**:
+  core `RawProjection`, with `Spec.coords`) and batch method selection
+  shared with `vertex/batch.rs` (`resolve_batch_method` with `Query` /
+  `AStarArgs` -> `BatchMethod`, `run_shortest_paths`). Result conversion lives in **projection/results.rs**:
   batch paths / distances, per-node values, embedding rows and groups /
   walks (with a shared node-id string cache).
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
@@ -331,7 +336,8 @@ Below is a quick guide to notable functions and where to find them.
   first, then insert all; attribute columns; GC paused).
 - **vertex/algorithms.rs** – `expand`, `filter`, `random_walks`.
 - **vertex/pathfinding.rs** – `shortest_path` (Python options → core
-  `PathQuery`, `distances=` table heuristic), `path_methods`.
+  `PathQuery`, `distances=` table heuristic), `path_methods`, `parse_coords`
+  (the `coords` option, shared with `vertex/batch.rs`).
 - **vertex/batch.rs** – `project`, and `shortest_paths` / `distances` (a
   one-off projection of the whole graph, queries with the GIL released).
 - **vertex/index.rs** – `create_index`, `find`, `find_range`, and
