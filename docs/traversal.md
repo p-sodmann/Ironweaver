@@ -104,7 +104,7 @@ One method, several algorithms. `method` picks one; `Vertex.path_methods()` list
 
 With `method=None` it picks `"astar"` if `heuristic`, `coords` or `distances` is given, `"dijkstra"` if `weight` is given, and `"bfs"` otherwise. Options shared by the weighted methods: `weight` (edge attribute, default `"weight"`), `default_weight` (cost of edges without it, default 1.0), `max_cost`, and `direction` (`"out"`, `"in"`, `"both"`). An option a method doesn't accept raises `TypeError`.
 
-The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, one of them is returned.
+The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, the choice is fixed (see [Equal-cost paths](#equal-cost-paths)).
 
 ```python
 path = v.shortest_path("root", "target")                     # bfs: fewest edges
@@ -115,6 +115,33 @@ path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth
 ```
 
 The older `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` still work but are deprecated (they emit a `DeprecationWarning`): use `method="bfs"` and `method="dijkstra"`.
+
+#### Equal-cost paths
+
+When several paths cost the same, every path method picks the same one each time: the choice depends only on the graph (nodes, edges, weights) and the node order, not on the order in which edges were added, the process (hash seeds) or the number of threads. A simulation that hashes or replays paths can rely on it.
+
+**The rule:** walking back from the target, each step goes to the earliest neighbour, in node order, through which a cheapest route arrives.
+
+- **Node order** is insertion order on a `Vertex` (the order of `keys()`; a node added after a removal can take the removed node's place) and the index (the position in `ids()`) on a `Projection`. `Vertex.project` numbers nodes in the Vertex's order, so `shortest_path`, `shortest_paths` and `project(...).shortest_paths` agree.
+- `"bfs"` follows the rule with every edge counting 1, `"dijkstra"` with the weights. `k_shortest_paths` searches the same way: its first path is the one `shortest_paths` returns.
+- `"astar"` applies the rule to the nodes it expands, in order of estimated total cost, then larger cost so far, then node order. It doesn't expand every node, so among equal-cost paths it can pick another one than `"dijkstra"`, but always the same one, and the same on a Vertex and on a Projection with the same coordinates and heuristic.
+- Over a zero-weight edge, a route only replaces the one found first if it is strictly cheaper (re-linking at equal cost could close a cycle). Which route comes first is still fixed: nodes are settled by cost, ties in node order.
+- Costs are compared exactly as computed (floating-point sums along the path), so two routes whose sums differ in the last bit are not tied.
+- For a result that also doesn't depend on the order nodes were added, add them in a canonical order (for example sorted by id), or pass `ids` to `Projection.from_arrays` in that order; the order of the edges never matters.
+- `Vertex(shuffle_seed=...)` doesn't change `shortest_path` (node order stays insertion order), but `project`, and so `Vertex.shortest_paths`, number the nodes in the shuffled order, so their ties can go another way.
+
+```python
+for edges in ([("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")],
+              [("c", "d"), ("a", "c"), ("b", "d"), ("a", "b")]):   # any edge order
+    sq = Vertex()
+    for n in ["a", "b", "c", "d"]:          # b before c: b wins the tie
+        sq.add_node(n)
+    for s, t in edges:
+        sq.add_edge(s, t, {"weight": 1.0})
+    assert sq.shortest_path("a", "d").meta["nodelist"] == ["a", "b", "d"]
+    assert sq.shortest_path("a", "d", weight="weight").meta["nodelist"] == ["a", "b", "d"]
+    assert sq.shortest_paths([("a", "d")])[0]["nodelist"] == ["a", "b", "d"]
+```
 
 #### A* — `method="astar"`
 
@@ -178,7 +205,7 @@ assert set(d["root"]) == {"root", "a", "b"}            # {source: {node: cost}}
 assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
 ```
 
-Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `"astar"` is not available here. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+Paths are those `shortest_path` returns, ties included (see [Equal-cost paths](#equal-cost-paths)), whatever the number of threads. Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `shortest_paths` also takes `"astar"`, with `coords` (as in `shortest_path`; `["x", "y"]` by default), `heuristic` and `heuristic_scale` (see [A* on a projection](#a-on-a-projection)); every node needs coordinates. `distances` has no `"astar"`: an estimate towards one target does not help a search to every node. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
 
 ### Projections — `vertex.project(...)`
 
@@ -197,21 +224,121 @@ sub = v.project(nodes=["root", "a", "b"], node_filter=lambda n: n.id != "b")
 assert sub.ids() == ["root", "a"]
 ```
 
-`project(weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None)`:
+`project(weight=None, default_weight=None, *, direction=None, nodes=None, node_filter=None, edge_filter=None, coords=None)`:
 
 - Without `weight` and `default_weight` the projection is unweighted (only `"bfs"` queries).
 - `direction`: `"out"` keeps edges as they are, `"in"` reverses them, `"both"` makes them undirected.
 - `nodes` limits the projection to those ids.
 - `node_filter` / `edge_filter` take a dict (attribute equality) or a callable receiving a `NodeView` / `EdgeView`. The edge filter is asked once per edge between kept nodes.
 - Weights are read and validated for the kept edges only.
+- `coords` compiles node coordinates in, for `"astar"`: an attribute holding a sequence (`"pos"`) or one attribute path per dimension (`["x", "y"]`, `["pos.lat", "pos.lon"]`). Every kept node needs them, all of the same length; a missing one raises `ValueError`, a non-numeric one `TypeError`.
 
 A projection is a snapshot: later changes to the graph don't affect it. Don't change the graph from inside a filter.
 
 Projection methods:
 
-- `shortest_paths(pairs, method=None, *, max_cost=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
+- `shortest_paths(pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"astar"` if `heuristic` or `heuristic_scale` is given, `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
 - `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
-- `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `memory_usage()` (bytes).
+- `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `coord_dim` (coordinates per node, 0 without), `memory_usage()` (bytes).
+- `set_weights(edges, weights)` and `edge_index(edge)` change edge weights in place (see [Changing weights](#changing-weights--set_weights)).
+
+#### A* on a projection
+
+With coordinates compiled in (`project(coords=...)` or `Projection.from_arrays(..., coords=...)`), `shortest_paths(pairs, "astar")` guides each search towards its target. The estimate of the remaining cost is `heuristic_scale` (default 1) times the `"euclidean"` (default) or `"manhattan"` distance between the node's and the target's coordinates, read from a flat array.
+
+```python
+g = Vertex()
+for x in range(4):
+    for y in range(3):
+        g.add_node(f"{x},{y}", {"x": x, "y": y})
+for x in range(4):
+    for y in range(3):
+        for nx, ny in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]:
+            if 0 <= nx < 4 and 0 <= ny < 3:
+                g.add_edge(f"{x},{y}", f"{nx},{ny}", {"cost": 2.0 if ny == 1 else 1.0})  # entering row 1 costs 2
+
+grid = g.project(weight="cost", coords=["x", "y"])
+fast = grid.shortest_paths([("0,0", "3,2")], "astar", heuristic="manhattan")
+assert fast[0]["cost"] == grid.shortest_paths([("0,0", "3,2")], "dijkstra")[0]["cost"] == 6.0
+assert g.shortest_paths([("0,0", "3,2")], "astar", weight="cost", heuristic="manhattan") == fast
+```
+
+- The path is the cheapest one when the estimate never exceeds the real remaining cost. That holds when every edge costs at least `heuristic_scale` times the distance between its ends: on a grid with unit steps and costs of at least 1 per tile, `heuristic="manhattan"` qualifies; if steps cost at least `c`, `heuristic_scale=c` finds the same paths and settles fewer nodes. A larger scale searches less but may return a more expensive path. Nodes reached again more cheaply are expanded again, so an admissible estimate is enough (it need not be consistent).
+- The distance is symmetric, so `"in"` (reversed) and `"both"` projections work the same way.
+- `"astar"` needs a weighted projection with coordinates; `distances` does not take it.
+- On a 180,000-tile grid (`benchmarks/compare_astar.py`), A* with the Manhattan distance settles a fraction of the nodes Dijkstra does and is several times faster per trip.
+
+#### Without a Vertex — `Projection.from_arrays(...)`
+
+When the graph is already in arrays (node ids, edge sources and targets as indices into the ids, weights), build the projection directly. It skips the Vertex (about 1.4 KB per node, against under 100 bytes for the projection) and is many times faster: on a 180,000-node, 700,000-edge grid it takes about 60 ms, against about 1.8 s for `add_nodes` + `add_edges` + `project`.
+
+```python
+import numpy as np
+from ironweaver import Projection
+
+ids = ["a", "b", "c", "d"]
+src = np.array([0, 0, 1, 2], dtype=np.int64)       # edge k: ids[src[k]] -> ids[dst[k]]
+dst = np.array([1, 2, 3, 3], dtype=np.int64)
+weight = np.array([1.0, 2.0, 5.0, 1.0])
+p = Projection.from_arrays(ids, src, dst, weight)
+assert p.shortest_paths([("a", "d")]) == [{"nodelist": ["a", "c", "d"], "cost": 3.0}]
+undirected = Projection.from_arrays(ids, src, dst, direction="both")   # unweighted
+assert undirected.neighbors("d") == ["b", "c"]
+```
+
+`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`:
+
+- Node `i` is `ids[i]` (ids must be distinct). Edge `k` goes from `ids[src[k]]` to `ids[dst[k]]` with weight `weight[k]`; without `weight` the projection is unweighted.
+- Edges keep the order given, so the result is exactly what `project(weight=..., direction=...)` gives on a Vertex with the same nodes and edges added in the same order. Equal-cost paths are chosen by node index (see [Equal-cost paths](#equal-cost-paths)), so the order of the edges doesn't change any path; order `ids` canonically for a canonical choice.
+- `src` / `dst` are 1-D int64 or int32 numpy arrays, `weight` float64 or float32 (any object with the buffer protocol; read without a Python call per item), or plain sequences. numpy itself is not required.
+- `coords` (an `(n, d)` array or `n` rows of `d` numbers) are node coordinates, for [A*](#a-on-a-projection).
+- Raises `ValueError` for lists of different lengths, indices out of range, negative or NaN weights (as on Vertex edges), duplicate ids or coords that are not finite or not one row per node.
+
+#### Changing weights — `set_weights(...)`
+
+The structure of a projection is fixed, but its weights can change in place: `set_weights(edges, weights)` gives edge `edges[i]` the weight `weights[i]`. It costs time in proportion to the number of edges changed, not to the size of the projection: on a 180,000-tile grid (`benchmarks/compare_set_weights.py`), changing the 4 edges into a tile takes about a microsecond, against about 60 ms to rebuild the projection. An infinite weight makes an edge impassable, a finite one makes it passable again, so a game map can block tiles (a building) or make them cheaper (a road) between queries.
+
+```python
+w, h = 5, 3
+ids = [f"{x},{y}" for y in range(h) for x in range(w)]
+src, dst = [], []
+for y in range(h):
+    for x in range(w):
+        for nx, ny in [(x + 1, y), (x, y + 1)]:
+            if nx < w and ny < h:
+                a, b = y * w + x, ny * w + nx
+                src += [a, b]
+                dst += [b, a]
+src, dst = np.array(src), np.array(dst)
+tiles = Projection.from_arrays(ids, src, dst, np.ones(len(src)))
+assert tiles.shortest_paths([("0,1", "4,1")])[0]["cost"] == 4.0
+
+building = np.flatnonzero(dst == 1 * w + 2)        # the edges into tile 2,1
+tiles.set_weights(building, np.full(len(building), np.inf))
+path = tiles.shortest_paths([("0,1", "4,1")])[0]
+assert path["cost"] == 6.0 and "2,1" not in path["nodelist"]
+tiles.set_weights(building, np.ones(len(building)))  # demolished
+assert tiles.shortest_paths([("0,1", "4,1")])[0]["cost"] == 4.0
+
+# A Vertex projection numbers its edges for you
+v2 = Vertex()
+for n in "abc":
+    v2.add_node(n)
+ab = v2.add_edge("a", "b", {"weight": 1.0})
+v2.add_edge("b", "c", {"weight": 1.0})
+v2.add_edge("a", "c", {"weight": 5.0})
+vp = v2.project(weight="weight")
+vp.set_weights([vp.edge_index(ab)], [np.inf])
+assert vp.shortest_paths([("a", "c")])[0]["nodelist"] == ["a", "c"]
+```
+
+- **Edge numbers** are positions in projected order. For `from_arrays` that is the order of the arrays: edge `k` is `src[k] -> dst[k]`. For `Vertex.project` it is the order in which the Vertex stores its edges (insertion order, except that an edge added after a removal can take the removed edge's place), counting only the projected edges; `edge_index(edge)` returns an `Edge`'s number (weighted projections made by `Vertex.project` only; `ValueError` for an edge of another Vertex, or one not projected).
+- One edge has one number in every direction: on a `"both"` projection it is listed from both of its ends and both entries change, and the reversed adjacency (`neighbors(id, "in")`) changes too. If an edge is listed twice, the last weight wins.
+- Afterwards every method returns exactly what a projection built with the new weights returns.
+- **`inf` is impassable** everywhere a path is searched, with weights or with hop counts: `shortest_paths` and `distances` (any method), `bfs_levels`, `k_shortest_paths`, betweenness, closeness and harmonic centrality, node2vec walks; `minimum_spanning_tree` leaves such edges out, and PageRank, FastRP, Leiden and modularity count them as weight 0. Methods that only look at the structure (components, `topological_sort`, `find_cycle`, `degree_centrality`, triangles, clustering, `core_number`, `label_propagation`, similarity, `neighbors`, `degree`) ignore weights and still count them.
+- Raises `ValueError` (changing nothing) on an unweighted projection, for lists of different lengths, an index outside `0 .. edge_count() - 1`, or a negative or NaN weight. `edges` / `weights` are arrays or sequences, as for `from_arrays`.
+- A query running in another thread holds the projection: `set_weights` raises `RuntimeError` meanwhile instead of changing weights under it.
+- A weighted projection keeps 4 bytes per edge (8 for `"both"`) to find each edge's entries, and once the reversed adjacency is built 4 more per entry; a weighted Vertex projection also keeps its edges' handles (8 bytes each).
 
 ### Random walks — `vertex.random_walks(...)`
 

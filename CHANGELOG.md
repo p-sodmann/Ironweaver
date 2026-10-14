@@ -62,6 +62,43 @@ a query layer and database foundations.
   - minimum / maximum spanning forests, k shortest paths (Yen),
     direction-optimizing BFS levels, batch shortest paths and distances;
   - FastRP embeddings and node2vec walks.
+- **`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *,
+  direction=None)`** builds a projection from node ids and edge arrays
+  (numpy int64 / int32 and float64 / float32 through the buffer protocol,
+  or sequences) without a Vertex, with the same results as projecting a
+  Vertex with those edges in that order. On a 180k-node / 700k-edge grid it
+  takes about 60 ms instead of about 1.8 s through `add_nodes` /
+  `add_edges` / `project`. In the core: `Projection::from_edges` and
+  `RawProjection::with_coords` (node coordinates, for A*). (#114)
+- **`Projection.set_weights(edges, weights)`** changes edge weights in place;
+  the structure stays. Edges are numbered in projected order: the order
+  given to `from_arrays`, or the Vertex's edge order among the projected
+  edges (`Projection.edge_index(edge)`). Every entry an edge became is
+  updated (both ends on a `"both"` projection, the reversed adjacency if
+  built), so every method gives the same results as a projection rebuilt
+  with the new weights, at a cost proportional to the number of edges
+  changed: about a microsecond for the 4 edges into a tile of a
+  180,000-tile grid, against about 60 ms for a rebuild
+  (`benchmarks/compare_set_weights.py`). An infinite weight makes an edge
+  impassable. `set_weights` raises `RuntimeError` while a query runs on the
+  projection in another thread. Weighted projections keep 4 bytes per
+  adjacency entry for this (plus 4 per entry of the reversed adjacency once
+  built, and 8 per edge for weighted Vertex projections). In the core:
+  `Projection::set_weights`, `Projection::edge_index`. (#115)
+- **A* on projections:** `Projection.shortest_paths(pairs, "astar",
+  heuristic="euclidean"|"manhattan", heuristic_scale=1.0)` reads node
+  coordinates compiled into the projection, by
+  `Vertex.project(coords=["x", "y"] | "pos")` or
+  `Projection.from_arrays(..., coords=...)`. With an admissible estimate
+  (no edge cheaper than `heuristic_scale` times the distance between its
+  ends) the costs equal Dijkstra's; nodes reached again more cheaply are
+  re-expanded, so the estimate need not be consistent. On a 180k-tile grid
+  (`benchmarks/compare_astar.py`) it is about 4-5x faster per trip than
+  projection Dijkstra on one thread. `Vertex.shortest_paths` takes
+  `"astar"` too (with `coords`, `heuristic`, `heuristic_scale`);
+  `distances` refuses it (one source to every node has no single target).
+  In the core: `batch::shortest_paths_astar`, `batch::AStar`,
+  `RawProjection::with_graph_coords`. (#113)
 - **Pattern matching:** `Vertex.match("(a:Person)-[k:KNOWS*1..3]->(b)")`,
   Cypher-like patterns with labels, types, variable lengths, property maps,
   `where=` expressions and fixed ids. `Node.paths(...)` lists
@@ -169,6 +206,34 @@ a query layer and database foundations.
 
 ### Changed
 
+- **Equal-cost paths are chosen by a stated rule** (#116): walking back
+  from the target, each step goes to the earliest neighbour in node order
+  (insertion order on a Vertex, the index on a Projection) through which a
+  cheapest route arrives. `Vertex.shortest_path` (`"bfs"`, `"dijkstra"`),
+  `Vertex.shortest_paths`, `Projection.shortest_paths` and the first path
+  of `k_shortest_paths` all follow it, so they agree, and the result no
+  longer depends on the order edges were added, on heap push order or on
+  the number of threads (it was deterministic before, but decided by edge
+  order and heap internals, and the bidirectional `"bfs"` by where its
+  frontiers met). `"astar"` applies the rule to the nodes it expands
+  (open list ordered by f, then larger g, then node order). Over a
+  zero-weight edge a route replaces the first one found only if strictly
+  cheaper. Cost: on a grid full of ties, about 9% more instructions for
+  batch `"bfs"`, 6% for batch `"dijkstra"` and none for batch `"astar"`;
+  for `Vertex.shortest_path`, 4% for `"dijkstra"`, 2% for `"astar"` and
+  20-30% for the bidirectional `"bfs"` search, which now marks the
+  target's side of the shortest paths to pick the canonical one (a few
+  percent of the whole call). Documented in docs/traversal.md ("Equal-cost
+  paths"); in the core: `pathfinding::best_first`, `batch`,
+  `traversal::bidirectional_bfs`, `algo::k_shortest_paths`.
+- Infinite edge weights on a projection mean "impassable" everywhere
+  (#115): hop-count searches on a weighted projection (`"bfs"` shortest
+  paths and distances, `bfs_levels`, unweighted betweenness / closeness /
+  harmonic centrality and k shortest paths) skip such edges, like the
+  weighted ones already did; node2vec walks never take them; spanning
+  trees leave them out; PageRank, FastRP, Leiden and modularity count them
+  as weight 0 (they gave NaN before).
+
 - The minimum supported Rust version is 1.99; both crates use edition 2024.
   `rand` is 0.9 (was 0.8): a seed still gives the same result on every run,
   whatever the number of cores, but random walks, node2vec walks and Leiden
@@ -207,6 +272,9 @@ a query layer and database foundations.
 
 ### Fixed
 
+- Weighted betweenness centrality with zero-weight edges no longer gives
+  NaN: a node's predecessors are the neighbours settled before it on a
+  shortest path, also at the same distance.
 - `Expr` serde keeps its depth-limit message ("expression nested more than
   100 levels deep") under the binary encoding: postcard drops custom
   messages, and `format::take_error` (now public) returns it after a failure.

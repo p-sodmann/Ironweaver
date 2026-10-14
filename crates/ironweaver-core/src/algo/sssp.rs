@@ -4,18 +4,25 @@
 // sources (betweenness, closeness, harmonic centrality): a workspace with
 // per-node arrays that is reset through the list of nodes a search touched.
 // Searches see the simple graph: parallel edges collapse to the lightest,
-// self-loops are skipped (like networkx on a multigraph).
+// self-loops are skipped (like networkx on a multigraph), and so are
+// impassable (infinite-weight) edges.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
+use super::passable;
 use crate::Projection;
 
 /// The distinct neighbours of a node with the smallest weight among
-/// parallel edges (1 if unweighted), skipping `skip` (the node itself).
+/// parallel edges (1 if unweighted), skipping `skip` (the node itself) and
+/// neighbours joined only by impassable (infinite-weight) edges, also when
+/// the weights are not used.
 pub(crate) struct SimpleRow<'a> {
     to: &'a [u32],
+    /// The projection's weights for this row, if it has them.
     weight: Option<&'a [f64]>,
+    /// Whether to report weights (else 1).
+    weighted: bool,
     skip: u32,
     i: usize,
 }
@@ -25,7 +32,7 @@ impl<'a> SimpleRow<'a> {
     pub(crate) fn of(p: &'a Projection, u: u32, reverse: bool, weighted: bool) -> Self {
         let (to, weight) =
             if reverse { (p.in_neighbors(u), p.in_weights(u)) } else { (p.out_neighbors(u), p.out_weights(u)) };
-        SimpleRow { to, weight: if weighted { weight } else { None }, skip: u, i: 0 }
+        SimpleRow { to, weight, weighted, skip: u, i: 0 }
     }
 }
 
@@ -44,8 +51,8 @@ impl Iterator for SimpleRow<'_> {
                 }
                 self.i += 1;
             }
-            if v != self.skip {
-                return Some((v, w));
+            if v != self.skip && passable(w) {
+                return Some((v, if self.weighted { w } else { 1.0 }));
             }
         }
     }

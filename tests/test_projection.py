@@ -240,8 +240,10 @@ def test_errors():
         p.neighbors("a", "both")
     with pytest.raises(ValueError, match="need a projection with edge weights"):
         p.shortest_paths([("a", "c")], "dijkstra")
-    with pytest.raises(ValueError, match="astar"):
+    with pytest.raises(ValueError, match="need a projection with edge weights"):
         p.shortest_paths([("a", "c")], "astar")
+    with pytest.raises(ValueError, match="needs a target"):
+        p.distances(["a"], method="astar")
     with pytest.raises(ValueError, match="unknown path method"):
         p.distances(["a"], method="nope")
     with pytest.raises(ValueError, match="max_cost"):

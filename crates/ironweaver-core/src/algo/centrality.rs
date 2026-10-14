@@ -2,6 +2,7 @@
 
 use rayon::prelude::*;
 
+use super::strength;
 use crate::{GraphError, Projection};
 
 /// Degree divided by `n - 1` (1.0 for every node of a graph with at most
@@ -50,7 +51,8 @@ impl Default for PageRank {
 
 /// PageRank by power iteration, in parallel (each node pulls from its
 /// in-neighbours). Edges carry their projection weight (1 if unweighted);
-/// parallel edges add up. Nodes without outgoing weight ("dangling") jump
+/// parallel edges add up, impassable (infinite-weight) edges count 0. Nodes
+/// without outgoing weight ("dangling") jump
 /// by the personalization distribution. Same results as `networkx.pagerank`.
 /// Fails for invalid options or if it doesn't converge in `max_iter` (unless
 /// `tol` is 0: then it runs exactly `max_iter` iterations).
@@ -85,7 +87,7 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
     let out_weight: Vec<f64> = (0..n as u32)
         .into_par_iter()
         .map(|u| match p.out_weights(u) {
-            Some(w) => w.iter().sum(),
+            Some(w) => w.iter().map(|&w| strength(w)).sum(),
             None => p.out_degree(u) as f64,
         })
         .collect();
@@ -115,7 +117,7 @@ pub fn pagerank(p: &Projection, opts: &PageRank) -> Result<Vec<f64>, GraphError>
             .map(|v| {
                 let from = incoming.neighbors(v);
                 let pulled: f64 = match incoming.weights(v) {
-                    Some(w) => from.iter().zip(w).map(|(&u, &w)| share[u as usize] * w).sum(),
+                    Some(w) => from.iter().zip(w).map(|(&u, &w)| share[u as usize] * strength(w)).sum(),
                     None => from.iter().map(|&u| share[u as usize]).sum(),
                 };
                 alpha * pulled + base * jump[v as usize]

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
-from typing_extensions import deprecated
+from typing_extensions import Buffer, deprecated
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -407,13 +407,48 @@ class Path:
 @final
 class Projection:
     """A compact, read-only copy of (part of) a graph for analytics, made by
-    :meth:`Vertex.project`.
+    :meth:`Vertex.project` or, without a Vertex, by
+    :meth:`Projection.from_arrays`.
 
     Holds the structure (sorted neighbour lists in both directions), at most
     one weight per edge and the node ids, but no attributes. Queries run on
     all cores with the GIL released. A snapshot: later changes to the graph
-    don't affect it.
+    don't affect it. Edge weights can change in place
+    (:meth:`set_weights`); an infinite weight makes an edge impassable.
     """
+
+    @staticmethod
+    def from_arrays(
+        ids: Sequence[str],
+        src: Buffer | Sequence[int],
+        dst: Buffer | Sequence[int],
+        weight: Buffer | Sequence[float] | None = ...,
+        coords: Buffer | Sequence[Sequence[float]] | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Projection:
+        """Build a projection from arrays, without a :class:`Vertex`.
+
+        Node ``i`` has id ``ids[i]``; edge ``k`` goes from ``ids[src[k]]`` to
+        ``ids[dst[k]]`` with weight ``weight[k]`` (unweighted if None).
+        Edges keep the order given (parallel edges in it), so the result is
+        the same as ``vertex.project(weight=..., direction=...)`` on a Vertex
+        with these nodes and edges added in this order; a caller can make
+        tie-breaking canonical by sorting the edges.
+
+        *src* / *dst* are 1-D numpy arrays of int64 or int32 (copied without a
+        Python call per item) or sequences of ints; *weight* a 1-D float64 /
+        float32 array or a sequence of numbers. *coords* (an ``(n, d)`` array or
+        n rows of d numbers) are node coordinates, for ``shortest_paths(...,
+        "astar")``. *direction*:
+        "out" (default), "in" (reversed) or "both" (undirected).
+
+        Raises ValueError for duplicate ids, arrays of different lengths,
+        indices outside ``0 .. len(ids) - 1``, negative or NaN weights, and
+        coords that are not finite or not one row per node; TypeError for
+        arrays of the wrong type.
+        """
+        ...
 
     @property
     def direction(self) -> Literal["out", "in", "both"]:
@@ -421,6 +456,10 @@ class Projection:
         ...
     @property
     def weighted(self) -> bool: ...
+    @property
+    def coord_dim(self) -> int:
+        """Number of coordinates per node (for A*); 0 without coordinates."""
+        ...
     def node_count(self) -> int: ...
     def edge_count(self) -> int:
         """Number of graph edges in the projection."""
@@ -438,15 +477,87 @@ class Projection:
     def memory_usage(self) -> int:
         """Approximate memory used, in bytes."""
         ...
+    def set_weights(
+        self, edges: Buffer | Sequence[int], weights: Buffer | Sequence[float]
+    ) -> None:
+        """Change the weights of some edges in place: edge ``edges[i]`` gets
+        ``weights[i]`` (if an edge is listed twice, the last weight wins).
+
+        Edges are numbered in projected order: for :meth:`from_arrays`, the
+        order of the edge arrays (edge ``k`` is ``src[k] -> dst[k]``); for
+        :meth:`Vertex.project`, the order in which the Vertex stores its
+        edges, among the projected ones (:meth:`edge_index` gives an edge's
+        number). One edge is one number whatever the direction: on a "both"
+        projection it is listed from both ends, and both entries change.
+
+        The structure stays the same. ``inf`` makes an edge impassable: every
+        search skips it (shortest paths and distances with any method, BFS
+        levels, k shortest paths, betweenness, closeness and harmonic
+        centrality, also unweighted; node2vec walks), the spanning tree
+        leaves it out, and PageRank, FastRP, Leiden and modularity count it
+        as weight 0. Algorithms that only look at the structure (components,
+        topological sort, cycles, degree, triangles, clustering, k-core,
+        label propagation, similarity, ``neighbors`` / ``degree``) still see
+        it. A finite weight makes it passable again.
+
+        Afterwards every method returns what a projection built with the new
+        weights would. Each call costs time in proportion to the number of
+        edges changed, not to the size of the projection. *edges* and
+        *weights* are numpy arrays (int64 / int32, float64 / float32) or
+        sequences, as for :meth:`from_arrays`.
+
+        Raises ValueError (changing nothing) on an unweighted projection,
+        lists of different lengths, an index outside ``0 .. edge_count() -
+        1``, or a negative or NaN weight; RuntimeError if a query is running
+        on this projection in another thread meanwhile.
+        """
+        ...
+    def edge_index(self, edge: Edge) -> int:
+        """The number of *edge* (an :class:`Edge` of the Vertex this
+        projection was made from) in projected order, as :meth:`set_weights`
+        takes it.
+
+        Raises ValueError if the projection is not a weighted one made by
+        :meth:`Vertex.project` (only those keep their edges), if the edge
+        belongs to another Vertex, or if it was not projected (filtered out,
+        or added or removed since).
+        """
+        ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]:
-        """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "dijkstra"
-        on a weighted projection, "bfs" otherwise."""
+        """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "astar" if
+        *heuristic* or *heuristic_scale* is given, "dijkstra" on a weighted
+        projection, "bfs" otherwise.
+
+        "astar" needs a weighted projection with node coordinates
+        (``Vertex.project(coords=...)`` or ``from_arrays(coords=...)``). It
+        estimates the remaining cost as *heuristic_scale* (default 1.0) times
+        the *heuristic* distance ("euclidean", the default, or "manhattan")
+        between the node's and the target's coordinates. Costs equal
+        "dijkstra"'s when no edge costs less than *heuristic_scale* times the
+        distance between its ends (e.g. "manhattan" on a grid with unit steps
+        and costs of at least 1); a larger scale settles fewer nodes but may
+        return dearer paths.
+
+        Equal-cost paths: walking back from the target, each step goes to
+        the neighbour with the lowest index (position in ``ids()``) through
+        which a cheapest route arrives, so the result does not depend on the
+        order of the edges (``from_arrays``) or on the number of threads.
+        "astar" applies this to the nodes it expands (ordered by estimated
+        total, then larger cost so far, then index): it may pick another of
+        several equal-cost paths than "dijkstra", but always the same one.
+
+        Raises ValueError for an unknown method or heuristic, a negative or
+        non-finite *heuristic_scale*, A* options with another method, or
+        "astar" on a projection without weights or coordinates.
+        """
         ...
     def distances(
         self,
@@ -456,7 +567,8 @@ class Projection:
         *,
         max_cost: float | None = ...,
     ) -> dict[str, dict[str, float]]:
-        """Like :meth:`Vertex.distances`, on this projection."""
+        """Like :meth:`Vertex.distances`, on this projection ("astar" raises
+        ValueError: it needs one target per query)."""
         ...
     def weakly_connected_components(self) -> list[list[str]]:
         """Components ignoring edge direction: lists of ids, largest first."""
@@ -600,7 +712,12 @@ class Projection:
         k: int,
         method: Literal["bfs", "dijkstra"] | None = ...,
     ) -> list[dict[str, Any]]:
-        """Up to ``k`` shortest loopless paths, cheapest first (Yen)."""
+        """Up to ``k`` shortest loopless paths, cheapest first (Yen).
+
+        Each search breaks ties between equal-cost paths like
+        :meth:`shortest_paths` (by node index), so the first path is the one
+        ``shortest_paths`` returns and the list is the same every time.
+        """
         ...
 
 # ---------------------------------------------------------------------------
@@ -973,6 +1090,15 @@ class Vertex:
         for ``"bfs"``), ``method`` and, for Dijkstra/A*, ``expanded`` (nodes
         settled).
 
+        Equal-cost paths: the choice is fixed by node order (insertion
+        order), never by edge order, process or thread count. Walking back
+        from the target, each step goes to the earliest neighbour through
+        which a cheapest route arrives ("bfs": every edge counts 1). "astar"
+        applies this to the nodes it expands, so it may pick another of
+        several equal-cost paths than "dijkstra", but always the same one.
+        Over a zero-weight edge a route replaces the first one found only if
+        strictly cheaper. See docs/traversal.md, "Equal-cost paths".
+
         Raises ValueError for an unknown method, a missing node, an
         unreachable target, a negative weight or a target without
         coordinates; TypeError for a non-numeric weight, coordinate or
@@ -1000,6 +1126,7 @@ class Vertex:
         nodes: list[str] | None = ...,
         node_filter: dict[str, Any] | Callable[[NodeView], bool] | None = ...,
         edge_filter: dict[str, Any] | Callable[[EdgeView], bool] | None = ...,
+        coords: str | list[str] | None = ...,
     ) -> Projection:
         """A compact, read-only copy of (part of) the graph for analytics.
 
@@ -1007,18 +1134,26 @@ class Vertex:
         "in" reverses edges, "both" makes them undirected. *nodes* limits the
         projection to those ids; *node_filter* / *edge_filter* take a dict
         (attribute equality) or a callable receiving a NodeView / EdgeView.
-        Build once, then run many queries on it.
+        *coords* compiles node coordinates in for
+        ``shortest_paths(..., "astar")``: an attribute holding a sequence
+        (``"pos"``) or one attribute path per dimension (``["x", "y"]``);
+        every kept node needs them (ValueError if missing or of different
+        lengths, TypeError if not numbers). Build once, then run many
+        queries on it.
         """
         ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         weight: str | None = ...,
         default_weight: float | None = ...,
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
+        coords: str | list[str] | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]:
         """Shortest paths for many (source, target) pairs, in parallel.
 
@@ -1027,8 +1162,18 @@ class Vertex:
         :meth:`project` to reuse one for several batches). Returns one
         entry per pair: ``{"nodelist": [...], "cost": ...}`` (cost is the number
         of edges for "bfs"), or None if the target is unreachable. Methods
-        "bfs" and "dijkstra" only. Edge weights of the whole graph are validated
-        when the projection is built. For a single query use ``shortest_path``.
+        "bfs", "dijkstra" and "astar" (as in :meth:`Projection.shortest_paths`,
+        with node coordinates at *coords*, ``["x", "y"]`` by default; every
+        node needs them). ``method=None`` picks "astar" if *coords*,
+        *heuristic* or *heuristic_scale* is given. Edge weights (and
+        coordinates) of the whole graph are validated when the projection is
+        built. For a single query use ``shortest_path``.
+
+        Paths, ties between equal-cost paths included, are those
+        ``shortest_path`` returns (earliest node in insertion order walking
+        back from the target), for any number of threads. With
+        ``Vertex(shuffle_seed=...)`` the projection numbers nodes in the
+        shuffled order, which then decides ties.
         """
         ...
     def distances(
@@ -1044,7 +1189,8 @@ class Vertex:
     ) -> dict[str, dict[str, float]]:
         """``{source: {node: cost}}`` for every node each source reaches within
         *max_cost* (only *targets*, if given), computed in parallel like
-        ``shortest_paths``."""
+        ``shortest_paths``. Methods "bfs" and "dijkstra": "astar" needs one
+        target per query."""
         ...
     @deprecated("Use shortest_path(root, target, method=\"bfs\")")
     def shortest_path_bfs(

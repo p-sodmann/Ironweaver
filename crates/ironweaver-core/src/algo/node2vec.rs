@@ -11,12 +11,15 @@
 // accept it with probability `bias / max_bias`. It needs no per-edge tables,
 // so memory stays at one prefix sum per edge (weighted projections only).
 // Neighbour tests are binary searches in the sorted neighbour lists.
+// Impassable (infinite-weight) edges are never taken (they weigh 0 in the
+// draw) and don't make `x` a neighbour of `t`, so walks are the same as
+// without those edges.
 
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
-use super::{check_nodes, mix};
+use super::{check_nodes, mix, passable_at, strength};
 use crate::{GraphError, Projection};
 
 /// node2vec walk options.
@@ -61,7 +64,7 @@ impl<'a> Picker<'a> {
             for u in 0..n {
                 let mut sum = 0.0;
                 for &w in p.out_weights(u).unwrap_or(&[]) {
-                    sum += w;
+                    sum += strength(w);
                     c.push(sum);
                 }
             }
@@ -90,6 +93,15 @@ impl<'a> Picker<'a> {
     }
 }
 
+/// Whether an edge `t -> x` can be crossed (rows are sorted; parallel
+/// edges are adjacent).
+fn joined(p: &Projection, t: u32, x: u32) -> bool {
+    let row = p.out_neighbors(t);
+    let weights = p.out_weights(t);
+    let first = row.partition_point(|&v| v < x);
+    (first..row.len()).take_while(|&i| row[i] == x).any(|i| passable_at(weights, i))
+}
+
 fn walk(p: &Projection, picker: &Picker, start: u32, opts: &Node2Vec, rng: &mut StdRng) -> Vec<u32> {
     let (back, out) = (1.0 / opts.p, 1.0 / opts.q);
     let max_bias = back.max(out).max(1.0);
@@ -111,7 +123,7 @@ fn walk(p: &Projection, picker: &Picker, start: u32, opts: &Node2Vec, rng: &mut 
                 let Some(x) = picker.pick(v, rng) else { break };
                 let bias = if x == t {
                     back
-                } else if p.out_neighbors(t).binary_search(&x).is_ok() {
+                } else if joined(p, t, x) {
                     1.0
                 } else {
                     out

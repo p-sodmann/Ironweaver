@@ -1,6 +1,6 @@
 # Analytics
 
-Graph algorithms run on a [`Projection`](traversal.md#projections--vertexproject): a compact, read-only copy of (part of) the graph made by `vertex.project(...)`. Build it once and run as many algorithms on it as you like. They run in Rust with the GIL released, several of them on all cores. Results use node ids: dicts `{id: value}` for per-node scores, lists of lists of ids (largest first) for groups of nodes.
+Graph algorithms run on a [`Projection`](traversal.md#projections--vertexproject): a compact, read-only copy of (part of) the graph made by `vertex.project(...)` (or from arrays, without a Vertex, by [`Projection.from_arrays(...)`](traversal.md#without-a-vertex--projectionfrom_arrays)). Build it once and run as many algorithms on it as you like. They run in Rust with the GIL released, several of them on all cores. Results use node ids: dicts `{id: value}` for per-node scores, lists of lists of ids (largest first) for groups of nodes.
 
 Ctrl+C stops a long computation: it raises `KeyboardInterrupt` within a fraction of a second and throws the partial result away; the graph and the projection stay usable. (Projections under 20,000 nodes plus edges run without that check: they finish quickly.)
 
@@ -23,6 +23,7 @@ Directed algorithms follow the projection's edges, so use `direction="in"` to re
 - Triangles, clustering, core numbers and similarity treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`). `clustering(directed=True)` and label propagation follow the LDBC Graphalytics definitions on directed projections.
 - Shortest-path based algorithms (betweenness, closeness, harmonic centrality, k shortest paths) ignore self-loops and take the lightest of parallel edges.
 - Leiden, modularity and spanning trees treat edges as undirected but keep their weights.
+- An edge of infinite weight is impassable (see [`set_weights`](traversal.md#changing-weights--set_weights)): searches skip it, with weights or hop counts (BFS levels, betweenness, closeness, harmonic centrality, k shortest paths, node2vec walks), spanning trees leave it out, and PageRank, FastRP, Leiden and modularity count it as weight 0. Algorithms that look only at the structure (components, topological sort, cycles, degree, triangles, clustering, core numbers, label propagation, similarity) still count it.
 
 Randomised algorithms (sampled betweenness, Leiden, FastRP, node2vec) take a `seed`: the same seed gives the same result, whatever the number of cores.
 
@@ -186,7 +187,7 @@ assert [r["nodelist"] for r in routes] == [["a", "c", "d", "e"], ["a", "b", "c",
 assert [r["cost"] for r in routes] == [3, 4]
 ```
 
-`k_shortest_paths(source, target, k, method=None)` gives up to `k` paths without repeated nodes, cheapest first, by Yen's algorithm. Each result is `{"nodelist": [...], "cost": c}`, as for `shortest_paths`. `method` is `"dijkstra"` (weights) or `"bfs"` (edge count); by default, dijkstra on a weighted projection.
+`k_shortest_paths(source, target, k, method=None)` gives up to `k` paths without repeated nodes, cheapest first, by Yen's algorithm. Each result is `{"nodelist": [...], "cost": c}`, as for `shortest_paths`. Each search breaks ties between equal-cost paths like `shortest_paths` (by node index, see [Equal-cost paths](traversal.md#equal-cost-paths)): the first path is the one `shortest_paths` returns, and the list is the same every time. `method` is `"dijkstra"` (weights) or `"bfs"` (edge count); by default, dijkstra on a weighted projection.
 
 ## Embeddings
 

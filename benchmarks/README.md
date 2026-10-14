@@ -139,3 +139,42 @@ confirmations preserve selected timing while running required references once.
 Primary and repeat estimates stay separate, and new repeat-only signals must
 remain explicit. Run all commands under one exclusive lock without overlapping
 builds, tests or benchmark workers.
+
+## Projections from arrays
+
+`compare_from_arrays.py` times `Projection.from_arrays` against building the
+same projection through a Vertex (`add_nodes`, `add_edges`, `project`) on a
+grid with random obstacles (about 180k nodes and 700k directed edges by
+default; `--side`, `--obstacles`, `--repeats`), and checks that both
+projections agree. It needs numpy.
+
+```bash
+python benchmarks/compare_from_arrays.py
+```
+
+## A* on a projection
+
+`compare_astar.py` builds a 4-connected grid with `Projection.from_arrays`
+(about 180k tiles and 700k directed edges by default; entering a tile costs
+1, or 2 to 4 for a fraction `--rough` of the tiles; `--side`, `--obstacles`,
+`--trips`) and times `Projection.shortest_paths` per trip with "dijkstra"
+and with "astar" (Manhattan and Euclidean estimates), one call per trip and
+one batch call, checking that all costs agree. Set `RAYON_NUM_THREADS=1` to
+time a single thread. It needs numpy.
+
+```bash
+RAYON_NUM_THREADS=1 python benchmarks/compare_astar.py
+```
+
+## Changing projection weights in place
+
+`compare_set_weights.py` builds the grid of `compare_astar.py` and times
+`Projection.set_weights` for batches of 1 to 10,000 tiles (the edges into
+them made impassable, then restored), with and without the reversed
+adjacency built, next to rebuilding the projection with
+`Projection.from_arrays`; it checks that the updated projection finds the
+same paths as a rebuilt one. It needs numpy.
+
+```bash
+python benchmarks/compare_set_weights.py
+```

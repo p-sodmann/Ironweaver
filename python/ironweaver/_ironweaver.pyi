@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
-from typing_extensions import deprecated
+from typing_extensions import Buffer, deprecated
 
 @final
 class ObservedDictionary:
@@ -149,10 +149,23 @@ class Path:
 class Projection:
     """Compact read-only copy of a graph for analytics (see Vertex.project)."""
 
+    @staticmethod
+    def from_arrays(
+        ids: Sequence[str],
+        src: Buffer | Sequence[int],
+        dst: Buffer | Sequence[int],
+        weight: Buffer | Sequence[float] | None = ...,
+        coords: Buffer | Sequence[Sequence[float]] | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Projection: ...
+
     @property
     def direction(self) -> Literal["out", "in", "both"]: ...
     @property
     def weighted(self) -> bool: ...
+    @property
+    def coord_dim(self) -> int: ...
     def node_count(self) -> int: ...
     def edge_count(self) -> int: ...
     def __len__(self) -> int: ...
@@ -162,12 +175,16 @@ class Projection:
     def neighbors(self, id: str, direction: Literal["out", "in"] | None = ...) -> list[str]: ...
     def degree(self, id: str, direction: Literal["out", "in"] | None = ...) -> int: ...
     def memory_usage(self) -> int: ...
+    def set_weights(self, edges: Buffer | Sequence[int], weights: Buffer | Sequence[float]) -> None: ...
+    def edge_index(self, edge: Edge) -> int: ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]: ...
     def distances(
         self,
@@ -380,7 +397,11 @@ class Vertex:
         coords: str | list[str] | None = ...,
         distances: str | None = ...,
     ) -> Vertex:
-        """Shortest path with method "bfs", "dijkstra" or "astar"; see ``path_methods()``."""
+        """Shortest path with method "bfs", "dijkstra" or "astar"; see ``path_methods()``.
+
+        Equal-cost ties go by node order (insertion order), never edge order:
+        walking back from the target, the earliest neighbour on a cheapest route.
+        """
         ...
     @staticmethod
     def path_methods() -> dict[str, str]: ...
@@ -393,18 +414,22 @@ class Vertex:
         nodes: list[str] | None = ...,
         node_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
         edge_filter: dict[str, Any] | Callable[[Any], bool] | None = ...,
+        coords: str | list[str] | None = ...,
     ) -> Projection:
         """Patched in ironweaver/__init__.py: callables receive NodeView / EdgeView."""
         ...
     def shortest_paths(
         self,
         pairs: list[tuple[str, str]],
-        method: Literal["bfs", "dijkstra"] | None = ...,
+        method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         weight: str | None = ...,
         default_weight: float | None = ...,
         max_cost: float | None = ...,
         direction: Literal["out", "in", "both"] | None = ...,
+        coords: str | list[str] | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
     ) -> list[dict[str, Any] | None]: ...
     def distances(
         self,

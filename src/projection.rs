@@ -11,9 +11,10 @@
 
 use ironweaver_core::algo;
 use ironweaver_core::batch;
-use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind, PathMethod};
+use ironweaver_core::pathfinding::{resolve, Coords, EdgeCost, MethodKind, Metric, PathMethod};
 use ironweaver_core::projection::RawProjection;
 use ironweaver_core::{Direction, NodeIx};
+use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
@@ -105,6 +106,8 @@ pub(crate) struct Spec<'py> {
     pub nodes: Option<Vec<String>>,
     pub node_filter: Filter<'py>,
     pub edge_filter: Filter<'py>,
+    /// Node coordinates to compile in (for A*).
+    pub coords: Option<Coords>,
 }
 
 /// The weight options of `project`: unweighted unless `weight` or
@@ -179,20 +182,104 @@ pub(crate) fn collect(
             }
         },
     )?;
-    Ok(raw)
+    match &spec.coords {
+        Some(coords) => raw.with_graph_coords::<_, _, Error>(&vertex.graph, coords).map_err(PyErr::from),
+        None => Ok(raw),
+    }
+}
+
+/// The items of a buffer (a numpy array) of `T` with `ndim` dimensions, in
+/// C order, and its shape; `None` if `obj` has no buffer or another item
+/// type.
+fn buffer_of<T: Element + Copy>(
+    py: Python<'_>,
+    obj: &Bound<'_, PyAny>,
+    name: &str,
+    ndim: usize,
+) -> PyResult<Option<(Vec<T>, Vec<usize>)>> {
+    let Ok(buf) = PyBuffer::<T>::get(obj) else { return Ok(None) };
+    if buf.dimensions() != ndim {
+        return Err(PyValueError::new_err(format!(
+            "{} must have {} dimension{}, got {}",
+            name,
+            ndim,
+            if ndim == 1 { "" } else { "s" },
+            buf.dimensions()
+        )));
+    }
+    Ok(Some((buf.to_vec(py)?, buf.shape().to_vec())))
+}
+
+/// Node indices: a 1-D int64 / int32 array (copied without a Python call
+/// per item) or any sequence of ints.
+fn index_array(py: Python<'_>, obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<i64>> {
+    if let Some((v, _)) = buffer_of::<i64>(py, obj, name, 1)? {
+        return Ok(v);
+    }
+    if let Some((v, _)) = buffer_of::<i32>(py, obj, name, 1)? {
+        return Ok(v.into_iter().map(i64::from).collect());
+    }
+    obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{} must be an integer array or a sequence of ints", name))
+    })
+}
+
+/// Edge weights (argument `name`): a 1-D float64 / float32 array or any
+/// sequence of numbers.
+fn weight_array(py: Python<'_>, obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<f64>> {
+    if let Some((v, _)) = buffer_of::<f64>(py, obj, name, 1)? {
+        return Ok(v);
+    }
+    if let Some((v, _)) = buffer_of::<f32>(py, obj, name, 1)? {
+        return Ok(v.into_iter().map(f64::from).collect());
+    }
+    obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{} must be a float array or a sequence of numbers", name))
+    })
+}
+
+/// Coordinates: an (n, d) float64 / float32 array or a sequence of equally
+/// long sequences of numbers; returns d and the numbers row after row.
+fn coord_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<(usize, Vec<f64>)> {
+    if let Some((v, shape)) = buffer_of::<f64>(py, obj, "coords", 2)? {
+        return Ok((shape[1], v));
+    }
+    if let Some((v, shape)) = buffer_of::<f32>(py, obj, "coords", 2)? {
+        return Ok((shape[1], v.into_iter().map(f64::from).collect()));
+    }
+    let rows: Vec<Vec<f64>> = obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err("coords must be a 2-D float array or a sequence of sequences of numbers")
+    })?;
+    let dim = rows.first().map_or(1, Vec::len);
+    if let Some(i) = rows.iter().position(|r| r.len() != dim) {
+        return Err(PyValueError::new_err(format!(
+            "coords rows must be equally long: row 0 has {} numbers, row {} has {}",
+            dim,
+            i,
+            rows[i].len()
+        )));
+    }
+    Ok((dim, rows.concat()))
 }
 
 /// A compact, read-only copy of (part of) a graph for analytics, made by
-/// `Vertex.project(...)`.
+/// `Vertex.project(...)` or `Projection.from_arrays(...)`.
 ///
 /// It keeps the structure (sorted neighbour lists, in both directions), at
 /// most one edge weight per edge and the node ids, but no attributes. It is
 /// a snapshot: later changes to the graph don't affect it. Queries run on all
 /// cores with the GIL released; build a projection once and run many
-/// queries on it.
-#[pyclass(frozen, module = "ironweaver")]
+/// queries on it. Weights can change in place (`set_weights`).
+///
+/// Not frozen, so that `set_weights` can take it exclusively: every query
+/// holds a shared borrow while it runs (also with the GIL released), and
+/// `set_weights` refuses to run meanwhile instead of waiting.
+#[pyclass(module = "ironweaver")]
 pub struct Projection {
     pub(crate) inner: ironweaver_core::Projection,
+    /// Address of the Vertex it was projected from (0 for `from_arrays`),
+    /// to refuse other vertices' edges in `edge_index`.
+    pub(crate) vertex: usize,
 }
 
 impl Projection {
@@ -214,23 +301,107 @@ impl Projection {
     }
 
     /// `method=None` picks dijkstra on a weighted projection, bfs otherwise.
-    fn uses_weights(&self, method: Option<&str>) -> PyResult<bool> {
-        Ok(resolve_batch_method(method, self.inner.is_weighted())?.weighted)
+    fn uses_weights(&self, method: Option<&str>, query: Query) -> PyResult<bool> {
+        Ok(resolve_batch_method(method, self.inner.is_weighted(), query, AStarArgs::default())?.method.weighted)
     }
 }
 
-/// Resolve a batch method, rejecting algorithms unavailable for batch queries.
-/// `None` picks Dijkstra when `weighted`, BFS otherwise. Vertex queries pass
-/// whether a weight attribute was given; Projection queries pass whether
-/// the snapshot has weights.
-pub(crate) fn resolve_batch_method(method: Option<&str>, weighted: bool) -> PyResult<&'static PathMethod> {
-    let m = resolve(method, weighted, &[]).map_err(graph_error)?;
-    if m.kind == MethodKind::AStar {
-        return Err(PyValueError::new_err(
-            "method 'astar' is not available for batch queries; use 'bfs' or 'dijkstra'",
-        ));
+/// What a batch query is for: A* needs one target per query.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Query {
+    /// `shortest_paths`: A* allowed.
+    Pairs,
+    /// `distances` (one source to every node): no A*.
+    Distances,
+    /// Other path-based algorithms (k shortest paths): no A*.
+    Other,
+}
+
+/// A* options as given: `heuristic`, `heuristic_scale` and whether
+/// `coords` was (Vertex queries only).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct AStarArgs<'a> {
+    pub heuristic: Option<&'a str>,
+    pub scale: Option<f64>,
+    pub coords: bool,
+}
+
+impl AStarArgs<'_> {
+    fn names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if self.heuristic.is_some() || self.scale.is_some() {
+            names.push("heuristic");
+        }
+        if self.coords {
+            names.push("coords");
+        }
+        names
     }
-    Ok(m)
+}
+
+/// A resolved batch method, with A*'s options for "astar".
+pub(crate) struct BatchMethod {
+    pub method: &'static PathMethod,
+    pub astar: Option<batch::AStar>,
+}
+
+/// Resolve a batch method. `None` picks A* if an A* option is given,
+/// Dijkstra when `weighted`, BFS otherwise. Vertex queries pass whether a
+/// weight attribute was given; Projection queries pass whether the snapshot
+/// has weights. A* is only for `Query::Pairs`; its options only for A*.
+pub(crate) fn resolve_batch_method(
+    method: Option<&str>,
+    weighted: bool,
+    query: Query,
+    args: AStarArgs<'_>,
+) -> PyResult<BatchMethod> {
+    let m = resolve(method, weighted, &args.names()).map_err(graph_error)?;
+    if m.kind != MethodKind::AStar {
+        if !args.names().is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "heuristic, heuristic_scale and coords are options of method 'astar', not '{}'",
+                m.name
+            )));
+        }
+        return Ok(BatchMethod { method: m, astar: None });
+    }
+    match query {
+        Query::Pairs => {}
+        Query::Distances => {
+            return Err(PyValueError::new_err(
+                "method 'astar' needs a target per query, so distances (one source to every node) \
+                 can't use it; use shortest_paths(...) for pairs, or 'dijkstra' / 'bfs' here",
+            ))
+        }
+        Query::Other => {
+            return Err(PyValueError::new_err("method 'astar' is not available here; use 'bfs' or 'dijkstra'"))
+        }
+    }
+    let metric = match args.heuristic {
+        None | Some("euclidean" | "manhattan") => Metric::parse(args.heuristic).map_err(graph_error)?,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!("unknown heuristic '{}'; use 'euclidean' or 'manhattan'", other)))
+        }
+    };
+    let astar = batch::AStar::new(metric, args.scale.unwrap_or(1.0)).map_err(graph_error)?;
+    Ok(BatchMethod { method: m, astar: Some(astar) })
+}
+
+/// Run a batch of shortest-path queries with `method` (GIL released).
+pub(crate) fn run_shortest_paths(
+    py: Python<'_>,
+    p: &ironweaver_core::Projection,
+    pairs: &[(u32, u32)],
+    method: &BatchMethod,
+    max_cost: Option<f64>,
+) -> PyResult<Py<PyList>> {
+    let weighted = method.method.weighted;
+    let results = interrupt::released(py, interrupt::size(p), || match &method.astar {
+        Some(astar) => batch::shortest_paths_astar(p, pairs, astar, max_cost),
+        None => batch::shortest_paths(p, pairs, weighted, max_cost),
+    })?
+    .map_err(graph_error)?;
+    paths_to_py(py, p, results, weighted)
 }
 
 fn parse_side(direction: Option<&str>) -> PyResult<bool> {
@@ -243,6 +414,82 @@ fn parse_side(direction: Option<&str>) -> PyResult<bool> {
 
 #[pymethods]
 impl Projection {
+    /// Build a projection from arrays, without a Vertex: node `i` has id
+    /// `ids[i]`, edge `k` goes from `ids[src[k]]` to `ids[dst[k]]` with
+    /// weight `weight[k]` (unweighted if None). Edges keep the order given
+    /// (parallel edges in it), so the result is the same as projecting a
+    /// Vertex with these nodes and edges, added in this order. `coords`
+    /// ((n, d) numbers) are node coordinates, kept for A*. Arrays are numpy
+    /// arrays (int64 / int32 indices, float64 / float32 numbers, read
+    /// without a Python call per item) or sequences.
+    #[staticmethod]
+    #[pyo3(signature = (ids, src, dst, weight=None, coords=None, *, direction=None))]
+    fn from_arrays(
+        py: Python<'_>,
+        ids: Vec<String>,
+        src: &Bound<'_, PyAny>,
+        dst: &Bound<'_, PyAny>,
+        weight: Option<&Bound<'_, PyAny>>,
+        coords: Option<&Bound<'_, PyAny>>,
+        direction: Option<&str>,
+    ) -> PyResult<Self> {
+        let direction = Direction::parse(direction).map_err(graph_error)?;
+        let src = index_array(py, src, "src")?;
+        let dst = index_array(py, dst, "dst")?;
+        let weight = weight.filter(|w| !w.is_none()).map(|w| weight_array(py, w, "weight")).transpose()?;
+        let coords = coords.filter(|c| !c.is_none()).map(|c| coord_array(py, c)).transpose()?;
+        let inner = py
+            .detach(|| {
+                let raw = ironweaver_core::Projection::from_edges(ids, direction, &src, &dst, weight.as_deref())?;
+                let raw = match coords {
+                    Some((dim, values)) => raw.with_coords(dim, values)?,
+                    None => raw,
+                };
+                Ok(raw.finish())
+            })
+            .map_err(graph_error)?;
+        Ok(Projection { inner, vertex: 0 })
+    }
+
+    /// Change the weights of some edges in place: edge `edges[i]` gets
+    /// `weights[i]`. Edges are numbered in projected order: the order given
+    /// to `from_arrays`, or for `Vertex.project` the graph's edge order
+    /// among the projected edges (`edge_index(edge)` finds an edge's
+    /// number). The structure stays; `inf` makes an edge impassable (every
+    /// search skips it), a finite weight makes it passable again. Every
+    /// result is then the same as for a projection built with the new
+    /// weights. Cost is proportional to the number of edges changed.
+    fn set_weights(slf: &Bound<'_, Self>, edges: &Bound<'_, PyAny>, weights: &Bound<'_, PyAny>) -> PyResult<()> {
+        let py = slf.py();
+        let edges = index_array(py, edges, "edges")?;
+        let weights = weight_array(py, weights, "weights")?;
+        let mut this = slf.try_borrow_mut().map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "set_weights: the projection is in use by another call (a query running in another thread); \
+                 change weights between queries",
+            )
+        })?;
+        this.inner.set_weights(&edges, &weights).map_err(graph_error)
+    }
+
+    /// The number of `edge` (an Edge of the Vertex this projection was made
+    /// from) in projected order, as `set_weights` takes it. ValueError if
+    /// the edge was not projected (filtered out, added or removed since);
+    /// only weighted projections made by `Vertex.project` keep their edges.
+    fn edge_index(&self, edge: &Bound<'_, Edge>) -> PyResult<usize> {
+        let edge = edge.get();
+        if self.vertex == 0 || !self.inner.is_weighted() {
+            return Err(PyValueError::new_err(
+                "edge_index needs a weighted projection made by Vertex.project (from_arrays: edges are numbered \
+                 in the order given)",
+            ));
+        }
+        if edge.vertex.as_ptr() as usize != self.vertex {
+            return Err(PyValueError::new_err("edge belongs to another Vertex than the one projected"));
+        }
+        self.inner.edge_index(edge.ix).ok_or_else(|| PyValueError::new_err("edge is not in the projection"))
+    }
+
     /// Number of nodes.
     fn node_count(&self) -> usize {
         self.inner.node_count()
@@ -272,6 +519,12 @@ impl Projection {
     #[getter]
     fn weighted(&self) -> bool {
         self.inner.is_weighted()
+    }
+
+    /// Number of coordinates per node (for A*), 0 without coordinates.
+    #[getter]
+    fn coord_dim(&self) -> usize {
+        self.inner.coord_dim()
     }
 
     /// Node ids, in the projection's order.
@@ -307,28 +560,31 @@ impl Projection {
 
     /// Shortest path for each (source_id, target_id) pair, in parallel.
     ///
-    /// `method`: "dijkstra" (weights; needs a weighted projection) or "bfs"
-    /// (edge count); None picks dijkstra on a weighted projection. Returns
-    /// one entry per pair: {"nodelist": [...], "cost": c}, or None if the
-    /// target is unreachable within `max_cost`.
-    #[pyo3(signature = (pairs, method=None, *, max_cost=None))]
+    /// `method`: "dijkstra" (weights; needs a weighted projection), "astar"
+    /// (weights and node coordinates) or "bfs" (edge count); None picks
+    /// astar if `heuristic` or `heuristic_scale` is given, dijkstra on a
+    /// weighted projection, bfs otherwise. A* estimates the remaining cost
+    /// as `heuristic_scale` (default 1) times the "euclidean" (default) or
+    /// "manhattan" distance to the target. Returns one entry per pair:
+    /// {"nodelist": [...], "cost": c}, or None if the target is unreachable
+    /// within `max_cost`.
+    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None))]
     fn shortest_paths(
         &self,
         py: Python<'_>,
         pairs: Vec<(String, String)>,
         method: Option<&str>,
         max_cost: Option<f64>,
+        heuristic: Option<&str>,
+        heuristic_scale: Option<f64>,
     ) -> PyResult<Py<PyList>> {
-        let weighted = self.uses_weights(method)?;
+        let args = AStarArgs { heuristic, scale: heuristic_scale, coords: false };
+        let method = resolve_batch_method(method, self.inner.is_weighted(), Query::Pairs, args)?;
         let dense: Vec<(u32, u32)> = pairs
             .iter()
             .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
             .collect::<PyResult<_>>()?;
-        let p = &self.inner;
-        let results =
-            interrupt::released(py, interrupt::size(p), || batch::shortest_paths(p, &dense, weighted, max_cost))?
-                .map_err(graph_error)?;
-        paths_to_py(py, p, results, weighted)
+        run_shortest_paths(py, &self.inner, &dense, &method, max_cost)
     }
 
     /// Cost from each source to every node it reaches within `max_cost`
@@ -342,7 +598,7 @@ impl Projection {
         method: Option<&str>,
         max_cost: Option<f64>,
     ) -> PyResult<Py<PyDict>> {
-        let weighted = self.uses_weights(method)?;
+        let weighted = self.uses_weights(method, Query::Distances)?;
         let sources: Vec<u32> = sources.iter().map(|s| self.index(s, "Root node")).collect::<PyResult<_>>()?;
         let targets: Option<HashSet<u32>> =
             targets.map(|ts| ts.iter().map(|t| self.index(t, "Target node")).collect::<PyResult<_>>()).transpose()?;
@@ -703,7 +959,7 @@ impl Projection {
         k: usize,
         method: Option<&str>,
     ) -> PyResult<Py<PyList>> {
-        let weighted = self.uses_weights(method)?;
+        let weighted = self.uses_weights(method, Query::Other)?;
         let (s, t) = (self.index(source, "Root node")?, self.index(target, "Target node")?);
         let p = &self.inner;
         let paths = interrupt::released(py, interrupt::size(p), || algo::k_shortest_paths(p, s, t, k, weighted))?

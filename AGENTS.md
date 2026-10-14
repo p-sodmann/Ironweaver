@@ -164,8 +164,18 @@ Below is a quick guide to notable functions and where to find them.
   reader relies on those limits and on rejecting unknown fields.
 - **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS), their
   `*_limited` variants under a `Budget`, `bidirectional_bfs` (used by the
-  `bfs` path method and `Node.bfs_search`).
+  `bfs` path method and `Node.bfs_search`; after the frontiers meet it
+  picks the canonical path, see below).
 - **pathfinding/** (everything behind `Vertex.shortest_path`)
+  - Ties between equal-cost paths (#116, documented on `find_path` and in
+    docs/traversal.md "Equal-cost paths"): walking back from the target,
+    each step goes to the lowest node (`NodeIx` / dense index) through
+    which a cheapest route arrives; never decided by edge or push order or
+    threads. Heaps order equal keys by node; a node reached again at its
+    current cost over a positive-weight edge takes the lower predecessor.
+    Every path search (`best_first.rs`, `bidirectional_bfs`, `batch.rs`,
+    `algo/ksp.rs`) must keep this; `tests/tie_break.rs` (core) and
+    `tests/test_tie_break.py` (processes, threads, edge orders) check it.
   - `mod.rs`: `find_path` entry point, `PathMethod` + the `METHODS`
     registry, `resolve` / `check_options` / `edge_cost` / `check_max_cost`,
     `PathQuery`, `PathResult`, `not_reachable`, `find_path_limited` (a
@@ -183,18 +193,36 @@ Below is a quick guide to notable functions and where to find them.
   two steps: `Projection::collect` (reads the graph: node / edge filters,
   weights; one pass over the edge arena, rows by counting sort) then
   `RawProjection::finish` (sorts rows; no graph access, so the
-  bindings release the GIL); `Projection::build` does both. The transposed
+  bindings release the GIL); `Projection::build` does both.
+  `Projection::from_edges` makes a `RawProjection` from ids plus source /
+  target / weight lists instead (no graph: no handles, edges in the order
+  given; checks ids, lengths, indices, weights), and
+  `RawProjection::with_coords` attaches node coordinates (`coords`, for A*;
+  `with_graph_coords` reads them from the graph at a `Coords` path).
+  Both paths share the counting sort (`adjacency_rows`). The transposed
   adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
   lazily. New analytics algorithms take `&Projection` and dense `u32` node
-  indices.
+  indices. `set_weights(&mut self)` changes weights in place (O(changed)):
+  weighted projections keep each edge's CSR position(s) (`positions`, from
+  the `Entry` tags the sort carries; `Both`: `2k` / `2k + 1`), the
+  transposed adjacency where each `out` entry went (`Transposed::of_out`),
+  and graph projections their `EdgeIx`s in projected (slot) order
+  (`edge_index`). Anything new derived from weights must be updated there
+  too. Infinite weights mean impassable: searches (also hop counts on a
+  weighted projection) skip them, strength-style algorithms count 0
+  (`algo::passable` / `passable_at` / `strength`).
 - **batch.rs** – `shortest_paths` / `distances` on a `Projection`: many
-  queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS.
+  queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS;
+  `shortest_paths_astar` + `AStar` (metric, scale): A* reading the
+  projection's coordinates (no closed set: re-expands nodes, so admissible
+  estimates suffice; ties prefer larger g). `distances` has no A*.
 - **algo/** – analytics on a `Projection` (dense indices in, `Vec`s / groups
   out; the comment in `mod.rs` is the recipe for adding one). Tests compare
   against brute-force references (`algo::testing` graphs); Python tests in
   `tests/test_algorithms.py` compare against networkx.
   - `mod.rs`: `Undirected` (simple undirected view: sorted, deduplicated,
-    no self-loops), `groups` (largest first), `NONE`.
+    no self-loops), `groups` (largest first), `NONE`, `passable` /
+    `passable_at` / `strength` (infinite weights; rules in its comment).
   - `components.rs`: `weakly_connected_components` (union-find),
     `strongly_connected_components` (iterative Tarjan).
   - `dag.rs`: `topological_sort` (Kahn, min-heap), `find_cycle`.
@@ -299,14 +327,20 @@ Below is a quick guide to notable functions and where to find them.
   `attr_get`, `attr_set`, `toJSON`.
 - **path.rs** – `Path` (nodes and edges of a path; `Node.paths`). **observed_dictionary.rs** – `ObservedDictionary`.
 - **projection.rs** – the `Projection` class (queries and analytics
-  methods release the GIL),
+  methods release the GIL; `from_arrays` reads numpy arrays through the
+  buffer protocol, `PyBuffer`, so numpy is not a dependency),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
-  core `RawProjection`) and batch method selection shared with
-  `vertex/batch.rs`. Result conversion lives in **projection/results.rs**:
+  core `RawProjection`, with `Spec.coords`) and batch method selection
+  shared with `vertex/batch.rs` (`resolve_batch_method` with `Query` /
+  `AStarArgs` -> `BatchMethod`, `run_shortest_paths`). Result conversion lives in **projection/results.rs**:
   batch paths / distances, per-node values, embedding rows and groups /
   walks (with a shared node-id string cache).
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
-  `NodeView` / `EdgeView`.
+  `NodeView` / `EdgeView`. The class is not frozen: queries hold a shared
+  borrow (also while the GIL is released), `set_weights` takes it
+  exclusively and raises `RuntimeError` if a query is running; `vertex`
+  (the source Vertex's address) lets `edge_index` refuse other vertices'
+  edges.
 - **interrupt.rs** – Ctrl+C: `released(py, size, f)` runs GIL-free work on
   rayon's pool under a token while the caller checks signals every 20 ms
   (inline below 20,000 nodes + edges); `polling(py, f)` runs GIL-held
@@ -325,7 +359,8 @@ Below is a quick guide to notable functions and where to find them.
   first, then insert all; attribute columns; GC paused).
 - **vertex/algorithms.rs** – `expand`, `filter`, `random_walks`.
 - **vertex/pathfinding.rs** – `shortest_path` (Python options → core
-  `PathQuery`, `distances=` table heuristic), `path_methods`.
+  `PathQuery`, `distances=` table heuristic), `path_methods`, `parse_coords`
+  (the `coords` option, shared with `vertex/batch.rs`).
 - **vertex/batch.rs** – `project`, and `shortest_paths` / `distances` (a
   one-off projection of the whole graph, queries with the GIL released).
 - **vertex/index.rs** – `create_index`, `find`, `find_range`, and

@@ -139,7 +139,7 @@ m.meta["est"] = {"a": 2.0, "b": 1.0}                          # {node: estimate}
 p = m.shortest_path("a", "c", distances="est")                # estimates from vertex.meta["est"]
 ```
 
-`shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` are deprecated (DeprecationWarning): use `method=`.
+`shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. Equal-cost ties: earliest node (insertion order) walking back from the target (see Gotchas). `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` are deprecated (DeprecationWarning): use `method=`.
 
 Batches run in parallel on all cores (GIL released); unreachable pairs give `None`:
 
@@ -151,7 +151,7 @@ assert d["alice"]["acme"] == res[0]["cost"]
 assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
 ```
 
-`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"` only. Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction, coords, heuristic, heuristic_scale)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"`, plus `"astar"` for `shortest_paths` only (coords default `["x", "y"]`, every node needs them). Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
 
 Copy the graph once with `project` to run many batches (or other analytics) on it:
 
@@ -162,19 +162,55 @@ assert p.neighbors("bob", "in") == ["alice"] and p.degree("alice") == 2
 knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; undirected
 ```
 
-`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter)`:
+`project(weight=None, default_weight=None, *, direction, nodes, node_filter, edge_filter, coords)`:
 
 - Unweighted unless `weight` or `default_weight` is given.
 - `direction` `"out"`/`"in"` (reversed)/`"both"` (undirected).
 - Filters take a dict (attribute equality) or a callable (NodeView / EdgeView).
+- `coords` (`"pos"` or `["x", "y"]`) compiles node coordinates in for A*; every kept node needs numeric ones (ValueError if missing, TypeError if not numbers).
 
 `Projection` methods:
 
-- `shortest_paths(pairs, method=None, *, max_cost)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means dijkstra if the projection is weighted, else bfs.
+- `shortest_paths(pairs, method=None, *, max_cost, heuristic, heuristic_scale)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means astar if `heuristic` / `heuristic_scale` is given, dijkstra if the projection is weighted, else bfs.
+- `"astar"` (shortest_paths only; weighted projection with coords): estimate = `heuristic_scale` (default 1) x `"euclidean"` (default) / `"manhattan"` distance to the target. Same costs as dijkstra if no edge costs less than scale x the distance between its ends (grid, cost >= 1 per tile: `heuristic="manhattan"`); several times faster on grids. Works on `"in"` / `"both"` projections.
 - `neighbors(id, direction="out"|"in")`, `degree(id, direction)`.
-- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `memory_usage()`.
+- `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `coord_dim`, `memory_usage()`.
 
-Later graph changes don't affect it.
+```python
+grid = Vertex()
+for i in range(3):
+    grid.add_node(str(i), {"x": i, "y": 0})
+grid.add_edge("0", "1", {"cost": 1.0}); grid.add_edge("1", "2", {"cost": 1.0}); grid.add_edge("0", "2", {"cost": 5.0})
+gp = grid.project(weight="cost", coords=["x", "y"])
+assert gp.shortest_paths([("0", "2")], "astar", heuristic="manhattan") == [{"nodelist": ["0", "1", "2"], "cost": 2.0}]
+```
+
+Graph already in arrays? Build the projection without a Vertex (much faster, far less memory):
+
+```python
+import numpy as np
+from ironweaver import Projection
+arr = Projection.from_arrays(["a", "b", "c"], np.array([0, 1]), np.array([1, 2]), np.array([1.0, 2.0]))
+assert arr.shortest_paths([("a", "c")])[0]["cost"] == 3.0
+```
+
+`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`: edge `k` is `ids[src[k]] -> ids[dst[k]]`; int64/int32 and float64/float32 arrays (buffer protocol) or sequences. Edges keep the given order: same results as a Vertex with the same nodes and edges added in that order (ties between equal-cost paths go by node index, so edge order never changes a path). `coords` `(n, d)` are node coordinates for `"astar"`. ValueError on duplicate ids, length mismatch, out-of-range indices, negative/NaN weights.
+
+Later graph changes don't affect it. Weights (not the structure) can change in place, at a cost proportional to the edges changed (microseconds for a few edges, vs. a rebuild):
+
+```python
+arr.set_weights([1], [np.inf])                      # edge 1 (b -> c) impassable
+assert arr.shortest_paths([("a", "c")]) == [None]
+arr.set_weights(np.array([1]), np.array([0.5]))     # passable again, cheaper
+assert arr.shortest_paths([("a", "c")])[0]["cost"] == 1.5
+pw = g.project(weight="weight")
+e = g["alice"].edges[0]                             # Vertex projections: number an Edge with edge_index
+pw.set_weights([pw.edge_index(e)], [7.0])
+assert pw.shortest_paths([("alice", e.to_node.id)])[0]["cost"] == 7.0
+```
+
+- `set_weights(edges, weights)`: edge numbers in projected order: `from_arrays` order, or for `Vertex.project` the Vertex's edge storage order among the projected edges (`edge_index(edge)` gives it; weighted Vertex projections only). One number per edge in any direction (a `"both"` projection updates both ends). Last weight wins for repeats. Results then equal a projection rebuilt with the new weights. ValueError (nothing changed) if unweighted, lengths differ, index out of range, weight negative/NaN; RuntimeError if a query runs on it in another thread.
+- `inf` = impassable: skipped by every search, weighted or hop-count (shortest_paths/distances with any method, bfs_levels, k_shortest_paths, betweenness/closeness/harmonic, node2vec walks) and by minimum_spanning_tree; weight 0 in pagerank/fastrp/leiden/modularity. Structure-only methods (components, topological_sort, find_cycle, degree, triangles, clustering, core_number, label_propagation, similarity, neighbors/degree) still count the edge.
 
 ## Analytics (on a Projection)
 
@@ -332,7 +368,7 @@ assert [e.to_node.id for e in lg["alice"].edges] == ["bob"]
 - `Node` / `Edge` objects are handles into their `vertex`: compare them with `==`, not `is` (`g["a"] == g["a"]`, but not necessarily `g["a"] is g["a"]`). Edges only come from `add_edge`; `Edge(...)` raises `TypeError`. `remove_node` returns a detached copy; old handles to it raise `RuntimeError`.
 - Don't change the graph (add/remove nodes or edges, set attributes) from inside a traversal `filter` callable: the graph is in use and the change can raise `RuntimeError`.
 - Ordered output is in `result.meta["nodelist"]`; `keys()` is graph order (insertion order until nodes are removed), not visit order.
-- With several equally short paths, `shortest_path` returns one of them (unspecified which).
+- Equal-cost paths: the choice is fixed by node order alone (Vertex: insertion order; Projection: index), never by edge order, process or thread count: walking back from the target, each step goes to the earliest neighbour through which a cheapest route arrives. Exact for bfs/dijkstra in `shortest_path`, `shortest_paths` (Vertex and Projection) and the first `k_shortest_paths` path; astar applies it to the nodes it expands (may differ from dijkstra, but fixed). Zero-weight edges re-link only if strictly cheaper. For a canonical choice, add nodes (or order `from_arrays` ids) canonically; edge order never matters. `Vertex(shuffle_seed=...)` renumbers `project` / `Vertex.shortest_paths`, not `shortest_path`.
 - `Vertex.load_from_json(s)` treats a string starting with `{` as JSON, anything else as a file path.
 - Ctrl+C stops long computations (analytics, batch queries, `match`, `Node.paths`, searches, walks) with `KeyboardInterrupt`; the graph stays usable. Projections under 20,000 nodes + edges aren't checked (they finish quickly).
 

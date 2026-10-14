@@ -51,20 +51,49 @@ def test_batch_method_selection(graph, kind, method, weighted, cost):
 
 
 @pytest.mark.parametrize("kind", QUERIES)
-@pytest.mark.parametrize("method", ["astar", "nope", ""])
+@pytest.mark.parametrize("method", ["nope", ""])
 def test_batch_method_errors(graph, kind, method):
     with pytest.raises(ValueError) as exc:
         query(graph, kind, method)
-    if method == "astar":
-        expected = "method 'astar' is not available for batch queries; use 'bfs' or 'dijkstra'"
+    assert str(exc.value) == f"unknown path method '{method}'; available: 'bfs', 'dijkstra', 'astar'"
+
+
+ASTAR_ERRORS = {
+    # The graph's nodes have no x / y attributes
+    "vertex_paths": "node 'a' has no coordinates at coords=['x', 'y']",
+    "vertex_distances": "method 'astar' needs a target per query",
+    "projection_paths": "weighted queries need a projection with edge weights",
+    "projection_distances": "method 'astar' needs a target per query",
+    "projection_k_paths": "method 'astar' is not available here; use 'bfs' or 'dijkstra'",
+}
+
+
+@pytest.mark.parametrize("kind", QUERIES)
+def test_astar_errors(graph, kind):
+    with pytest.raises(ValueError) as exc:
+        query(graph, kind, "astar")
+    assert str(exc.value).startswith(ASTAR_ERRORS[kind])
+
+
+@pytest.mark.parametrize("kind", ["vertex_paths", "projection_paths"])
+@pytest.mark.parametrize("method", [None, "astar"])
+def test_astar_selection(graph, kind, method):
+    # Equal coordinates: a zero estimate, so A* returns Dijkstra's cost
+    for node in ["a", "b", "c"]:
+        graph.get_node(node).attr_set("pos", [0.0, 0.0])
+    if kind == "vertex_paths":
+        cost = graph.shortest_paths([("a", "c")], method, coords="pos", heuristic="manhattan")[0]["cost"]
     else:
-        expected = f"unknown path method '{method}'; available: 'bfs', 'dijkstra', 'astar'"
-    assert str(exc.value) == expected
+        p = graph.project(weight="weight", coords="pos")
+        cost = p.shortest_paths([("a", "c")], method, heuristic="manhattan")[0]["cost"]
+    assert cost == 10.0
 
 
 @pytest.mark.parametrize("kind", QUERIES[:-1])
 @pytest.mark.parametrize("method", ["astar", "nope"])
 def test_method_errors_precede_bad_limits_and_missing_nodes(graph, kind, method):
+    if method == "astar" and kind.endswith("paths"):
+        return  # a valid method there
     with pytest.raises(ValueError) as exc:
         query(graph, kind, method, source="missing", max_cost=-1)
     prefix = f"method '{method}'" if method == "astar" else f"unknown path method '{method}'"
