@@ -5,7 +5,9 @@
 // node, found by a search that may not reuse the earlier path's prefix nodes
 // nor the edges earlier paths took from the same prefix. Parallel edges
 // count as one edge with the lightest weight; impassable (infinite-weight)
-// edges are skipped.
+// edges are skipped. Each search breaks ties like `batch::shortest_paths`
+// (lowest index first, and the lowest predecessor among equal-cost routes),
+// so the first path is the one `shortest_paths` returns.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
@@ -59,13 +61,13 @@ impl Spur {
         let mut heap = BinaryHeap::new();
         let mut queue = VecDeque::new();
         if weighted {
-            heap.push((Reverse(0f64.to_bits()), s));
+            heap.push(Reverse((0f64.to_bits(), s)));
         } else {
             queue.push_back(s);
         }
         loop {
             let u = if weighted {
-                let Some((Reverse(bits), u)) = heap.pop() else { break };
+                let Some(Reverse((bits, u))) = heap.pop() else { break };
                 if f64::from_bits(bits) > self.dist[u as usize] {
                     continue;
                 }
@@ -85,14 +87,21 @@ impl Spur {
                     continue;
                 }
                 let nd = du + weights.filter(|_| weighted).map_or(1.0, |w| w[i]);
-                if nd < self.dist[v as usize] {
-                    if self.dist[v as usize].is_infinite() {
+                let dv = self.dist[v as usize];
+                if nd == dv && nd > du {
+                    // Same cost over a positive weight: the lower predecessor
+                    let parent = self.parent[v as usize];
+                    if u < parent && parent != u32::MAX {
+                        self.parent[v as usize] = u;
+                    }
+                } else if nd < dv {
+                    if dv.is_infinite() {
                         self.touched.push(v);
                     }
                     self.dist[v as usize] = nd;
                     self.parent[v as usize] = u;
                     if weighted {
-                        heap.push((Reverse(nd.to_bits()), v));
+                        heap.push(Reverse((nd.to_bits(), v)));
                     } else {
                         queue.push_back(v);
                     }

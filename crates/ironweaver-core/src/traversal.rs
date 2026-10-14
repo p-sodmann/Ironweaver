@@ -330,9 +330,9 @@ fn expand_metered<N, E, X>(
     Ok(order)
 }
 
-/// Parent links of one side of a bidirectional search (`None` for the side's
-/// starting node).
-type Parents = IxMap<NodeIx, Option<NodeIx>>;
+/// Depth of each node reached by one side of a bidirectional search (0 for
+/// the side's starting node).
+type Depths = IxMap<NodeIx, usize>;
 
 /// Shortest path (fewest edges) from `source` to `target` following edges in
 /// `direction`, using only edges for which `edge_ok` returns true. Returns
@@ -342,8 +342,15 @@ type Parents = IxMap<NodeIx, Option<NodeIx>>;
 /// Grows one frontier from each end and stops when they meet; on graphs
 /// whose BFS frontier fans out quickly this explores roughly the square root
 /// of what a one-sided search does. Each round expands one complete level of
-/// the smaller frontier, so the first meeting is a shortest path. Among
-/// several shortest paths the one returned is not specified.
+/// the smaller frontier, so the first meeting gives the length of a
+/// shortest path.
+///
+/// Among several shortest paths the one returned is fixed: walking back
+/// from the target, each step goes to the neighbour with the lowest
+/// [`NodeIx`] (slot) among those one edge closer to the source on a
+/// shortest path. That is the path a one-sided BFS (or Dijkstra with unit
+/// weights) picks under the same rule (see [`find_path`](crate::pathfinding::find_path)); it does
+/// not depend on the order of the edges, nor on how the frontiers met.
 pub fn bidirectional_bfs<N, E, X>(
     g: &Graph<N, E>,
     source: NodeIx,
@@ -390,10 +397,10 @@ pub(crate) fn bidirectional_metered<N, E, X>(
     if source == target {
         return Ok(meter.produce().then(|| vec![source]));
     }
-    let mut fwd = Parents::default();
-    fwd.insert(source, None);
-    let mut bwd = Parents::default();
-    bwd.insert(target, None);
+    let mut fwd = Depths::default();
+    fwd.insert(source, 0);
+    let mut bwd = Depths::default();
+    bwd.insert(target, 0);
     let mut fwd_frontier = vec![source];
     let mut bwd_frontier = vec![target];
     let (mut fwd_depth, mut bwd_depth) = (0usize, 0usize);
@@ -409,14 +416,14 @@ pub(crate) fn bidirectional_metered<N, E, X>(
         }
 
         let forward = fwd_frontier.len() <= bwd_frontier.len();
-        let (frontier, this, other, dir) = if forward {
-            (&mut fwd_frontier, &mut fwd, &bwd, direction)
+        let (frontier, this, other, dir, depth) = if forward {
+            (&fwd_frontier, &mut fwd, &bwd, direction, fwd_depth)
         } else {
-            (&mut bwd_frontier, &mut bwd, &fwd, direction.reversed())
+            (&bwd_frontier, &mut bwd, &fwd, direction.reversed(), bwd_depth)
         };
 
         let mut next = Vec::new();
-        let mut meeting = None;
+        let mut met = false;
         'level: for &ix in frontier.iter() {
             if !meter.enter() {
                 return Ok(None);
@@ -428,43 +435,138 @@ pub(crate) fn bidirectional_metered<N, E, X>(
                 if this.contains_key(&neighbor) || !edge_ok(e, g.edge_ref(e))? {
                     continue;
                 }
-                this.insert(neighbor, Some(ix));
                 if other.contains_key(&neighbor) {
-                    meeting = Some(neighbor);
+                    met = true;
                     break 'level;
                 }
+                this.insert(neighbor, depth + 1);
                 next.push(neighbor);
             }
         }
 
-        if let Some(m) = meeting {
-            return Ok(meter.produce().then(|| reconstruct(&fwd, &bwd, m)));
+        if met {
+            let ends = Ends { source, target, a: fwd_depth, b: bwd_depth, fwd: &fwd, bwd: &bwd };
+            let path = ends.canonical_path(g, &fwd_frontier, &bwd_frontier, direction, meter, &mut edge_ok)?;
+            return Ok(path.filter(|_| meter.produce()));
         }
-        *frontier = next;
         if forward {
+            fwd_frontier = next;
             fwd_depth += 1;
         } else {
+            bwd_frontier = next;
             bwd_depth += 1;
         }
     }
     Ok(None)
 }
 
-/// Path source -> meeting -> target from the two parent maps.
-fn reconstruct(fwd: &Parents, bwd: &Parents, meeting: NodeIx) -> Vec<NodeIx> {
-    let mut path = Vec::new();
-    let mut k = Some(meeting);
-    while let Some(cur) = k {
-        path.push(cur);
-        k = fwd[&cur];
+/// The state of a bidirectional search whose frontiers just met: `fwd`
+/// holds every node within `a` edges of the source (and maybe some at
+/// `a + 1`), `bwd` every node within `b` edges of the target (and maybe some
+/// at `b + 1`). Shortest paths have `a + b + 1` edges and cross from depth
+/// `a` of `fwd` to depth `b` of `bwd`.
+struct Ends<'a> {
+    source: NodeIx,
+    target: NodeIx,
+    a: usize,
+    b: usize,
+    fwd: &'a Depths,
+    bwd: &'a Depths,
+}
+
+impl Ends<'_> {
+    /// The shortest path that walks back from the target to the lowest
+    /// node (by `NodeIx`) one step closer to the source each time. Edges
+    /// looked at count as examined; `None` if the budget runs out or the
+    /// search is cancelled (or if `edge_ok` contradicts itself).
+    fn canonical_path<N, E, X>(
+        &self,
+        g: &Graph<N, E>,
+        fwd_frontier: &[NodeIx],
+        bwd_frontier: &[NodeIx],
+        direction: Direction,
+        meter: &mut Meter,
+        edge_ok: &mut impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+    ) -> Result<Option<Vec<NodeIx>>, X> {
+        let (a, b, len) = (self.a, self.b, self.a + self.b + 1);
+        let stop = crate::cancel::stop();
+        // The target's side of every shortest path: nodes at depth b of bwd
+        // linked from depth a of fwd (found from the smaller frontier), then
+        // layer by layer the nodes they lead to one step closer to the target.
+        let mut on_path: IxSet<NodeIx> = IxSet::default();
+        let mut layer = Vec::new();
+        if fwd_frontier.len() <= bwd_frontier.len() {
+            for &x in fwd_frontier {
+                for (e, y) in g.neighbors(x, direction) {
+                    if stop.poll() || !meter.examine() {
+                        return Ok(None);
+                    }
+                    if self.bwd.get(&y) == Some(&b) && !on_path.contains(&y) && edge_ok(e, g.edge_ref(e))? {
+                        on_path.insert(y);
+                        layer.push(y);
+                    }
+                }
+            }
+        } else {
+            for &y in bwd_frontier {
+                for (e, x) in g.neighbors(y, direction.reversed()) {
+                    if stop.poll() || !meter.examine() {
+                        return Ok(None);
+                    }
+                    if self.fwd.get(&x) == Some(&a) && edge_ok(e, g.edge_ref(e))? {
+                        on_path.insert(y);
+                        layer.push(y);
+                        break;
+                    }
+                }
+            }
+        }
+        for k in (1..=b).rev() {
+            let mut next = Vec::new();
+            for &y in &layer {
+                for (e, z) in g.neighbors(y, direction) {
+                    if stop.poll() || !meter.examine() {
+                        return Ok(None);
+                    }
+                    if self.bwd.get(&z) == Some(&(k - 1)) && !on_path.contains(&z) && edge_ok(e, g.edge_ref(e))? {
+                        on_path.insert(z);
+                        next.push(z);
+                    }
+                }
+            }
+            layer = next;
+        }
+
+        // Walk back from the target: the node at distance `pos` from the
+        // source steps to the lowest neighbour at distance `pos - 1`.
+        let mut path = vec![self.target];
+        let mut cur = self.target;
+        for want in (0..len).rev() {
+            let mut best: Option<NodeIx> = None;
+            for (e, u) in g.neighbors(cur, direction.reversed()) {
+                if stop.poll() || !meter.examine() {
+                    return Ok(None);
+                }
+                if best.is_some_and(|best| u >= best) {
+                    continue;
+                }
+                let fits = if want > a {
+                    self.bwd.get(&u) == Some(&(len - want)) && on_path.contains(&u)
+                } else {
+                    self.fwd.get(&u) == Some(&want)
+                };
+                if fits && edge_ok(e, g.edge_ref(e))? {
+                    best = Some(u);
+                }
+            }
+            // Only an edge filter that changes its answers leaves no step
+            let Some(u) = best else { return Ok(None) };
+            path.push(u);
+            cur = u;
+        }
+        path.reverse();
+        Ok((path[0] == self.source).then_some(path))
     }
-    path.reverse();
-    let mut k = bwd[&meeting];
-    while let Some(cur) = k {
-        path.push(cur);
-        k = bwd[&cur];
-    }
-    path
 }
 
 #[cfg(test)]

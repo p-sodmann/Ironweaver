@@ -6,6 +6,17 @@
 // when a cheaper route to it turns up, so the path is optimal for any
 // admissible heuristic (one that never overestimates), consistent or not.
 //
+// Ties are decided by node handle (`NodeIx`, i.e. slot), never by the
+// order edges were added or pushed: the open list is ordered by lowest f,
+// then highest g, then lowest handle, and a node reached again at exactly
+// its current g takes the new predecessor if that one has a lower handle
+// (over an edge of positive weight: re-parenting over a zero-weight edge
+// could close a cycle, so there the first route found stays). For Dijkstra (h = 0) and
+// positive weights this gives: walking back from the target, each step goes
+// to the lowest neighbour through which a cheapest route arrives. A* applies
+// the same rule to the nodes it expands, so among equal-cost paths it may
+// pick another one than Dijkstra, but always the same one.
+//
 // Work is counted on a `Meter`: each node settled is visited, each edge
 // relaxed examined (before its cost and the heuristic are computed), and
 // cancellation is polled per edge.
@@ -47,8 +58,9 @@ impl PartialOrd for State {
 impl Ord for State {
     fn cmp(&self, other: &Self) -> Ordering {
         // BinaryHeap is a max-heap: smallest f first, then largest g (closer
-        // to the target) to break ties.
-        other.f.total_cmp(&self.f).then(self.g.total_cmp(&other.g))
+        // to the target), then the lowest node, so the order of pops never
+        // depends on the order of pushes.
+        other.f.total_cmp(&self.f).then(self.g.total_cmp(&other.g)).then(other.node.cmp(&self.node))
     }
 }
 
@@ -114,8 +126,12 @@ where
             }
             let ng = g + cost.cost::<E, X>(&graph.edge_ref(e).data)?;
             let slot = match info.entry(next) {
-                Entry::Occupied(o) => {
-                    if ng >= o.get().g {
+                Entry::Occupied(mut o) => {
+                    let known = o.get_mut();
+                    if ng == known.g && ng > g && known.parent.is_some_and(|p| current < p) {
+                        known.parent = Some(current); // same cost, lower predecessor
+                    }
+                    if ng >= known.g {
                         continue;
                     }
                     o.into_mut()

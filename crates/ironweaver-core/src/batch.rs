@@ -16,6 +16,17 @@
 // in f = g + h prefer the larger g (the node closer to the target), which
 // keeps grids with many equal-cost paths from being explored in full.
 //
+// Ties between equal-cost paths are decided by node index, the same way
+// for every method, query and thread count: the heaps pop equal keys lowest
+// index first (A*: lowest f, then highest g, then lowest index), and a node
+// reached again at exactly its current cost takes the new predecessor if
+// it has a lower index (over an edge of positive weight: re-parenting over
+// a zero-weight edge could close a cycle, so there the first route stays). Walking back from the target, each step of a BFS
+// or Dijkstra path (positive weights) therefore goes to the lowest-indexed
+// neighbour through which a cheapest route arrives. BFS stops when the
+// target is found, but first checks the rest of that level for a lower
+// predecessor (a binary search in each sorted row).
+//
 // Edges of infinite weight are impassable (see `Projection::set_weights`):
 // Dijkstra and A* never relax them (an infinite cost never improves on
 // "unreached"), and BFS on a weighted projection skips them too.
@@ -102,10 +113,11 @@ struct Workspace {
     dist: Vec<f64>,
     parent: Vec<u32>,
     touched: Vec<u32>,
-    heap: BinaryHeap<(Reverse<u64>, u32)>,
+    /// Dijkstra's heap, lowest cost then lowest index first.
+    heap: BinaryHeap<Reverse<(u64, u32)>>,
     queue: VecDeque<u32>,
-    /// A*'s open list, ordered by lowest f, then highest g.
-    open: BinaryHeap<(Reverse<u64>, u64, u32)>,
+    /// A*'s open list, ordered by lowest f, then highest g, then lowest index.
+    open: BinaryHeap<(Reverse<u64>, u64, Reverse<u32>)>,
 }
 
 impl Workspace {
@@ -139,6 +151,18 @@ impl Workspace {
         self.parent[u as usize] = parent;
     }
 
+    /// `u` reaches `v` at exactly its current cost, over an edge of
+    /// positive weight: keep the lower of the two predecessors. (The source
+    /// and unreached nodes have no predecessor and keep none: an impassable
+    /// edge "reaches" an unreached node at infinite cost.)
+    #[inline]
+    fn tie(&mut self, u: u32, v: u32) {
+        let parent = self.parent[v as usize];
+        if u < parent && parent != NONE {
+            self.parent[v as usize] = u;
+        }
+    }
+
     /// Search from `source` until `target` is settled (or everything within
     /// `max_cost` is, without a target): Dijkstra if `weighted`, BFS
     /// otherwise. Returns the number of nodes settled. Afterwards `touched`
@@ -160,8 +184,8 @@ impl Workspace {
             // like the values themselves.
             true => {
                 let mut settled = 0;
-                self.heap.push((Reverse(0f64.to_bits()), source));
-                while let Some((Reverse(bits), u)) = self.heap.pop() {
+                self.heap.push(Reverse((0f64.to_bits(), source)));
+                while let Some(Reverse((bits, u))) = self.heap.pop() {
                     let du = f64::from_bits(bits);
                     if du > self.dist[u as usize] {
                         continue; // stale entry
@@ -173,9 +197,12 @@ impl Workspace {
                     let weights = p.out_weights(u).expect("checked: the projection is weighted");
                     for (&v, &w) in p.out_neighbors(u).iter().zip(weights) {
                         let nd = du + w;
-                        if nd < self.dist[v as usize] && max_cost.is_none_or(|limit| nd <= limit) {
+                        let dv = self.dist[v as usize];
+                        if nd < dv && max_cost.is_none_or(|limit| nd <= limit) {
                             self.reach(v, nd, u);
-                            self.heap.push((Reverse(nd.to_bits()), v));
+                            self.heap.push(Reverse((nd.to_bits(), v)));
+                        } else if nd == dv && w > 0.0 {
+                            self.tie(u, v);
                         }
                     }
                 }
@@ -192,16 +219,39 @@ impl Workspace {
                     }
                     let weights = p.out_weights(u);
                     for (i, &v) in p.out_neighbors(u).iter().enumerate() {
-                        if passable_at(weights, i) && self.dist[v as usize].is_infinite() {
+                        if !passable_at(weights, i) {
+                            continue;
+                        }
+                        // Distances are whole numbers or infinite: compare bits
+                        let dv = self.dist[v as usize].to_bits();
+                        if dv == f64::INFINITY.to_bits() {
                             self.reach(v, next, u);
                             if Some(v) == target {
+                                self.lowest_parent_in_level(p, v);
                                 return self.touched.len();
                             }
                             self.queue.push_back(v);
+                        } else if dv == next.to_bits() && u < self.parent[v as usize] {
+                            // v (not the source) has a predecessor: keep the lower
+                            self.parent[v as usize] = u;
                         }
                     }
                 }
                 self.touched.len()
+            }
+        }
+    }
+
+    /// BFS just found `target`: the rest of its predecessor's level (at the
+    /// front of the queue) may hold a lower predecessor.
+    fn lowest_parent_in_level(&mut self, p: &Projection, target: u32) {
+        let level = self.dist[target as usize] - 1.0;
+        for &u in &self.queue {
+            if self.dist[u as usize] != level {
+                break;
+            }
+            if u < self.parent[target as usize] && has_passable_edge(p, u, target) {
+                self.parent[target as usize] = u;
             }
         }
     }
@@ -227,10 +277,10 @@ impl Workspace {
         };
         let mut expanded = 0;
         let hs = h(source);
-        self.open.push((Reverse(hs.to_bits()), 0f64.to_bits(), source));
+        self.open.push((Reverse(hs.to_bits()), 0f64.to_bits(), Reverse(source)));
         // f and g are non-negative, so their bit patterns order like the
         // values themselves.
-        while let Some((_, g_bits, u)) = self.open.pop() {
+        while let Some((_, g_bits, Reverse(u))) = self.open.pop() {
             let du = f64::from_bits(g_bits);
             if du > self.dist[u as usize] {
                 continue; // stale entry
@@ -242,7 +292,10 @@ impl Workspace {
             let weights = p.out_weights(u).expect("checked: the projection is weighted");
             for (&v, &w) in p.out_neighbors(u).iter().zip(weights) {
                 let nd = du + w;
-                if nd < self.dist[v as usize] {
+                let dv = self.dist[v as usize];
+                if nd == dv && w > 0.0 {
+                    self.tie(u, v);
+                } else if nd < dv {
                     let f = nd + h(v);
                     // The estimate never exceeds the rest of the path, so
                     // f > max_cost rules v out (h = 0 at the target).
@@ -250,7 +303,7 @@ impl Workspace {
                         continue;
                     }
                     self.reach(v, nd, u);
-                    self.open.push((Reverse(f.to_bits()), nd.to_bits(), v));
+                    self.open.push((Reverse(f.to_bits()), nd.to_bits(), Reverse(v)));
                 }
             }
         }
@@ -269,10 +322,24 @@ impl Workspace {
     }
 }
 
+/// Whether `u` has a passable edge to `v` (rows are sorted).
+fn has_passable_edge(p: &Projection, u: u32, v: u32) -> bool {
+    let row = p.out_neighbors(u);
+    let first = row.partition_point(|&x| x < v);
+    let last = first + row[first..].partition_point(|&x| x == v);
+    (first..last).any(|i| passable_at(p.out_weights(u), i))
+}
+
 /// Shortest path for every `(source, target)` pair, computed in parallel:
 /// Dijkstra over the projection's weights if `weighted`, BFS (edge count)
 /// otherwise. `None` for pairs whose target is not reachable within
 /// `max_cost` (for BFS: edges). Results are in the order of `pairs`.
+///
+/// Among several cheapest paths, walking back from the target, each step
+/// goes to the lowest-indexed node through which a cheapest route arrives
+/// (over a zero-weight edge, only if strictly cheaper than the route found
+/// first). The result does not depend on the order of the edges or on the
+/// number of threads.
 pub fn shortest_paths(
     p: &Projection,
     pairs: &[(u32, u32)],
@@ -308,7 +375,10 @@ pub fn shortest_paths(
 /// Shortest path for every `(source, target)` pair by A*, in parallel,
 /// over the projection's weights, guided by its node coordinates (see
 /// [`AStar`]). Results are like [`shortest_paths`]'; with an admissible
-/// estimate the costs are the same, with fewer nodes settled.
+/// estimate the costs are the same, with fewer nodes settled. Ties follow
+/// the same rule among the nodes A* expands (by lowest f, then highest g,
+/// then lowest index), so among equal-cost paths A* may pick another one
+/// than Dijkstra, but always the same one.
 pub fn shortest_paths_astar(
     p: &Projection,
     pairs: &[(u32, u32)],

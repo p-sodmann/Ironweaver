@@ -187,7 +187,7 @@ assert [r["nodelist"] for r in routes] == [["a", "c", "d", "e"], ["a", "b", "c",
 assert [r["cost"] for r in routes] == [3, 4]
 ```
 
-`k_shortest_paths(source, target, k, method=None)` gives up to `k` paths without repeated nodes, cheapest first, by Yen's algorithm. Each result is `{"nodelist": [...], "cost": c}`, as for `shortest_paths`. `method` is `"dijkstra"` (weights) or `"bfs"` (edge count); by default, dijkstra on a weighted projection.
+`k_shortest_paths(source, target, k, method=None)` gives up to `k` paths without repeated nodes, cheapest first, by Yen's algorithm. Each result is `{"nodelist": [...], "cost": c}`, as for `shortest_paths`. Each search breaks ties between equal-cost paths like `shortest_paths` (by node index, see [Equal-cost paths](traversal.md#equal-cost-paths)): the first path is the one `shortest_paths` returns, and the list is the same every time. `method` is `"dijkstra"` (weights) or `"bfs"` (edge count); by default, dijkstra on a weighted projection.
 
 ## Embeddings
 

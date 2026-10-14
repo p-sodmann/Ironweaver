@@ -104,7 +104,7 @@ One method, several algorithms. `method` picks one; `Vertex.path_methods()` list
 
 With `method=None` it picks `"astar"` if `heuristic`, `coords` or `distances` is given, `"dijkstra"` if `weight` is given, and `"bfs"` otherwise. Options shared by the weighted methods: `weight` (edge attribute, default `"weight"`), `default_weight` (cost of edges without it, default 1.0), `max_cost`, and `direction` (`"out"`, `"in"`, `"both"`). An option a method doesn't accept raises `TypeError`.
 
-The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, one of them is returned.
+The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, the choice is fixed (see [Equal-cost paths](#equal-cost-paths)).
 
 ```python
 path = v.shortest_path("root", "target")                     # bfs: fewest edges
@@ -115,6 +115,33 @@ path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth
 ```
 
 The older `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` still work but are deprecated (they emit a `DeprecationWarning`): use `method="bfs"` and `method="dijkstra"`.
+
+#### Equal-cost paths
+
+When several paths cost the same, every path method picks the same one each time: the choice depends only on the graph (nodes, edges, weights) and the node order, not on the order in which edges were added, the process (hash seeds) or the number of threads. A simulation that hashes or replays paths can rely on it.
+
+**The rule:** walking back from the target, each step goes to the earliest neighbour, in node order, through which a cheapest route arrives.
+
+- **Node order** is insertion order on a `Vertex` (the order of `keys()`; a node added after a removal can take the removed node's place) and the index (the position in `ids()`) on a `Projection`. `Vertex.project` numbers nodes in the Vertex's order, so `shortest_path`, `shortest_paths` and `project(...).shortest_paths` agree.
+- `"bfs"` follows the rule with every edge counting 1, `"dijkstra"` with the weights. `k_shortest_paths` searches the same way: its first path is the one `shortest_paths` returns.
+- `"astar"` applies the rule to the nodes it expands, in order of estimated total cost, then larger cost so far, then node order. It doesn't expand every node, so among equal-cost paths it can pick another one than `"dijkstra"`, but always the same one, and the same on a Vertex and on a Projection with the same coordinates and heuristic.
+- Over a zero-weight edge, a route only replaces the one found first if it is strictly cheaper (re-linking at equal cost could close a cycle). Which route comes first is still fixed: nodes are settled by cost, ties in node order.
+- Costs are compared exactly as computed (floating-point sums along the path), so two routes whose sums differ in the last bit are not tied.
+- For a result that also doesn't depend on the order nodes were added, add them in a canonical order (for example sorted by id), or pass `ids` to `Projection.from_arrays` in that order; the order of the edges never matters.
+- `Vertex(shuffle_seed=...)` doesn't change `shortest_path` (node order stays insertion order), but `project`, and so `Vertex.shortest_paths`, number the nodes in the shuffled order, so their ties can go another way.
+
+```python
+for edges in ([("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")],
+              [("c", "d"), ("a", "c"), ("b", "d"), ("a", "b")]):   # any edge order
+    sq = Vertex()
+    for n in ["a", "b", "c", "d"]:          # b before c: b wins the tie
+        sq.add_node(n)
+    for s, t in edges:
+        sq.add_edge(s, t, {"weight": 1.0})
+    assert sq.shortest_path("a", "d").meta["nodelist"] == ["a", "b", "d"]
+    assert sq.shortest_path("a", "d", weight="weight").meta["nodelist"] == ["a", "b", "d"]
+    assert sq.shortest_paths([("a", "d")])[0]["nodelist"] == ["a", "b", "d"]
+```
 
 #### A* — `method="astar"`
 
@@ -178,7 +205,7 @@ assert set(d["root"]) == {"root", "a", "b"}            # {source: {node: cost}}
 assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
 ```
 
-Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `shortest_paths` also takes `"astar"`, with `coords` (as in `shortest_path`; `["x", "y"]` by default), `heuristic` and `heuristic_scale` (see [A* on a projection](#a-on-a-projection)); every node needs coordinates. `distances` has no `"astar"`: an estimate towards one target does not help a search to every node. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+Paths are those `shortest_path` returns, ties included (see [Equal-cost paths](#equal-cost-paths)), whatever the number of threads. Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `shortest_paths` also takes `"astar"`, with `coords` (as in `shortest_path`; `["x", "y"]` by default), `heuristic` and `heuristic_scale` (see [A* on a projection](#a-on-a-projection)); every node needs coordinates. `distances` has no `"astar"`: an estimate towards one target does not help a search to every node. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
 
 ### Projections — `vertex.project(...)`
 
@@ -262,7 +289,7 @@ assert undirected.neighbors("d") == ["b", "c"]
 `Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`:
 
 - Node `i` is `ids[i]` (ids must be distinct). Edge `k` goes from `ids[src[k]]` to `ids[dst[k]]` with weight `weight[k]`; without `weight` the projection is unweighted.
-- Edges keep the order given, so the result is exactly what `project(weight=..., direction=...)` gives on a Vertex with the same nodes and edges added in the same order (parallel edges and ties included). Sort the edges to make tie-breaking canonical.
+- Edges keep the order given, so the result is exactly what `project(weight=..., direction=...)` gives on a Vertex with the same nodes and edges added in the same order. Equal-cost paths are chosen by node index (see [Equal-cost paths](#equal-cost-paths)), so the order of the edges doesn't change any path; order `ids` canonically for a canonical choice.
 - `src` / `dst` are 1-D int64 or int32 numpy arrays, `weight` float64 or float32 (any object with the buffer protocol; read without a Python call per item), or plain sequences. numpy itself is not required.
 - `coords` (an `(n, d)` array or `n` rows of `d` numbers) are node coordinates, for [A*](#a-on-a-projection).
 - Raises `ValueError` for lists of different lengths, indices out of range, negative or NaN weights (as on Vertex edges), duplicate ids or coords that are not finite or not one row per node.

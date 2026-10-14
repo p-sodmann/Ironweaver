@@ -397,7 +397,11 @@ class Vertex:
         coords: str | list[str] | None = ...,
         distances: str | None = ...,
     ) -> Vertex:
-        """Shortest path with method "bfs", "dijkstra" or "astar"; see ``path_methods()``."""
+        """Shortest path with method "bfs", "dijkstra" or "astar"; see ``path_methods()``.
+
+        Equal-cost ties go by node order (insertion order), never edge order:
+        walking back from the target, the earliest neighbour on a cheapest route.
+        """
         ...
     @staticmethod
     def path_methods() -> dict[str, str]: ...

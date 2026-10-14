@@ -403,8 +403,11 @@ These behaviours surprise people (and LLMs) most often:
 - **Ordered results live in `meta`.** Traversal order and paths are in
   `result.meta["nodelist"]`; `result.keys()` is graph order (insertion order
   until nodes are removed), not visit order.
-- **Shortest-path ties.** When several shortest paths exist,
-  `shortest_path` returns one of them; which one is not specified.
+- **Shortest-path ties.** When several shortest paths exist, the choice is
+  fixed by node order (insertion order; the index on a `Projection`), never
+  by edge order, process or thread count: walking back from the target, each
+  step goes to the earliest neighbour on a cheapest route. See
+  [Equal-cost paths](docs/traversal.md#equal-cost-paths).
 - **`Vertex.load_from_json(text)`** treats a string starting with `{` as JSON
   and any other string as a file path.
 

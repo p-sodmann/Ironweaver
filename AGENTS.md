@@ -164,8 +164,18 @@ Below is a quick guide to notable functions and where to find them.
   reader relies on those limits and on rejecting unknown fields.
 - **traversal.rs** – `dfs`, `bfs`, `expand` (multi-source BFS), their
   `*_limited` variants under a `Budget`, `bidirectional_bfs` (used by the
-  `bfs` path method and `Node.bfs_search`).
+  `bfs` path method and `Node.bfs_search`; after the frontiers meet it
+  picks the canonical path, see below).
 - **pathfinding/** (everything behind `Vertex.shortest_path`)
+  - Ties between equal-cost paths (#116, documented on `find_path` and in
+    docs/traversal.md "Equal-cost paths"): walking back from the target,
+    each step goes to the lowest node (`NodeIx` / dense index) through
+    which a cheapest route arrives; never decided by edge or push order or
+    threads. Heaps order equal keys by node; a node reached again at its
+    current cost over a positive-weight edge takes the lower predecessor.
+    Every path search (`best_first.rs`, `bidirectional_bfs`, `batch.rs`,
+    `algo/ksp.rs`) must keep this; `tests/tie_break.rs` (core) and
+    `tests/test_tie_break.py` (processes, threads, edge orders) check it.
   - `mod.rs`: `find_path` entry point, `PathMethod` + the `METHODS`
     registry, `resolve` / `check_options` / `edge_cost` / `check_max_cost`,
     `PathQuery`, `PathResult`, `not_reachable`, `find_path_limited` (a

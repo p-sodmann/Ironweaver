@@ -546,6 +546,14 @@ class Projection:
         and costs of at least 1); a larger scale settles fewer nodes but may
         return dearer paths.
 
+        Equal-cost paths: walking back from the target, each step goes to
+        the neighbour with the lowest index (position in ``ids()``) through
+        which a cheapest route arrives, so the result does not depend on the
+        order of the edges (``from_arrays``) or on the number of threads.
+        "astar" applies this to the nodes it expands (ordered by estimated
+        total, then larger cost so far, then index): it may pick another of
+        several equal-cost paths than "dijkstra", but always the same one.
+
         Raises ValueError for an unknown method or heuristic, a negative or
         non-finite *heuristic_scale*, A* options with another method, or
         "astar" on a projection without weights or coordinates.
@@ -704,7 +712,12 @@ class Projection:
         k: int,
         method: Literal["bfs", "dijkstra"] | None = ...,
     ) -> list[dict[str, Any]]:
-        """Up to ``k`` shortest loopless paths, cheapest first (Yen)."""
+        """Up to ``k`` shortest loopless paths, cheapest first (Yen).
+
+        Each search breaks ties between equal-cost paths like
+        :meth:`shortest_paths` (by node index), so the first path is the one
+        ``shortest_paths`` returns and the list is the same every time.
+        """
         ...
 
 # ---------------------------------------------------------------------------
@@ -1077,6 +1090,15 @@ class Vertex:
         for ``"bfs"``), ``method`` and, for Dijkstra/A*, ``expanded`` (nodes
         settled).
 
+        Equal-cost paths: the choice is fixed by node order (insertion
+        order), never by edge order, process or thread count. Walking back
+        from the target, each step goes to the earliest neighbour through
+        which a cheapest route arrives ("bfs": every edge counts 1). "astar"
+        applies this to the nodes it expands, so it may pick another of
+        several equal-cost paths than "dijkstra", but always the same one.
+        Over a zero-weight edge a route replaces the first one found only if
+        strictly cheaper. See docs/traversal.md, "Equal-cost paths".
+
         Raises ValueError for an unknown method, a missing node, an
         unreachable target, a negative weight or a target without
         coordinates; TypeError for a non-numeric weight, coordinate or
@@ -1146,6 +1168,12 @@ class Vertex:
         *heuristic* or *heuristic_scale* is given. Edge weights (and
         coordinates) of the whole graph are validated when the projection is
         built. For a single query use ``shortest_path``.
+
+        Paths, ties between equal-cost paths included, are those
+        ``shortest_path`` returns (earliest node in insertion order walking
+        back from the target), for any number of threads. With
+        ``Vertex(shuffle_seed=...)`` the projection numbers nodes in the
+        shuffled order, which then decides ties.
         """
         ...
     def distances(

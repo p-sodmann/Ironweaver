@@ -15,7 +15,10 @@
 //   3. List its options in `METHOD.options`; if it needs a new one, add a
 //      field to `PathQuery` and parse it in the bindings
 //      (src/vertex/pathfinding.rs).
-//   4. Update the `.pyi` stubs, docs/traversal.md, llms.txt and add tests.
+//   4. Break ties between equal-cost paths by the rule documented on
+//      `find_path` (never by edge or push order); tests/tie_break.rs checks
+//      every method against a brute-force reference.
+//   5. Update the `.pyi` stubs, docs/traversal.md, llms.txt and add tests.
 
 mod astar;
 mod best_first;
@@ -177,6 +180,16 @@ pub struct PathResult {
 
 /// Run `query.method` from `source` to `target`. `Ok(None)` means the target
 /// is not reachable within the query's limits.
+///
+/// Among several cheapest paths the one returned depends only on the graph
+/// and the node handles, never on the order edges were added: walking back
+/// from the target, each step goes to the lowest [`NodeIx`] (slot) through
+/// which a cheapest route arrives (BFS: every edge counts 1). A* applies the
+/// rule to the nodes it expands, which it orders by f, then larger g, then
+/// lower handle, so among equal-cost paths it may pick another one than
+/// Dijkstra. Over a zero-weight edge a route replaces the first one found
+/// only if it is strictly cheaper. [`batch::shortest_paths`](crate::batch::shortest_paths)
+/// follows the same rule on a projection's dense indices.
 pub fn find_path<N, E, X>(
     g: &Graph<N, E>,
     source: NodeIx,

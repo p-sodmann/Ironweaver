@@ -206,6 +206,26 @@ a query layer and database foundations.
 
 ### Changed
 
+- **Equal-cost paths are chosen by a stated rule** (#116): walking back
+  from the target, each step goes to the earliest neighbour in node order
+  (insertion order on a Vertex, the index on a Projection) through which a
+  cheapest route arrives. `Vertex.shortest_path` (`"bfs"`, `"dijkstra"`),
+  `Vertex.shortest_paths`, `Projection.shortest_paths` and the first path
+  of `k_shortest_paths` all follow it, so they agree, and the result no
+  longer depends on the order edges were added, on heap push order or on
+  the number of threads (it was deterministic before, but decided by edge
+  order and heap internals, and the bidirectional `"bfs"` by where its
+  frontiers met). `"astar"` applies the rule to the nodes it expands
+  (open list ordered by f, then larger g, then node order). Over a
+  zero-weight edge a route replaces the first one found only if strictly
+  cheaper. Cost: on a grid full of ties, about 9% more instructions for
+  batch `"bfs"`, 6% for batch `"dijkstra"` and none for batch `"astar"`;
+  for `Vertex.shortest_path`, 4% for `"dijkstra"`, 2% for `"astar"` and
+  20-30% for the bidirectional `"bfs"` search, which now marks the
+  target's side of the shortest paths to pick the canonical one (a few
+  percent of the whole call). Documented in docs/traversal.md ("Equal-cost
+  paths"); in the core: `pathfinding::best_first`, `batch`,
+  `traversal::bidirectional_bfs`, `algo::k_shortest_paths`.
 - Infinite edge weights on a projection mean "impassable" everywhere
   (#115): hop-count searches on a weighted projection (`"bfs"` shortest
   paths and distances, `bfs_levels`, unweighted betweenness / closeness /
