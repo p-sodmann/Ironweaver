@@ -98,21 +98,14 @@ pub fn check_options(method: &PathMethod, option_names: &[&str]) -> Result<(), G
     Ok(())
 }
 
-/// The edge cost `method` uses: `Weighted` for weighted methods; unweighted
-/// methods refuse `weight` / `default_weight`.
+/// Weighted methods use costs; BFS uses supplied weights only for passability.
 pub fn edge_cost(
     method: &PathMethod,
     weight: Option<String>,
     default_weight: Option<f64>,
 ) -> Result<EdgeCost, GraphError> {
-    if method.weighted {
+    if method.weighted || weight.is_some() || default_weight.is_some() {
         return Ok(EdgeCost::weighted(weight, default_weight));
-    }
-    if weight.is_some() || default_weight.is_some() {
-        return Err(GraphError::InvalidArgument(format!(
-            "method '{}' ignores edge weights; use method='dijkstra' or 'astar' for weighted paths",
-            method.name
-        )));
     }
     Ok(EdgeCost::Unit)
 }
@@ -174,7 +167,8 @@ impl<'h, N, X> PathQuery<'h, N, X> {
 pub struct PathResult {
     pub nodes: Vec<NodeIx>,
     pub cost: f64,
-    /// Nodes the algorithm settled, if it keeps count.
+    /// Dijkstra settled nodes, A* expansions (including reopens), or BFS
+    /// frontier nodes expanded from both ends. Reconstruction is excluded.
     pub expanded: Option<usize>,
 }
 

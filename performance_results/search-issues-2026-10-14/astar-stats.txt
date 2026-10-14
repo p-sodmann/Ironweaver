@@ -1,0 +1,8 @@
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.894 ms     0.833 ms   (1.0x)
+    median nodes settled: 18,512
+  astar manhattan         0.216 ms     0.156 ms   (4.1x)
+    median nodes settled: 692
+  astar euclidean         0.496 ms     0.421 ms   (1.8x)
+    median nodes settled: 3,954

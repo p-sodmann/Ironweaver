@@ -66,6 +66,7 @@ def main():
     ap.add_argument("--trips", type=int, default=200)
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--stats", action="store_true", help="include and report core settled-node counts")
     args = ap.parse_args()
 
     ids, src, dst, weight, coords = grid(args.side, args.obstacles, args.rough, args.seed)
@@ -81,6 +82,9 @@ def main():
         "astar manhattan": {"method": "astar", "heuristic": "manhattan"},
         "astar euclidean": {"method": "astar", "heuristic": "euclidean"},
     }
+    if args.stats:
+        for kw in methods.values():
+            kw["stats"] = True
     results = {name: proj.shortest_paths(pairs, **kw) for name, kw in methods.items()}
     want = [r and r["cost"] for r in results["dijkstra"]]
     for name, got in results.items():
@@ -92,7 +96,10 @@ def main():
         single = per_trip(lambda: [proj.shortest_paths([p], **kw) for p in pairs], len(pairs), args.repeats)
         batch = per_trip(lambda: proj.shortest_paths(pairs, **kw), len(pairs), args.repeats)
         base = base or single
-        print(f"  {name:<17} {1000 * single:11.2f} ms {1000 * batch:9.2f} ms   ({base / single:.1f}x)")
+        print(f"  {name:<17} {1000 * single:11.3f} ms {1000 * batch:9.3f} ms   ({base / single:.1f}x)")
+        if args.stats:
+            counts = [r["stats"]["settled"] for r in results[name] if r is not None]
+            print(f"    median nodes settled: {statistics.median(counts):,.0f}")
 
 
 if __name__ == "__main__":

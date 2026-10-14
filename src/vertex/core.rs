@@ -30,6 +30,9 @@ use super::serialization;
 /// your own graph-level data, and the `on_*_callbacks` lists are live too.
 #[pyclass]
 pub struct Vertex {
+    /// Allocated independently of the Vertex. Projections retain this token
+    /// so a later Vertex cannot reuse its identity, even at the same address.
+    pub(crate) identity: std::sync::Arc<()>,
     pub graph: PyGraph,
     #[pyo3(get, set)]
     pub meta: Py<PyDict>,
@@ -47,6 +50,7 @@ impl Vertex {
     /// A Vertex around `graph` with an empty `meta` and no callbacks.
     pub fn with_graph(py: Python<'_>, graph: PyGraph) -> Self {
         Vertex {
+            identity: std::sync::Arc::new(()),
             graph,
             meta: PyDict::new(py).into(),
             on_node_add_callbacks: PyList::empty(py).into(),
@@ -156,6 +160,7 @@ impl Vertex {
 
     fn __clear__(&mut self) {
         self.graph = PyGraph::new();
+        self.identity = std::sync::Arc::new(());
     }
 
     fn __getitem__(slf: &Bound<'_, Self>, key: String) -> PyResult<Py<Node>> {
@@ -693,8 +698,11 @@ impl Vertex {
     ///     default_weight (float, optional): Cost of edges without that attribute. Defaults to 1.0.
     ///     max_cost (float, optional): Ignore paths more expensive than this (for "bfs": more edges).
     ///     direction (str, optional): "out" (default), "in" or "both".
-    ///     **options: Method-specific options:
-    ///         bfs: max_depth (int).
+    ///     **options: stats=True adds meta["stats"] = {"settled": n}:
+    ///         Dijkstra settled nodes, A* expansions, BFS frontier nodes expanded.
+    ///         Other method-specific options:
+    ///         bfs: max_depth (int). Supplied weights filter infinite edges;
+    ///             all finite edges still count as one hop.
     ///         astar: heuristic ("euclidean" default, or "manhattan") with coords, where
     ///             node coordinates live: a list of attribute paths, one per dimension
     ///             (default ["x", "y"]; "pos.lat" reads attr["pos"]["lat"]), or one
@@ -824,6 +832,8 @@ impl Vertex {
     ///     direction (str, optional): "out" (default), "in" or "both".
     ///     coords (str | list[str], optional): "astar": where node coordinates live
     ///         (as in `project`). Defaults to ["x", "y"]; every node needs them.
+    ///     stats (bool): Include {"stats": {"settled": n}} in found path entries:
+    ///         Dijkstra settled nodes, A* expansions, BFS nodes reached.
     ///     heuristic (str, optional): "astar": "euclidean" (default) or "manhattan".
     ///     heuristic_scale (float, optional): "astar": multiplies the distance
     ///         (default 1.0). Paths are cheapest if no edge costs less than
@@ -837,7 +847,7 @@ impl Vertex {
     ///     ValueError: Unknown node or method, a negative edge weight anywhere in the
     ///         graph, or (astar) a node without coordinates
     ///     TypeError: A non-numeric edge weight or coordinate anywhere in the graph
-    #[pyo3(signature = (pairs, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None, coords=None, heuristic=None, heuristic_scale=None))]
+    #[pyo3(signature = (pairs, method=None, *, weight=None, default_weight=None, max_cost=None, direction=None, coords=None, heuristic=None, heuristic_scale=None, stats=false))]
     #[allow(clippy::too_many_arguments)]
     fn shortest_paths(
         &self,
@@ -851,6 +861,7 @@ impl Vertex {
         coords: Option<Bound<'_, PyAny>>,
         heuristic: Option<&str>,
         heuristic_scale: Option<f64>,
+        stats: bool,
     ) -> PyResult<Py<PyList>> {
         batch::shortest_paths(
             self,
@@ -864,6 +875,7 @@ impl Vertex {
             coords.as_ref(),
             heuristic,
             heuristic_scale,
+            stats,
         )
     }
 

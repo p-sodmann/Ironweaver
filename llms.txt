@@ -141,6 +141,11 @@ p = m.shortest_path("a", "c", distances="est")                # estimates from v
 
 `shortest_path(source, target, method=None, *, weight, default_weight, max_cost, direction, **options)`: `method` is `"bfs"`, `"dijkstra"` or `"astar"`; None picks astar if `heuristic`/`coords`/`distances` is given, dijkstra if `weight` is given, else bfs. Method options: bfs `max_depth`; astar `heuristic` (`"euclidean"`/`"manhattan"`) with `coords` (`["x", "y"]` default, `"pos"` for a tuple/list attribute, `["pos.lat", "pos.lon"]` for keys in a dict attribute) or `distances="<meta key>"`. A* estimates must not overestimate the remaining cost; nodes without coordinates/estimates count as 0. Result meta: `nodelist`, `cost` (edges for bfs), `method`, `expanded`. Equal-cost ties: earliest node (insertion order) walking back from the target (see Gotchas). `ValueError` if a node is missing or the target is unreachable; `TypeError` for an option the method doesn't take. `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` are deprecated (DeprecationWarning): use `method=`.
 
+Search statistics: `stats=True` on `Vertex.shortest_path` adds `meta["stats"] = {"settled": n}`; on `Vertex.shortest_paths` and `Projection.shortest_paths` each found path dict gets the same `stats` field. Default keys and return shapes are unchanged; unreachable batch entries remain None. Dijkstra counts nodes settled, A* expansions (including target/reopens), batch BFS nodes reached, Vertex BFS frontier nodes expanded from both ends (reconstruction excluded). BFS counters differ by algorithm. These expose existing core counters without extra search work.
+
+`Vertex.shortest_path(..., "bfs", weight="w")` and `Vertex.shortest_paths(..., "bfs", weight="w")` skip infinite weights like weighted projections; finite edges still cost one hop, missing attributes use `default_weight` (1.0). Negative/NaN/nonnumeric weights are errors. Without weight/default_weight BFS ignores weights. `Node.bfs_search` remains unweighted and only checks reachability; use an edge filter to skip weighted edges. `Projection.edge_index` checks a unique source identity, even after the source is collected or its address reused.
+
+
 Batches run in parallel on all cores (GIL released); unreachable pairs give `None`:
 
 ```python
@@ -151,7 +156,7 @@ assert d["alice"]["acme"] == res[0]["cost"]
 assert g.distances(["alice"], targets=["acme"]) == {"alice": {"acme": 1}}  # bfs: edge counts
 ```
 
-`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction, coords, heuristic, heuristic_scale)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"`, plus `"astar"` for `shortest_paths` only (coords default `["x", "y"]`, every node needs them). Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
+`shortest_paths(pairs, method=None, *, weight, default_weight, max_cost, direction, coords, heuristic, heuristic_scale, stats=False)` / `distances(sources, targets=None, method=None, ...)`: methods `"bfs"` and `"dijkstra"`, plus `"astar"` for `shortest_paths` only (coords default `["x", "y"]`, every node needs them). Each call first copies the graph into a projection (one pass; all edge weights are validated then), so use `shortest_path` for a single query.
 
 Copy the graph once with `project` to run many batches (or other analytics) on it:
 
@@ -171,7 +176,7 @@ knows = g.project(edge_filter={"type": "knows"}, direction="both")   # filter; u
 
 `Projection` methods:
 
-- `shortest_paths(pairs, method=None, *, max_cost, heuristic, heuristic_scale)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means astar if `heuristic` / `heuristic_scale` is given, dijkstra if the projection is weighted, else bfs.
+- `shortest_paths(pairs, method=None, *, max_cost, heuristic, heuristic_scale, stats=False)` and `distances(sources, targets=None, method=None, *, max_cost)`; `method=None` means astar if `heuristic` / `heuristic_scale` is given, dijkstra if the projection is weighted, else bfs.
 - `"astar"` (shortest_paths only; weighted projection with coords): estimate = `heuristic_scale` (default 1) x `"euclidean"` (default) / `"manhattan"` distance to the target. Same costs as dijkstra if no edge costs less than scale x the distance between its ends (grid, cost >= 1 per tile: `heuristic="manhattan"`); several times faster on grids. Works on `"in"` / `"both"` projections.
 - `neighbors(id, direction="out"|"in")`, `degree(id, direction)`.
 - `ids()`, `node_count()`, `edge_count()`, `weighted`, `direction`, `coord_dim`, `memory_usage()`.

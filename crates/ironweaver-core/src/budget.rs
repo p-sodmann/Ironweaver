@@ -115,6 +115,10 @@ impl Meter {
         Meter { budget, visited: 0, edges: 0, results: 0, hit: false }
     }
 
+    pub(crate) fn visited(&self) -> usize {
+        self.visited
+    }
+
     /// Count entering a node; false (the search must stop) if that is over
     /// the budget.
     #[inline]
