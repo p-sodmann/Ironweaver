@@ -183,7 +183,12 @@ Below is a quick guide to notable functions and where to find them.
   two steps: `Projection::collect` (reads the graph: node / edge filters,
   weights; one pass over the edge arena, rows by counting sort) then
   `RawProjection::finish` (sorts rows; no graph access, so the
-  bindings release the GIL); `Projection::build` does both. The transposed
+  bindings release the GIL); `Projection::build` does both.
+  `Projection::from_edges` makes a `RawProjection` from ids plus source /
+  target / weight lists instead (no graph: no handles, edges in the order
+  given; checks ids, lengths, indices, weights), and
+  `RawProjection::with_coords` attaches node coordinates (`coords`, for A*).
+  Both paths share the counting sort (`adjacency_rows`). The transposed
   adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
   lazily. New analytics algorithms take `&Projection` and dense `u32` node
   indices.
@@ -299,7 +304,8 @@ Below is a quick guide to notable functions and where to find them.
   `attr_get`, `attr_set`, `toJSON`.
 - **path.rs** – `Path` (nodes and edges of a path; `Node.paths`). **observed_dictionary.rs** – `ObservedDictionary`.
 - **projection.rs** – the `Projection` class (queries and analytics
-  methods release the GIL),
+  methods release the GIL; `from_arrays` reads numpy arrays through the
+  buffer protocol, `PyBuffer`, so numpy is not a dependency),
   `Filter` (dict / callable node and edge filters), `collect` (Vertex →
   core `RawProjection`) and batch method selection shared with
   `vertex/batch.rs`. Result conversion lives in **projection/results.rs**:

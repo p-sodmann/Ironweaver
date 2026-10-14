@@ -14,6 +14,7 @@ use ironweaver_core::batch;
 use ironweaver_core::pathfinding::{resolve, EdgeCost, MethodKind, PathMethod};
 use ironweaver_core::projection::RawProjection;
 use ironweaver_core::{Direction, NodeIx};
+use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
@@ -182,8 +183,80 @@ pub(crate) fn collect(
     Ok(raw)
 }
 
+/// The items of a buffer (a numpy array) of `T` with `ndim` dimensions, in
+/// C order, and its shape; `None` if `obj` has no buffer or another item
+/// type.
+fn buffer_of<T: Element + Copy>(
+    py: Python<'_>,
+    obj: &Bound<'_, PyAny>,
+    name: &str,
+    ndim: usize,
+) -> PyResult<Option<(Vec<T>, Vec<usize>)>> {
+    let Ok(buf) = PyBuffer::<T>::get(obj) else { return Ok(None) };
+    if buf.dimensions() != ndim {
+        return Err(PyValueError::new_err(format!(
+            "{} must have {} dimension{}, got {}",
+            name,
+            ndim,
+            if ndim == 1 { "" } else { "s" },
+            buf.dimensions()
+        )));
+    }
+    Ok(Some((buf.to_vec(py)?, buf.shape().to_vec())))
+}
+
+/// Node indices: a 1-D int64 / int32 array (copied without a Python call
+/// per item) or any sequence of ints.
+fn index_array(py: Python<'_>, obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<i64>> {
+    if let Some((v, _)) = buffer_of::<i64>(py, obj, name, 1)? {
+        return Ok(v);
+    }
+    if let Some((v, _)) = buffer_of::<i32>(py, obj, name, 1)? {
+        return Ok(v.into_iter().map(i64::from).collect());
+    }
+    obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{} must be an integer array or a sequence of ints", name))
+    })
+}
+
+/// Edge weights: a 1-D float64 / float32 array or any sequence of numbers.
+fn weight_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    if let Some((v, _)) = buffer_of::<f64>(py, obj, "weight", 1)? {
+        return Ok(v);
+    }
+    if let Some((v, _)) = buffer_of::<f32>(py, obj, "weight", 1)? {
+        return Ok(v.into_iter().map(f64::from).collect());
+    }
+    obj.extract()
+        .map_err(|_| pyo3::exceptions::PyTypeError::new_err("weight must be a float array or a sequence of numbers"))
+}
+
+/// Coordinates: an (n, d) float64 / float32 array or a sequence of equally
+/// long sequences of numbers; returns d and the numbers row after row.
+fn coord_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<(usize, Vec<f64>)> {
+    if let Some((v, shape)) = buffer_of::<f64>(py, obj, "coords", 2)? {
+        return Ok((shape[1], v));
+    }
+    if let Some((v, shape)) = buffer_of::<f32>(py, obj, "coords", 2)? {
+        return Ok((shape[1], v.into_iter().map(f64::from).collect()));
+    }
+    let rows: Vec<Vec<f64>> = obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err("coords must be a 2-D float array or a sequence of sequences of numbers")
+    })?;
+    let dim = rows.first().map_or(1, Vec::len);
+    if let Some(i) = rows.iter().position(|r| r.len() != dim) {
+        return Err(PyValueError::new_err(format!(
+            "coords rows must be equally long: row 0 has {} numbers, row {} has {}",
+            dim,
+            i,
+            rows[i].len()
+        )));
+    }
+    Ok((dim, rows.concat()))
+}
+
 /// A compact, read-only copy of (part of) a graph for analytics, made by
-/// `Vertex.project(...)`.
+/// `Vertex.project(...)` or `Projection.from_arrays(...)`.
 ///
 /// It keeps the structure (sorted neighbour lists, in both directions), at
 /// most one edge weight per edge and the node ids, but no attributes. It is
@@ -243,6 +316,43 @@ fn parse_side(direction: Option<&str>) -> PyResult<bool> {
 
 #[pymethods]
 impl Projection {
+    /// Build a projection from arrays, without a Vertex: node `i` has id
+    /// `ids[i]`, edge `k` goes from `ids[src[k]]` to `ids[dst[k]]` with
+    /// weight `weight[k]` (unweighted if None). Edges keep the order given
+    /// (parallel edges in it), so the result is the same as projecting a
+    /// Vertex with these nodes and edges, added in this order. `coords`
+    /// ((n, d) numbers) are node coordinates, kept for A*. Arrays are numpy
+    /// arrays (int64 / int32 indices, float64 / float32 numbers, read
+    /// without a Python call per item) or sequences.
+    #[staticmethod]
+    #[pyo3(signature = (ids, src, dst, weight=None, coords=None, *, direction=None))]
+    fn from_arrays(
+        py: Python<'_>,
+        ids: Vec<String>,
+        src: &Bound<'_, PyAny>,
+        dst: &Bound<'_, PyAny>,
+        weight: Option<&Bound<'_, PyAny>>,
+        coords: Option<&Bound<'_, PyAny>>,
+        direction: Option<&str>,
+    ) -> PyResult<Self> {
+        let direction = Direction::parse(direction).map_err(graph_error)?;
+        let src = index_array(py, src, "src")?;
+        let dst = index_array(py, dst, "dst")?;
+        let weight = weight.filter(|w| !w.is_none()).map(|w| weight_array(py, w)).transpose()?;
+        let coords = coords.filter(|c| !c.is_none()).map(|c| coord_array(py, c)).transpose()?;
+        let inner = py
+            .detach(|| {
+                let raw = ironweaver_core::Projection::from_edges(ids, direction, &src, &dst, weight.as_deref())?;
+                let raw = match coords {
+                    Some((dim, values)) => raw.with_coords(dim, values)?,
+                    None => raw,
+                };
+                Ok(raw.finish())
+            })
+            .map_err(graph_error)?;
+        Ok(Projection { inner })
+    }
+
     /// Number of nodes.
     fn node_count(&self) -> usize {
         self.inner.node_count()

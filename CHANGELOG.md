@@ -62,6 +62,14 @@ a query layer and database foundations.
   - minimum / maximum spanning forests, k shortest paths (Yen),
     direction-optimizing BFS levels, batch shortest paths and distances;
   - FastRP embeddings and node2vec walks.
+- **`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *,
+  direction=None)`** builds a projection from node ids and edge arrays
+  (numpy int64 / int32 and float64 / float32 through the buffer protocol,
+  or sequences) without a Vertex, with the same results as projecting a
+  Vertex with those edges in that order. On a 180k-node / 700k-edge grid it
+  takes about 60 ms instead of about 1.8 s through `add_nodes` /
+  `add_edges` / `project`. In the core: `Projection::from_edges` and
+  `RawProjection::with_coords` (node coordinates, for A*). (#114)
 - **Pattern matching:** `Vertex.match("(a:Person)-[k:KNOWS*1..3]->(b)")`,
   Cypher-like patterns with labels, types, variable lengths, property maps,
   `where=` expressions and fixed ids. `Node.paths(...)` lists

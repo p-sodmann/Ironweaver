@@ -213,6 +213,32 @@ Projection methods:
 - `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
 - `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `memory_usage()` (bytes).
 
+#### Without a Vertex — `Projection.from_arrays(...)`
+
+When the graph is already in arrays (node ids, edge sources and targets as indices into the ids, weights), build the projection directly. It skips the Vertex (about 1.4 KB per node, against under 100 bytes for the projection) and is many times faster: on a 180,000-node, 700,000-edge grid it takes about 60 ms, against about 1.8 s for `add_nodes` + `add_edges` + `project`.
+
+```python
+import numpy as np
+from ironweaver import Projection
+
+ids = ["a", "b", "c", "d"]
+src = np.array([0, 0, 1, 2], dtype=np.int64)       # edge k: ids[src[k]] -> ids[dst[k]]
+dst = np.array([1, 2, 3, 3], dtype=np.int64)
+weight = np.array([1.0, 2.0, 5.0, 1.0])
+p = Projection.from_arrays(ids, src, dst, weight)
+assert p.shortest_paths([("a", "d")]) == [{"nodelist": ["a", "c", "d"], "cost": 3.0}]
+undirected = Projection.from_arrays(ids, src, dst, direction="both")   # unweighted
+assert undirected.neighbors("d") == ["b", "c"]
+```
+
+`Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`:
+
+- Node `i` is `ids[i]` (ids must be distinct). Edge `k` goes from `ids[src[k]]` to `ids[dst[k]]` with weight `weight[k]`; without `weight` the projection is unweighted.
+- Edges keep the order given, so the result is exactly what `project(weight=..., direction=...)` gives on a Vertex with the same nodes and edges added in the same order (parallel edges and ties included). Sort the edges to make tie-breaking canonical.
+- `src` / `dst` are 1-D int64 or int32 numpy arrays, `weight` float64 or float32 (any object with the buffer protocol; read without a Python call per item), or plain sequences. numpy itself is not required.
+- `coords` (an `(n, d)` array or `n` rows of `d` numbers) are node coordinates, kept for A*.
+- Raises `ValueError` for lists of different lengths, indices out of range, negative or NaN weights (as on Vertex edges), duplicate ids or coords that are not finite or not one row per node.
+
 ### Random walks — `vertex.random_walks(...)`
 
 Generate multiple random walks from a starting node.

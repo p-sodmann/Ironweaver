@@ -139,3 +139,15 @@ confirmations preserve selected timing while running required references once.
 Primary and repeat estimates stay separate, and new repeat-only signals must
 remain explicit. Run all commands under one exclusive lock without overlapping
 builds, tests or benchmark workers.
+
+## Projections from arrays
+
+`compare_from_arrays.py` times `Projection.from_arrays` against building the
+same projection through a Vertex (`add_nodes`, `add_edges`, `project`) on a
+grid with random obstacles (about 180k nodes and 700k directed edges by
+default; `--side`, `--obstacles`, `--repeats`), and checks that both
+projections agree. It needs numpy.
+
+```bash
+python benchmarks/compare_from_arrays.py
+```

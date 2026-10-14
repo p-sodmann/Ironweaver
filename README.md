@@ -452,6 +452,8 @@ dist = graph.distances(sources: list[str], targets: list[str] = None, method=Non
 # -> {source: {node: cost}}; "bfs" or "dijkstra" only
 proj = graph.project(weight=None, default_weight=None, *, direction="out", nodes=None,
                      node_filter=None, edge_filter=None) -> Projection
+proj = Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction="out")
+# the same without a Vertex: edge k is ids[src[k]] -> ids[dst[k]] (numpy int64 / float64 arrays or lists)
 # compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None),
 # proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
 # analytics (docs/analytics.md): proj.weakly_connected_components(), proj.strongly_connected_components(),

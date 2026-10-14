@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
-from typing_extensions import deprecated
+from typing_extensions import Buffer, deprecated
 
 # ---------------------------------------------------------------------------
 # NodeView — proxy passed to Vertex.filter predicates
@@ -407,13 +407,46 @@ class Path:
 @final
 class Projection:
     """A compact, read-only copy of (part of) a graph for analytics, made by
-    :meth:`Vertex.project`.
+    :meth:`Vertex.project` or, without a Vertex, by
+    :meth:`Projection.from_arrays`.
 
     Holds the structure (sorted neighbour lists in both directions), at most
     one weight per edge and the node ids, but no attributes. Queries run on
     all cores with the GIL released. A snapshot: later changes to the graph
     don't affect it.
     """
+
+    @staticmethod
+    def from_arrays(
+        ids: Sequence[str],
+        src: Buffer | Sequence[int],
+        dst: Buffer | Sequence[int],
+        weight: Buffer | Sequence[float] | None = ...,
+        coords: Buffer | Sequence[Sequence[float]] | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Projection:
+        """Build a projection from arrays, without a :class:`Vertex`.
+
+        Node ``i`` has id ``ids[i]``; edge ``k`` goes from ``ids[src[k]]`` to
+        ``ids[dst[k]]`` with weight ``weight[k]`` (unweighted if None).
+        Edges keep the order given (parallel edges in it), so the result is
+        the same as ``vertex.project(weight=..., direction=...)`` on a Vertex
+        with these nodes and edges added in this order; a caller can make
+        tie-breaking canonical by sorting the edges.
+
+        *src* / *dst* are 1-D numpy arrays of int64 or int32 (copied without a
+        Python call per item) or sequences of ints; *weight* a 1-D float64 /
+        float32 array or a sequence of numbers. *coords* (an ``(n, d)`` array or
+        n rows of d numbers) are node coordinates kept for A*. *direction*:
+        "out" (default), "in" (reversed) or "both" (undirected).
+
+        Raises ValueError for duplicate ids, arrays of different lengths,
+        indices outside ``0 .. len(ids) - 1``, negative or NaN weights, and
+        coords that are not finite or not one row per node; TypeError for
+        arrays of the wrong type.
+        """
+        ...
 
     @property
     def direction(self) -> Literal["out", "in", "both"]:

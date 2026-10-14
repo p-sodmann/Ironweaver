@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
 
-from typing_extensions import deprecated
+from typing_extensions import Buffer, deprecated
 
 @final
 class ObservedDictionary:
@@ -148,6 +148,17 @@ class Path:
 @final
 class Projection:
     """Compact read-only copy of a graph for analytics (see Vertex.project)."""
+
+    @staticmethod
+    def from_arrays(
+        ids: Sequence[str],
+        src: Buffer | Sequence[int],
+        dst: Buffer | Sequence[int],
+        weight: Buffer | Sequence[float] | None = ...,
+        coords: Buffer | Sequence[Sequence[float]] | None = ...,
+        *,
+        direction: Literal["out", "in", "both"] | None = ...,
+    ) -> Projection: ...
 
     @property
     def direction(self) -> Literal["out", "in", "both"]: ...
