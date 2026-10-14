@@ -11,7 +11,7 @@ use rand::seq::index::sample;
 use rand::SeedableRng;
 
 use super::sssp::{Search, SimpleRow};
-use super::{check_nodes, ordered_sum};
+use super::{check_nodes, ordered_sum, NONE};
 use crate::{Direction, GraphError, Projection};
 
 /// Betweenness options; the defaults match networkx.
@@ -56,6 +56,8 @@ struct Brandes {
     /// Predecessors of `order[i]` are `preds[pred_start[i]..pred_start[i + 1]]`.
     preds: Vec<u32>,
     pred_start: Vec<usize>,
+    /// Position of each node in `search.order` (`NONE` if not reached yet).
+    pos: Vec<u32>,
 }
 
 impl Brandes {
@@ -66,6 +68,7 @@ impl Brandes {
             delta: vec![0.0; n],
             preds: Vec::new(),
             pred_start: Vec::new(),
+            pos: vec![NONE; n],
         }
     }
 
@@ -74,10 +77,12 @@ impl Brandes {
         let s = &mut self.search;
         s.run(p, source, opts.weighted, false);
         // Path counts in order of distance: a node's predecessors are the
-        // in-neighbours on a shortest path to it, all settled before it
+        // in-neighbours on a shortest path to it settled before it (with
+        // zero-weight edges, a predecessor can be as far as the node)
         self.preds.clear();
         self.pred_start.clear();
         for (i, &w) in s.order.iter().enumerate() {
+            self.pos[w as usize] = i as u32;
             self.pred_start.push(self.preds.len());
             if i == 0 {
                 self.sigma[w as usize] = 1.0;
@@ -87,7 +92,7 @@ impl Brandes {
             let mut sigma = 0.0;
             for (v, weight) in SimpleRow::of(p, w, true, opts.weighted) {
                 let dv = s.dist[v as usize];
-                if dv < dw && dv + weight == dw {
+                if (self.pos[v as usize] as usize) < i && dv + weight == dw {
                     sigma += self.sigma[v as usize];
                     self.preds.push(v);
                 }
@@ -112,6 +117,7 @@ impl Brandes {
         for &w in &s.order {
             self.sigma[w as usize] = 0.0;
             self.delta[w as usize] = 0.0;
+            self.pos[w as usize] = NONE;
         }
     }
 }
@@ -285,5 +291,22 @@ mod tests {
         assert!(betweenness_centrality(&p, &Betweenness { sources: Some(vec![9]), ..Default::default() }).is_err());
         let empty = from_edges(0, &[], Direction::Out);
         assert!(betweenness_centrality(&empty, &Betweenness::default()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn zero_and_infinite_weights() {
+        // 0 -> 1 weighs 0, so 0 -> 1 -> 2 ties with 0 -> 2: node 1 is on
+        // half the shortest paths from 0 to 2 (it used to give NaN)
+        let triangle = |w: [f64; 3]| {
+            let ids = (0..3).map(|i| format!("n{i}")).collect();
+            Projection::from_edges(ids, Direction::Out, &[0i64, 1, 0], &[1, 2, 2], Some(&w)).unwrap().finish()
+        };
+        let opts = Betweenness { normalized: false, weighted: true, ..Default::default() };
+        assert_eq!(betweenness_centrality(&triangle([0.0, 1.0, 1.0]), &opts).unwrap(), [0.0, 0.5, 0.0]);
+        let p = triangle([1.0, 1.0, f64::INFINITY]);
+        // The direct edge is impassable: every path from 0 to 2 goes through 1
+        assert_eq!(betweenness_centrality(&p, &opts).unwrap(), [0.0, 1.0, 0.0]);
+        let hops = Betweenness { weighted: false, ..opts };
+        assert_eq!(betweenness_centrality(&p, &hops).unwrap(), [0.0, 1.0, 0.0]);
     }
 }

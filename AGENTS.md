@@ -192,7 +192,15 @@ Below is a quick guide to notable functions and where to find them.
   Both paths share the counting sort (`adjacency_rows`). The transposed
   adjacency (`in_neighbors`) and the id index (`index_of_id`) are built
   lazily. New analytics algorithms take `&Projection` and dense `u32` node
-  indices.
+  indices. `set_weights(&mut self)` changes weights in place (O(changed)):
+  weighted projections keep each edge's CSR position(s) (`positions`, from
+  the `Entry` tags the sort carries; `Both`: `2k` / `2k + 1`), the
+  transposed adjacency where each `out` entry went (`Transposed::of_out`),
+  and graph projections their `EdgeIx`s in projected (slot) order
+  (`edge_index`). Anything new derived from weights must be updated there
+  too. Infinite weights mean impassable: searches (also hop counts on a
+  weighted projection) skip them, strength-style algorithms count 0
+  (`algo::passable` / `passable_at` / `strength`).
 - **batch.rs** – `shortest_paths` / `distances` on a `Projection`: many
   queries in parallel (rayon, per-thread workspaces), Dijkstra or BFS;
   `shortest_paths_astar` + `AStar` (metric, scale): A* reading the
@@ -203,7 +211,8 @@ Below is a quick guide to notable functions and where to find them.
   against brute-force references (`algo::testing` graphs); Python tests in
   `tests/test_algorithms.py` compare against networkx.
   - `mod.rs`: `Undirected` (simple undirected view: sorted, deduplicated,
-    no self-loops), `groups` (largest first), `NONE`.
+    no self-loops), `groups` (largest first), `NONE`, `passable` /
+    `passable_at` / `strength` (infinite weights; rules in its comment).
   - `components.rs`: `weakly_connected_components` (union-find),
     `strongly_connected_components` (iterative Tarjan).
   - `dag.rs`: `topological_sort` (Kahn, min-heap), `find_cycle`.
@@ -317,7 +326,11 @@ Below is a quick guide to notable functions and where to find them.
   batch paths / distances, per-node values, embedding rows and groups /
   walks (with a shared node-id string cache).
   `Vertex.project` is wrapped in `__init__.py` so callable filters receive
-  `NodeView` / `EdgeView`.
+  `NodeView` / `EdgeView`. The class is not frozen: queries hold a shared
+  borrow (also while the GIL is released), `set_weights` takes it
+  exclusively and raises `RuntimeError` if a query is running; `vertex`
+  (the source Vertex's address) lets `edge_index` refuse other vertices'
+  edges.
 - **interrupt.rs** – Ctrl+C: `released(py, size, f)` runs GIL-free work on
   rayon's pool under a token while the caller checks signals every 20 ms
   (inline below 20,000 nodes + edges); `polling(py, f)` runs GIL-held

@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use super::{check_nodes, NONE};
+use super::{check_nodes, passable_at, NONE};
 use crate::{GraphError, Projection};
 
 // Direction-optimizing switch (Beamer et al.): go bottom-up when the
@@ -14,6 +14,7 @@ const BETA: usize = 24;
 
 /// Hop distance from the nearest of `sources` to every node along the
 /// projection's edges (`NONE` if unreachable, or farther than `max_depth`).
+/// Impassable (infinite-weight) edges are skipped.
 ///
 /// Level-synchronous and parallel; switches between pushing from the
 /// frontier (top-down) and letting unvisited nodes look for a parent in it
@@ -50,19 +51,27 @@ pub fn bfs_levels(p: &Projection, sources: &[u32], max_depth: Option<u32>) -> Re
                 .into_par_iter()
                 .with_min_len(1024)
                 .filter(|&v| {
-                    level[v as usize].load(Ordering::Relaxed) == NONE
-                        && p.in_neighbors(v).iter().any(|&u| level[u as usize].load(Ordering::Relaxed) == depth)
+                    level[v as usize].load(Ordering::Relaxed) == NONE && {
+                        let weights = p.in_weights(v);
+                        p.in_neighbors(v).iter().enumerate().any(|(i, &u)| {
+                            passable_at(weights, i) && level[u as usize].load(Ordering::Relaxed) == depth
+                        })
+                    }
                 })
                 .collect()
         } else {
             frontier
                 .par_iter()
                 .flat_map_iter(|&u| {
-                    p.out_neighbors(u).iter().copied().filter(|&v| {
-                        level[v as usize]
-                            .compare_exchange(NONE, next_level, Ordering::Relaxed, Ordering::Relaxed)
-                            .is_ok()
-                    })
+                    let weights = p.out_weights(u);
+                    p.out_neighbors(u).iter().enumerate().filter(move |&(i, _)| passable_at(weights, i)).filter_map(
+                        |(_, &v)| {
+                            level[v as usize]
+                                .compare_exchange(NONE, next_level, Ordering::Relaxed, Ordering::Relaxed)
+                                .is_ok()
+                                .then_some(v)
+                        },
+                    )
                 })
                 .collect()
         };

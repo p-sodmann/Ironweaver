@@ -165,3 +165,16 @@ time a single thread. It needs numpy.
 ```bash
 RAYON_NUM_THREADS=1 python benchmarks/compare_astar.py
 ```
+
+## Changing projection weights in place
+
+`compare_set_weights.py` builds the grid of `compare_astar.py` and times
+`Projection.set_weights` for batches of 1 to 10,000 tiles (the edges into
+them made impassable, then restored), with and without the reversed
+adjacency built, next to rebuilding the projection with
+`Projection.from_arrays`; it checks that the updated projection finds the
+same paths as a rebuilt one. It needs numpy.
+
+```bash
+python benchmarks/compare_set_weights.py
+```

@@ -26,6 +26,17 @@
 // node `i` is `ids[i]` and the edges' order plays the part of slot order.
 // Such a projection has no graph handles (`node`, `index_of`), and may
 // carry node coordinates (`coords`) for A*.
+//
+// Weights can change in place (`set_weights`), the structure can't. Edges
+// are named by their position in the projected order: the order of the
+// edge lists for `from_edges`, the edge-slot order of the graph's kept
+// edges for `collect` (`edge_index` finds an edge's position). A weighted
+// projection keeps, per edge, the adjacency position(s) it became
+// (`positions`: one entry per edge, two for `Both`, the source's row then
+// the target's), and the transposed adjacency, once built, where each
+// entry of `out` went (`Transposed::of_out`), so a change costs O(1) per
+// edge. Infinite weights mark edges as impassable: every search skips
+// them (see `algo` and `batch`).
 
 use rayon::prelude::*;
 use std::ops::Range;
@@ -35,6 +46,17 @@ use crate::pathfinding::{Coords, EdgeCost};
 use crate::{Attributes, Direction, Edge, EdgeIx, Graph, GraphError, Node, NodeIx};
 
 const NONE: u32 = u32::MAX;
+
+/// An adjacency entry while building: the neighbour, the edge it comes
+/// from (its position in the projected order; for `Both` twice that, plus
+/// 1 for the entry in the target's row) and the weight (0.0 when
+/// unweighted). 16 bytes, like a `(u32, f64)` pair.
+#[derive(Clone, Copy, Debug, Default)]
+struct Entry {
+    to: u32,
+    edge: u32,
+    w: f64,
+}
 
 /// Adjacency in CSR layout: the neighbours of node `u` are
 /// `to[start[u]..start[u + 1]]`, with weights at the same positions.
@@ -59,9 +81,9 @@ impl Csr {
         self.weight.as_ref().map(|w| &w[row])
     }
 
-    /// The reverse adjacency. Rows come out sorted because sources are
-    /// visited in order.
-    fn transpose(&self, n: usize) -> Csr {
+    /// The reverse adjacency (and, if weighted, where each entry of `self`
+    /// went). Rows come out sorted because sources are visited in order.
+    fn transpose(&self, n: usize) -> Transposed {
         let mut start = vec![0u32; n + 1];
         for &v in &self.to {
             start[v as usize + 1] += 1;
@@ -72,6 +94,7 @@ impl Csr {
         let mut fill: Vec<u32> = start[..n].to_vec();
         let mut to = vec![0u32; self.to.len()];
         let mut weight = self.weight.as_ref().map(|_| vec![0f64; self.to.len()]);
+        let mut of_out = if self.weight.is_some() { vec![0u32; self.to.len()] } else { Vec::new() };
         for u in 0..n as u32 {
             for i in self.row(u) {
                 let v = self.to[i] as usize;
@@ -80,14 +103,29 @@ impl Csr {
                 to[at] = u;
                 if let (Some(dst), Some(src)) = (&mut weight, &self.weight) {
                     dst[at] = src[i];
+                    of_out[i] = at as u32;
                 }
             }
         }
-        Csr { start, to, weight }
+        Transposed { csr: Csr { start, to, weight }, of_out }
     }
 
     fn bytes(&self) -> usize {
         4 * (self.start.len() + self.to.len()) + self.weight.as_ref().map_or(0, |w| 8 * w.len())
+    }
+}
+
+/// The transposed adjacency of a directed projection; for a weighted one
+/// also the position in it of each entry of `out`, to update weights.
+#[derive(Clone, Debug)]
+struct Transposed {
+    csr: Csr,
+    of_out: Vec<u32>,
+}
+
+impl Transposed {
+    fn bytes(&self) -> usize {
+        self.csr.bytes() + 4 * self.of_out.len()
     }
 }
 
@@ -107,7 +145,14 @@ pub struct Projection {
     out: Csr,
     /// Transposed `out`, built on first use; never used for undirected
     /// projections (the same as `out`).
-    inc: OnceLock<Csr>,
+    inc: OnceLock<Transposed>,
+    /// Weighted projections: the position in `out` of each edge's entry
+    /// (edge `k` at `k`; for `Both` at `2k` in the source's row and
+    /// `2k + 1` in the target's). Empty if unweighted.
+    positions: Vec<u32>,
+    /// Weighted projections of a graph: the projected edges, in order
+    /// (increasing slots). Empty otherwise.
+    edges: Vec<EdgeIx>,
     /// Dense index -> node handle (empty without a graph) / id.
     nodes: Vec<NodeIx>,
     ids: Vec<String>,
@@ -124,9 +169,11 @@ pub struct RawProjection {
     direction: Direction,
     edge_count: usize,
     start: Vec<u32>,
-    /// Unsorted rows, with the weight (0.0 when unweighted).
-    adj: Vec<(u32, f64)>,
+    /// Unsorted rows, with edge positions and weights.
+    adj: Vec<Entry>,
     weighted: bool,
+    /// The kept edges, if weighted and collected from a graph.
+    edges: Vec<EdgeIx>,
     nodes: Vec<NodeIx>,
     ids: Vec<String>,
     /// Heap bytes of `ids`' strings.
@@ -138,12 +185,12 @@ pub struct RawProjection {
 }
 
 /// Row starts and (unsorted) entries of an adjacency.
-type Rows = (Vec<u32>, Vec<(u32, f64)>);
+type Rows = (Vec<u32>, Vec<Entry>);
 
 /// The adjacency rows of `kept` edges (source, target, weight) between `n`
 /// nodes, by counting sort: a row lists a node's edges in the order of
 /// `kept` (outgoing, then incoming for `Both`), unsorted. Returns the row
-/// starts and the entries.
+/// starts and the entries, tagged with their edge (see [`Entry`]).
 fn adjacency_rows(n: usize, direction: Direction, kept: &[(u32, u32, f64)]) -> Result<Rows, GraphError> {
     let entries = if direction == Direction::Both { 2 * kept.len() } else { kept.len() };
     if u32::try_from(entries).is_err() || u32::try_from(n).is_err() {
@@ -172,20 +219,22 @@ fn adjacency_rows(n: usize, direction: Direction, kept: &[(u32, u32, f64)]) -> R
         start[i + 1] += start[i];
     }
     let mut fill: Vec<u32> = start[..n].to_vec();
-    let mut adj = vec![(0u32, 0f64); entries];
-    let mut put = |row: u32, neighbor: u32, w: f64| {
+    let mut adj = vec![Entry::default(); entries];
+    let mut put = |row: u32, to: u32, edge: usize, w: f64| {
         let at = &mut fill[row as usize];
-        adj[*at as usize] = (neighbor, w);
+        // `edge` < `entries`, checked above to fit
+        adj[*at as usize] = Entry { to, edge: edge as u32, w };
         *at += 1;
     };
+    let both = forward && backward;
     if forward {
-        for &(s, t, w) in kept {
-            put(s, t, w);
+        for (k, &(s, t, w)) in kept.iter().enumerate() {
+            put(s, t, if both { 2 * k } else { k }, w);
         }
     }
     if backward {
-        for &(s, t, w) in kept {
-            put(t, s, w);
+        for (k, &(s, t, w)) in kept.iter().enumerate() {
+            put(t, s, if both { 2 * k + 1 } else { k }, w);
         }
     }
     Ok((start, adj))
@@ -244,6 +293,7 @@ impl Projection {
         // Kept edges, in slot order: one sequential pass over the edge arena
         let weighted = !matches!(cost, EdgeCost::Unit);
         let mut kept: Vec<(u32, u32, f64)> = Vec::with_capacity(g.edge_count());
+        let mut edges = Vec::new();
         for (e, edge) in g.edges() {
             let (s, t) = (dense[edge.source().slot()], dense[edge.target().slot()]);
             if s == NONE || t == NONE || !edge_ok(e, edge)? {
@@ -251,6 +301,9 @@ impl Projection {
             }
             let w = if weighted { cost.cost::<E, X>(&edge.data)? } else { 0.0 };
             kept.push((s, t, w));
+            if weighted {
+                edges.push(e);
+            }
         }
         let edge_count = kept.len();
         // Rows in slot order, sorted by `finish`
@@ -262,6 +315,7 @@ impl Projection {
             start,
             adj,
             weighted,
+            edges,
             nodes,
             ids,
             id_bytes,
@@ -354,6 +408,7 @@ impl Projection {
             start,
             adj,
             weighted: weight.is_some(),
+            edges: Vec::new(),
             nodes: Vec::new(),
             ids,
             id_bytes,
@@ -420,7 +475,7 @@ impl Projection {
         if self.direction == Direction::Both {
             return &self.out;
         }
-        self.inc.get_or_init(|| self.out.transpose(self.ids.len()))
+        &self.inc.get_or_init(|| self.out.transpose(self.ids.len())).csr
     }
 
     /// Number of coordinates per node (0 without coordinates).
@@ -472,11 +527,87 @@ impl Projection {
         self.inc().row(u).len()
     }
 
+    /// Position of graph edge `e` in the projected order (what
+    /// [`set_weights`](Self::set_weights) takes), if it was projected.
+    /// Only weighted projections collected from a graph keep their edges;
+    /// others find nothing. Only meaningful for the graph the projection
+    /// was built from.
+    pub fn edge_index(&self, e: EdgeIx) -> Option<usize> {
+        let k = self.edges.binary_search_by_key(&e.slot(), |x| x.slot()).ok()?;
+        (self.edges[k] == e).then_some(k)
+    }
+
+    /// Change the weights of some edges in place: edge `edges[i]` (its
+    /// position in the projected order: the order of the edge lists for
+    /// [`from_edges`](Self::from_edges), the graph's edge-slot order of the
+    /// kept edges for [`collect`](Self::collect); see
+    /// [`edge_index`](Self::edge_index)) gets `weights[i]`. The structure
+    /// stays as it is; an infinite weight makes the edge impassable (every
+    /// search skips it), a finite one makes it passable again. Every
+    /// adjacency entry of the edge is updated (both rows for `Both`, the
+    /// transposed adjacency if it was built), so results are the same as
+    /// for a projection built with these weights. O(1) per edge.
+    ///
+    /// Fails, changing nothing, if the projection is unweighted, the lists'
+    /// lengths differ, an index is out of range or a weight is negative or
+    /// NaN. If an edge is listed more than once, the last weight wins.
+    pub fn set_weights<I>(&mut self, edges: &[I], weights: &[f64]) -> Result<(), GraphError>
+    where
+        I: Copy + Into<i64>,
+    {
+        if !self.is_weighted() {
+            return Err(GraphError::InvalidArgument(
+                "set_weights needs a weighted projection (project with weight=... or from_arrays(weight=...))".into(),
+            ));
+        }
+        if edges.len() != weights.len() {
+            return Err(GraphError::InvalidArgument(format!(
+                "edges and weights must have the same length, got {} and {}",
+                edges.len(),
+                weights.len()
+            )));
+        }
+        let m = self.edge_count;
+        for (i, (&k, &w)) in edges.iter().zip(weights).enumerate() {
+            let k: i64 = k.into();
+            if usize::try_from(k).map_or(true, |k| k >= m) {
+                return Err(GraphError::InvalidArgument(if m == 0 {
+                    format!("edges[{}] is {}, but there are no edges", i, k)
+                } else {
+                    format!("edges[{}] is {}, not an edge index (0 to {})", i, k, m - 1)
+                }));
+            }
+            if w.is_nan() || w < 0.0 {
+                return Err(GraphError::InvalidArgument(format!(
+                    "Edge weights must be non-negative, got {} (weights[{}])",
+                    w, i
+                )));
+            }
+        }
+        let both = self.direction == Direction::Both;
+        let out = self.out.weight.as_mut().expect("checked: the projection is weighted");
+        let mut inc = self.inc.get_mut();
+        for (&k, &w) in edges.iter().zip(weights) {
+            let k = k.into() as usize;
+            let at = if both { &self.positions[2 * k..2 * k + 2] } else { &self.positions[k..k + 1] };
+            for &i in at {
+                out[i as usize] = w;
+                if let Some(t) = inc.as_deref_mut() {
+                    let w_in = t.csr.weight.as_mut().expect("weighted like `out`");
+                    w_in[t.of_out[i as usize] as usize] = w;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Approximate heap memory used, in bytes.
     pub fn memory_usage(&self) -> usize {
         let ids: usize = self.ids.iter().map(|s| s.capacity() + std::mem::size_of::<String>()).sum();
         self.out.bytes()
-            + self.inc.get().map_or(0, Csr::bytes)
+            + self.inc.get().map_or(0, Transposed::bytes)
+            + 4 * self.positions.len()
+            + 8 * self.edges.len()
             + ids
             + 8 * self.nodes.len()
             + 4 * (self.by_id.get().map_or(0, Vec::len) + self.dense.len())
@@ -491,7 +622,8 @@ impl RawProjection {
     pub fn memory_usage(&self) -> usize {
         use std::mem::size_of;
         size_of::<u32>() * (self.start.capacity() + self.dense.capacity())
-            + size_of::<(u32, f64)>() * self.adj.capacity()
+            + size_of::<Entry>() * self.adj.capacity()
+            + size_of::<EdgeIx>() * self.edges.capacity()
             + size_of::<NodeIx>() * self.nodes.capacity()
             + size_of::<String>() * self.ids.capacity()
             + self.id_bytes
@@ -574,26 +706,57 @@ impl RawProjection {
 
     /// Sort the neighbour lists (in parallel where it pays off).
     pub fn finish(self) -> Projection {
-        let RawProjection { direction, edge_count, start, mut adj, weighted, nodes, ids, dense, by_id, coords, .. } =
-            self;
+        let RawProjection {
+            direction,
+            edge_count,
+            start,
+            mut adj,
+            weighted,
+            edges,
+            nodes,
+            ids,
+            dense,
+            by_id,
+            coords,
+            ..
+        } = self;
 
         // Sort each row by neighbour; the sort is stable, so parallel edges
         // keep their insertion order
-        let mut rows: Vec<&mut [(u32, f64)]> = Vec::with_capacity(ids.len());
+        let mut rows: Vec<&mut [Entry]> = Vec::with_capacity(ids.len());
         let mut rest = &mut adj[..];
         for [from, to] in start.array_windows() {
             let (row, tail) = rest.split_at_mut((to - from) as usize);
             rows.push(row);
             rest = tail;
         }
-        rows.par_iter_mut().with_min_len(1024).for_each(|row| row.sort_by_key(|&(v, _)| v));
+        rows.par_iter_mut().with_min_len(1024).for_each(|row| row.sort_by_key(|e| e.to));
 
-        let to = adj.iter().map(|&(v, _)| v).collect();
-        let weight = weighted.then(|| adj.iter().map(|&(_, w)| w).collect());
+        let to = adj.iter().map(|e| e.to).collect();
+        let weight = weighted.then(|| adj.iter().map(|e| e.w).collect());
+        let mut positions = Vec::new();
+        if weighted {
+            positions = vec![0u32; adj.len()];
+            for (i, e) in adj.iter().enumerate() {
+                positions[e.edge as usize] = i as u32;
+            }
+        }
         drop(adj);
         let out = Csr { start, to, weight };
         let by_id = by_id.map_or_else(OnceLock::new, OnceLock::from);
-        Projection { direction, edge_count, out, inc: OnceLock::new(), nodes, ids, by_id, dense, coords }
+        Projection {
+            direction,
+            edge_count,
+            out,
+            inc: OnceLock::new(),
+            positions,
+            edges,
+            nodes,
+            ids,
+            by_id,
+            dense,
+            coords,
+        }
     }
 }
 

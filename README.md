@@ -460,6 +460,8 @@ proj = Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direct
 # compact read-only snapshot for analytics: proj.shortest_paths(pairs, method=None, *, max_cost=None,
 #   heuristic=None, heuristic_scale=None) ("astar" with coords: several times faster on grids),
 # proj.distances(...), proj.neighbors(id, "out"|"in"), proj.degree(id), proj.ids(), proj.memory_usage()
+# proj.set_weights(edges, weights): change weights in place (edge k as given to from_arrays, or
+#   proj.edge_index(edge) for Vertex projections); cost per edge changed; inf = impassable
 # analytics (docs/analytics.md): proj.weakly_connected_components(), proj.strongly_connected_components(),
 # proj.topological_sort(), proj.find_cycle(), proj.degree_centrality("out"|"in"),
 # proj.pagerank(alpha=0.85, *, personalization=None, max_iter=100, tol=1e-6), proj.triangles(),

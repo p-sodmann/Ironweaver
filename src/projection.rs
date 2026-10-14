@@ -224,16 +224,18 @@ fn index_array(py: Python<'_>, obj: &Bound<'_, PyAny>, name: &str) -> PyResult<V
     })
 }
 
-/// Edge weights: a 1-D float64 / float32 array or any sequence of numbers.
-fn weight_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
-    if let Some((v, _)) = buffer_of::<f64>(py, obj, "weight", 1)? {
+/// Edge weights (argument `name`): a 1-D float64 / float32 array or any
+/// sequence of numbers.
+fn weight_array(py: Python<'_>, obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<f64>> {
+    if let Some((v, _)) = buffer_of::<f64>(py, obj, name, 1)? {
         return Ok(v);
     }
-    if let Some((v, _)) = buffer_of::<f32>(py, obj, "weight", 1)? {
+    if let Some((v, _)) = buffer_of::<f32>(py, obj, name, 1)? {
         return Ok(v.into_iter().map(f64::from).collect());
     }
-    obj.extract()
-        .map_err(|_| pyo3::exceptions::PyTypeError::new_err("weight must be a float array or a sequence of numbers"))
+    obj.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{} must be a float array or a sequence of numbers", name))
+    })
 }
 
 /// Coordinates: an (n, d) float64 / float32 array or a sequence of equally
@@ -267,10 +269,17 @@ fn coord_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<(usize, Vec<f
 /// most one edge weight per edge and the node ids, but no attributes. It is
 /// a snapshot: later changes to the graph don't affect it. Queries run on all
 /// cores with the GIL released; build a projection once and run many
-/// queries on it.
-#[pyclass(frozen, module = "ironweaver")]
+/// queries on it. Weights can change in place (`set_weights`).
+///
+/// Not frozen, so that `set_weights` can take it exclusively: every query
+/// holds a shared borrow while it runs (also with the GIL released), and
+/// `set_weights` refuses to run meanwhile instead of waiting.
+#[pyclass(module = "ironweaver")]
 pub struct Projection {
     pub(crate) inner: ironweaver_core::Projection,
+    /// Address of the Vertex it was projected from (0 for `from_arrays`),
+    /// to refuse other vertices' edges in `edge_index`.
+    pub(crate) vertex: usize,
 }
 
 impl Projection {
@@ -427,7 +436,7 @@ impl Projection {
         let direction = Direction::parse(direction).map_err(graph_error)?;
         let src = index_array(py, src, "src")?;
         let dst = index_array(py, dst, "dst")?;
-        let weight = weight.filter(|w| !w.is_none()).map(|w| weight_array(py, w)).transpose()?;
+        let weight = weight.filter(|w| !w.is_none()).map(|w| weight_array(py, w, "weight")).transpose()?;
         let coords = coords.filter(|c| !c.is_none()).map(|c| coord_array(py, c)).transpose()?;
         let inner = py
             .detach(|| {
@@ -439,7 +448,46 @@ impl Projection {
                 Ok(raw.finish())
             })
             .map_err(graph_error)?;
-        Ok(Projection { inner })
+        Ok(Projection { inner, vertex: 0 })
+    }
+
+    /// Change the weights of some edges in place: edge `edges[i]` gets
+    /// `weights[i]`. Edges are numbered in projected order: the order given
+    /// to `from_arrays`, or for `Vertex.project` the graph's edge order
+    /// among the projected edges (`edge_index(edge)` finds an edge's
+    /// number). The structure stays; `inf` makes an edge impassable (every
+    /// search skips it), a finite weight makes it passable again. Every
+    /// result is then the same as for a projection built with the new
+    /// weights. Cost is proportional to the number of edges changed.
+    fn set_weights(slf: &Bound<'_, Self>, edges: &Bound<'_, PyAny>, weights: &Bound<'_, PyAny>) -> PyResult<()> {
+        let py = slf.py();
+        let edges = index_array(py, edges, "edges")?;
+        let weights = weight_array(py, weights, "weights")?;
+        let mut this = slf.try_borrow_mut().map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "set_weights: the projection is in use by another call (a query running in another thread); \
+                 change weights between queries",
+            )
+        })?;
+        this.inner.set_weights(&edges, &weights).map_err(graph_error)
+    }
+
+    /// The number of `edge` (an Edge of the Vertex this projection was made
+    /// from) in projected order, as `set_weights` takes it. ValueError if
+    /// the edge was not projected (filtered out, added or removed since);
+    /// only weighted projections made by `Vertex.project` keep their edges.
+    fn edge_index(&self, edge: &Bound<'_, Edge>) -> PyResult<usize> {
+        let edge = edge.get();
+        if self.vertex == 0 || !self.inner.is_weighted() {
+            return Err(PyValueError::new_err(
+                "edge_index needs a weighted projection made by Vertex.project (from_arrays: edges are numbered \
+                 in the order given)",
+            ));
+        }
+        if edge.vertex.as_ptr() as usize != self.vertex {
+            return Err(PyValueError::new_err("edge belongs to another Vertex than the one projected"));
+        }
+        self.inner.edge_index(edge.ix).ok_or_else(|| PyValueError::new_err("edge is not in the projection"))
     }
 
     /// Number of nodes.

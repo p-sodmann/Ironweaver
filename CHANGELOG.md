@@ -70,6 +70,21 @@ a query layer and database foundations.
   takes about 60 ms instead of about 1.8 s through `add_nodes` /
   `add_edges` / `project`. In the core: `Projection::from_edges` and
   `RawProjection::with_coords` (node coordinates, for A*). (#114)
+- **`Projection.set_weights(edges, weights)`** changes edge weights in place;
+  the structure stays. Edges are numbered in projected order: the order
+  given to `from_arrays`, or the Vertex's edge order among the projected
+  edges (`Projection.edge_index(edge)`). Every entry an edge became is
+  updated (both ends on a `"both"` projection, the reversed adjacency if
+  built), so every method gives the same results as a projection rebuilt
+  with the new weights, at a cost proportional to the number of edges
+  changed: about a microsecond for the 4 edges into a tile of a
+  180,000-tile grid, against about 60 ms for a rebuild
+  (`benchmarks/compare_set_weights.py`). An infinite weight makes an edge
+  impassable. `set_weights` raises `RuntimeError` while a query runs on the
+  projection in another thread. Weighted projections keep 4 bytes per
+  adjacency entry for this (plus 4 per entry of the reversed adjacency once
+  built, and 8 per edge for weighted Vertex projections). In the core:
+  `Projection::set_weights`, `Projection::edge_index`. (#115)
 - **A* on projections:** `Projection.shortest_paths(pairs, "astar",
   heuristic="euclidean"|"manhattan", heuristic_scale=1.0)` reads node
   coordinates compiled into the projection, by
@@ -191,6 +206,14 @@ a query layer and database foundations.
 
 ### Changed
 
+- Infinite edge weights on a projection mean "impassable" everywhere
+  (#115): hop-count searches on a weighted projection (`"bfs"` shortest
+  paths and distances, `bfs_levels`, unweighted betweenness / closeness /
+  harmonic centrality and k shortest paths) skip such edges, like the
+  weighted ones already did; node2vec walks never take them; spanning
+  trees leave them out; PageRank, FastRP, Leiden and modularity count them
+  as weight 0 (they gave NaN before).
+
 - The minimum supported Rust version is 1.99; both crates use edition 2024.
   `rand` is 0.9 (was 0.8): a seed still gives the same result on every run,
   whatever the number of cores, but random walks, node2vec walks and Leiden
@@ -229,6 +252,9 @@ a query layer and database foundations.
 
 ### Fixed
 
+- Weighted betweenness centrality with zero-weight edges no longer gives
+  NaN: a node's predecessors are the neighbours settled before it on a
+  shortest path, also at the same distance.
 - `Expr` serde keeps its depth-limit message ("expression nested more than
   100 levels deep") under the binary encoding: postcard drops custom
   messages, and `format::take_error` (now public) returns it after a failure.

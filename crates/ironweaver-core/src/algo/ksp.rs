@@ -4,12 +4,13 @@
 // shortest path, each next path deviates from an earlier one at some "spur"
 // node, found by a search that may not reuse the earlier path's prefix nodes
 // nor the edges earlier paths took from the same prefix. Parallel edges
-// count as one edge with the lightest weight.
+// count as one edge with the lightest weight; impassable (infinite-weight)
+// edges are skipped.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 
-use super::check_nodes;
+use super::{check_nodes, passable_at};
 use crate::batch::DensePath;
 use crate::{GraphError, Projection};
 
@@ -78,12 +79,12 @@ impl Spur {
                 break;
             }
             let du = self.dist[u as usize];
-            let weights = p.out_weights(u).filter(|_| weighted);
+            let weights = p.out_weights(u);
             for (i, &v) in p.out_neighbors(u).iter().enumerate() {
-                if v == u || self.banned[v as usize] || banned_edges.contains(&(u, v)) {
+                if v == u || self.banned[v as usize] || !passable_at(weights, i) || banned_edges.contains(&(u, v)) {
                     continue;
                 }
-                let nd = du + weights.map_or(1.0, |w| w[i]);
+                let nd = du + weights.filter(|_| weighted).map_or(1.0, |w| w[i]);
                 if nd < self.dist[v as usize] {
                     if self.dist[v as usize].is_infinite() {
                         self.touched.push(v);

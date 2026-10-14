@@ -23,6 +23,7 @@ Directed algorithms follow the projection's edges, so use `direction="in"` to re
 - Triangles, clustering, core numbers and similarity treat edges as undirected, and ignore self-loops and parallel edges (like networkx on `nx.Graph(G)`). `clustering(directed=True)` and label propagation follow the LDBC Graphalytics definitions on directed projections.
 - Shortest-path based algorithms (betweenness, closeness, harmonic centrality, k shortest paths) ignore self-loops and take the lightest of parallel edges.
 - Leiden, modularity and spanning trees treat edges as undirected but keep their weights.
+- An edge of infinite weight is impassable (see [`set_weights`](traversal.md#changing-weights--set_weights)): searches skip it, with weights or hop counts (BFS levels, betweenness, closeness, harmonic centrality, k shortest paths, node2vec walks), spanning trees leave it out, and PageRank, FastRP, Leiden and modularity count it as weight 0. Algorithms that look only at the structure (components, topological sort, cycles, degree, triangles, clustering, core numbers, label propagation, similarity) still count it.
 
 Randomised algorithms (sampled betweenness, Leiden, FastRP, node2vec) take a `seed`: the same seed gives the same result, whatever the number of cores.
 

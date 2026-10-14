@@ -11,7 +11,7 @@ use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
-use super::mix;
+use super::{mix, strength};
 use crate::{GraphError, Projection};
 
 /// FastRP options.
@@ -52,7 +52,7 @@ fn normalize(v: &mut [f32]) {
 
 /// FastRP embeddings along the projection's edges (use a `Both` projection
 /// to treat them as undirected), weighted by the projection's weights if it
-/// has them. Returns `node_count * dimension` values, node by node.
+/// has them (impassable, infinite-weight edges count 0). Returns `node_count * dimension` values, node by node.
 /// Deterministic for a seed, whatever the number of threads.
 pub fn fastrp(p: &Projection, opts: &FastRP) -> Result<Vec<f32>, GraphError> {
     let d = opts.dimension;
@@ -109,7 +109,7 @@ pub fn fastrp(p: &Projection, opts: &FastRP) -> Result<Vec<f32>, GraphError> {
             v.iter_mut().for_each(|x| *x = 0.0);
             let weights = p.out_weights(u as u32);
             for (i, &w) in p.out_neighbors(u as u32).iter().enumerate() {
-                let f = weights.map_or(1.0, |ws| ws[i] as f32);
+                let f = weights.map_or(1.0, |ws| strength(ws[i]) as f32);
                 let from = &previous[w as usize * d..(w as usize + 1) * d];
                 v.iter_mut().zip(from).for_each(|(x, y)| *x += f * y);
             }

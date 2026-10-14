@@ -17,6 +17,8 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
   - label propagation, Leiden communities and modularity;
   - node similarity, spanning forests, k shortest paths, BFS levels and batch shortest paths;
   - FastRP embeddings and node2vec walks.
+
+  Its edge weights can change in place (`Projection::set_weights`, O(1) per edge; infinite weights make edges impassable), for maps that change a few tiles at a time.
 - **Queries:** Cypher-like pattern matching and variable-length path expansion. Patterns and filter expressions implement serde, and patterns print back as text that parses to the same pattern.
 - **Budgets:** traversals, path expansion and random walks can run under a `Budget` (most nodes visited, most results), failing or returning the first results with a `truncated` flag.
 - **Pathfinding:** BFS, Dijkstra and A* with pluggable heuristics.

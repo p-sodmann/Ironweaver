@@ -25,7 +25,7 @@ use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
-use super::{groups, NONE};
+use super::{groups, strength, NONE};
 use crate::{Direction, GraphError, Projection};
 
 /// Leiden options.
@@ -86,7 +86,8 @@ impl WGraph {
         WGraph { start, to, w, self_w, k }
     }
 
-    /// The projection's edges as undirected, parallel edges summed. Rows
+    /// The projection's edges as undirected, parallel edges summed
+    /// (impassable, infinite-weight edges count 0). Rows
     /// are merged from the sorted neighbour lists, in parallel.
     fn of(p: &Projection) -> WGraph {
         let both = p.direction() == Direction::Both;
@@ -95,7 +96,7 @@ impl WGraph {
             .with_min_len(256)
             .map(|u| {
                 let entries = |to: &'_ [u32], w: Option<&'_ [f64]>| -> Vec<(u32, f64)> {
-                    to.iter().enumerate().map(|(i, &v)| (v, w.map_or(1.0, |w| w[i]))).collect()
+                    to.iter().enumerate().map(|(i, &v)| (v, w.map_or(1.0, |w| strength(w[i])))).collect()
                 };
                 let out = entries(p.out_neighbors(u), p.out_weights(u));
                 // A directed edge u -> v is in u's out-row and v's in-row;

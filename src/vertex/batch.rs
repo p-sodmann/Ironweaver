@@ -50,7 +50,7 @@ pub fn project(
         let vertex = slf.try_borrow()?;
         projection::collect(py, &vertex, Some(&handle), &spec)?
     };
-    Ok(Projection { inner: py.detach(|| raw.finish()) })
+    Ok(Projection { inner: py.detach(|| raw.finish()), vertex: slf.as_ptr() as usize })
 }
 
 /// Validate the shared options (same rules and messages as

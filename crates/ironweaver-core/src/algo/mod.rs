@@ -18,6 +18,17 @@
 // spanning forests take edges as undirected but keep weights (parallel
 // edges add up in Leiden and modularity).
 //
+// Infinite weights mark impassable edges (`Projection::set_weights`): on a
+// weighted projection every search skips them, weighted or not (batch
+// shortest paths and distances, BFS levels, k shortest paths, betweenness,
+// closeness, harmonic centrality), node2vec walks never take them, spanning
+// forests leave them out, and algorithms that use weights as strengths
+// (PageRank, FastRP, Leiden, modularity) count them as 0 (`passable`,
+// `strength`).
+// Algorithms that only look at the structure (components, topological
+// order, cycles, degree, triangles, clustering, k-core, label propagation,
+// similarity) ignore weights, so such edges count there like any other.
+//
 // Randomised algorithms take a `seed` and give the same result for it
 // whatever the number of threads (per-item seeds from `mix`); parallel sums
 // over sources use `ordered_sum` for the same reason.
@@ -68,6 +79,31 @@ use crate::{Direction, GraphError, Projection};
 
 /// Marks "no node" / "unreached" in `u32` arrays.
 pub const NONE: u32 = u32::MAX;
+
+/// Whether searches may cross an edge of weight `w`: infinite weights mark
+/// impassable edges.
+#[inline]
+pub(crate) fn passable(w: f64) -> bool {
+    w != f64::INFINITY
+}
+
+/// Whether the `i`-th entry of a row with weights `w` (`None`:
+/// unweighted, every edge passable) can be crossed.
+#[inline]
+pub(crate) fn passable_at(w: Option<&[f64]>, i: usize) -> bool {
+    w.is_none_or(|w| passable(w[i]))
+}
+
+/// An edge's weight where weights are strengths (PageRank, FastRP,
+/// Leiden; node2vec's draw): impassable edges count 0.
+#[inline]
+pub(crate) fn strength(w: f64) -> f64 {
+    if passable(w) {
+        w
+    } else {
+        0.0
+    }
+}
 
 /// The simple undirected graph underlying a projection: for each node, the
 /// sorted distinct nodes joined to it by an edge in either direction,

@@ -196,7 +196,21 @@ assert arr.shortest_paths([("a", "c")])[0]["cost"] == 3.0
 
 `Projection.from_arrays(ids, src, dst, weight=None, coords=None, *, direction=None)`: edge `k` is `ids[src[k]] -> ids[dst[k]]`; int64/int32 and float64/float32 arrays (buffer protocol) or sequences. Edges keep the given order: same results as a Vertex with the same nodes and edges added in that order. `coords` `(n, d)` are node coordinates for `"astar"`. ValueError on duplicate ids, length mismatch, out-of-range indices, negative/NaN weights.
 
-Later graph changes don't affect it.
+Later graph changes don't affect it. Weights (not the structure) can change in place, at a cost proportional to the edges changed (microseconds for a few edges, vs. a rebuild):
+
+```python
+arr.set_weights([1], [np.inf])                      # edge 1 (b -> c) impassable
+assert arr.shortest_paths([("a", "c")]) == [None]
+arr.set_weights(np.array([1]), np.array([0.5]))     # passable again, cheaper
+assert arr.shortest_paths([("a", "c")])[0]["cost"] == 1.5
+pw = g.project(weight="weight")
+e = g["alice"].edges[0]                             # Vertex projections: number an Edge with edge_index
+pw.set_weights([pw.edge_index(e)], [7.0])
+assert pw.shortest_paths([("alice", e.to_node.id)])[0]["cost"] == 7.0
+```
+
+- `set_weights(edges, weights)`: edge numbers in projected order: `from_arrays` order, or for `Vertex.project` the Vertex's edge storage order among the projected edges (`edge_index(edge)` gives it; weighted Vertex projections only). One number per edge in any direction (a `"both"` projection updates both ends). Last weight wins for repeats. Results then equal a projection rebuilt with the new weights. ValueError (nothing changed) if unweighted, lengths differ, index out of range, weight negative/NaN; RuntimeError if a query runs on it in another thread.
+- `inf` = impassable: skipped by every search, weighted or hop-count (shortest_paths/distances with any method, bfs_levels, k_shortest_paths, betweenness/closeness/harmonic, node2vec walks) and by minimum_spanning_tree; weight 0 in pagerank/fastrp/leiden/modularity. Structure-only methods (components, topological_sort, find_cycle, degree, triangles, clustering, core_number, label_propagation, similarity, neighbors/degree) still count the edge.
 
 ## Analytics (on a Projection)
 

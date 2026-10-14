@@ -413,7 +413,8 @@ class Projection:
     Holds the structure (sorted neighbour lists in both directions), at most
     one weight per edge and the node ids, but no attributes. Queries run on
     all cores with the GIL released. A snapshot: later changes to the graph
-    don't affect it.
+    don't affect it. Edge weights can change in place
+    (:meth:`set_weights`); an infinite weight makes an edge impassable.
     """
 
     @staticmethod
@@ -475,6 +476,52 @@ class Projection:
     def degree(self, id: str, direction: Literal["out", "in"] | None = ...) -> int: ...
     def memory_usage(self) -> int:
         """Approximate memory used, in bytes."""
+        ...
+    def set_weights(
+        self, edges: Buffer | Sequence[int], weights: Buffer | Sequence[float]
+    ) -> None:
+        """Change the weights of some edges in place: edge ``edges[i]`` gets
+        ``weights[i]`` (if an edge is listed twice, the last weight wins).
+
+        Edges are numbered in projected order: for :meth:`from_arrays`, the
+        order of the edge arrays (edge ``k`` is ``src[k] -> dst[k]``); for
+        :meth:`Vertex.project`, the order in which the Vertex stores its
+        edges, among the projected ones (:meth:`edge_index` gives an edge's
+        number). One edge is one number whatever the direction: on a "both"
+        projection it is listed from both ends, and both entries change.
+
+        The structure stays the same. ``inf`` makes an edge impassable: every
+        search skips it (shortest paths and distances with any method, BFS
+        levels, k shortest paths, betweenness, closeness and harmonic
+        centrality, also unweighted; node2vec walks), the spanning tree
+        leaves it out, and PageRank, FastRP, Leiden and modularity count it
+        as weight 0. Algorithms that only look at the structure (components,
+        topological sort, cycles, degree, triangles, clustering, k-core,
+        label propagation, similarity, ``neighbors`` / ``degree``) still see
+        it. A finite weight makes it passable again.
+
+        Afterwards every method returns what a projection built with the new
+        weights would. Each call costs time in proportion to the number of
+        edges changed, not to the size of the projection. *edges* and
+        *weights* are numpy arrays (int64 / int32, float64 / float32) or
+        sequences, as for :meth:`from_arrays`.
+
+        Raises ValueError (changing nothing) on an unweighted projection,
+        lists of different lengths, an index outside ``0 .. edge_count() -
+        1``, or a negative or NaN weight; RuntimeError if a query is running
+        on this projection in another thread meanwhile.
+        """
+        ...
+    def edge_index(self, edge: Edge) -> int:
+        """The number of *edge* (an :class:`Edge` of the Vertex this
+        projection was made from) in projected order, as :meth:`set_weights`
+        takes it.
+
+        Raises ValueError if the projection is not a weighted one made by
+        :meth:`Vertex.project` (only those keep their edges), if the edge
+        belongs to another Vertex, or if it was not projected (filtered out,
+        or added or removed since).
+        """
         ...
     def shortest_paths(
         self,

@@ -213,6 +213,7 @@ Projection methods:
 - `shortest_paths(pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"astar"` if `heuristic` or `heuristic_scale` is given, `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
 - `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
 - `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `coord_dim` (coordinates per node, 0 without), `memory_usage()` (bytes).
+- `set_weights(edges, weights)` and `edge_index(edge)` change edge weights in place (see [Changing weights](#changing-weights--set_weights)).
 
 #### A* on a projection
 
@@ -265,6 +266,52 @@ assert undirected.neighbors("d") == ["b", "c"]
 - `src` / `dst` are 1-D int64 or int32 numpy arrays, `weight` float64 or float32 (any object with the buffer protocol; read without a Python call per item), or plain sequences. numpy itself is not required.
 - `coords` (an `(n, d)` array or `n` rows of `d` numbers) are node coordinates, for [A*](#a-on-a-projection).
 - Raises `ValueError` for lists of different lengths, indices out of range, negative or NaN weights (as on Vertex edges), duplicate ids or coords that are not finite or not one row per node.
+
+#### Changing weights — `set_weights(...)`
+
+The structure of a projection is fixed, but its weights can change in place: `set_weights(edges, weights)` gives edge `edges[i]` the weight `weights[i]`. It costs time in proportion to the number of edges changed, not to the size of the projection: on a 180,000-tile grid (`benchmarks/compare_set_weights.py`), changing the 4 edges into a tile takes about a microsecond, against about 60 ms to rebuild the projection. An infinite weight makes an edge impassable, a finite one makes it passable again, so a game map can block tiles (a building) or make them cheaper (a road) between queries.
+
+```python
+w, h = 5, 3
+ids = [f"{x},{y}" for y in range(h) for x in range(w)]
+src, dst = [], []
+for y in range(h):
+    for x in range(w):
+        for nx, ny in [(x + 1, y), (x, y + 1)]:
+            if nx < w and ny < h:
+                a, b = y * w + x, ny * w + nx
+                src += [a, b]
+                dst += [b, a]
+src, dst = np.array(src), np.array(dst)
+tiles = Projection.from_arrays(ids, src, dst, np.ones(len(src)))
+assert tiles.shortest_paths([("0,1", "4,1")])[0]["cost"] == 4.0
+
+building = np.flatnonzero(dst == 1 * w + 2)        # the edges into tile 2,1
+tiles.set_weights(building, np.full(len(building), np.inf))
+path = tiles.shortest_paths([("0,1", "4,1")])[0]
+assert path["cost"] == 6.0 and "2,1" not in path["nodelist"]
+tiles.set_weights(building, np.ones(len(building)))  # demolished
+assert tiles.shortest_paths([("0,1", "4,1")])[0]["cost"] == 4.0
+
+# A Vertex projection numbers its edges for you
+v2 = Vertex()
+for n in "abc":
+    v2.add_node(n)
+ab = v2.add_edge("a", "b", {"weight": 1.0})
+v2.add_edge("b", "c", {"weight": 1.0})
+v2.add_edge("a", "c", {"weight": 5.0})
+vp = v2.project(weight="weight")
+vp.set_weights([vp.edge_index(ab)], [np.inf])
+assert vp.shortest_paths([("a", "c")])[0]["nodelist"] == ["a", "c"]
+```
+
+- **Edge numbers** are positions in projected order. For `from_arrays` that is the order of the arrays: edge `k` is `src[k] -> dst[k]`. For `Vertex.project` it is the order in which the Vertex stores its edges (insertion order, except that an edge added after a removal can take the removed edge's place), counting only the projected edges; `edge_index(edge)` returns an `Edge`'s number (weighted projections made by `Vertex.project` only; `ValueError` for an edge of another Vertex, or one not projected).
+- One edge has one number in every direction: on a `"both"` projection it is listed from both of its ends and both entries change, and the reversed adjacency (`neighbors(id, "in")`) changes too. If an edge is listed twice, the last weight wins.
+- Afterwards every method returns exactly what a projection built with the new weights returns.
+- **`inf` is impassable** everywhere a path is searched, with weights or with hop counts: `shortest_paths` and `distances` (any method), `bfs_levels`, `k_shortest_paths`, betweenness, closeness and harmonic centrality, node2vec walks; `minimum_spanning_tree` leaves such edges out, and PageRank, FastRP, Leiden and modularity count them as weight 0. Methods that only look at the structure (components, `topological_sort`, `find_cycle`, `degree_centrality`, triangles, clustering, `core_number`, `label_propagation`, similarity, `neighbors`, `degree`) ignore weights and still count them.
+- Raises `ValueError` (changing nothing) on an unweighted projection, for lists of different lengths, an index outside `0 .. edge_count() - 1`, or a negative or NaN weight. `edges` / `weights` are arrays or sequences, as for `from_arrays`.
+- A query running in another thread holds the projection: `set_weights` raises `RuntimeError` meanwhile instead of changing weights under it.
+- A weighted projection keeps 4 bytes per edge (8 for `"both"`) to find each edge's entries, and once the reversed adjacency is built 4 more per entry; a weighted Vertex projection also keeps its edges' handles (8 bytes each).
 
 ### Random walks — `vertex.random_walks(...)`
 

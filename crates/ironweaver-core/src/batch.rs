@@ -15,11 +15,16 @@
 // admissible but inconsistent estimate still gives the cheapest path. Ties
 // in f = g + h prefer the larger g (the node closer to the target), which
 // keeps grids with many equal-cost paths from being explored in full.
+//
+// Edges of infinite weight are impassable (see `Projection::set_weights`):
+// Dijkstra and A* never relax them (an infinite cost never improves on
+// "unreached"), and BFS on a weighted projection skips them too.
 
 use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
+use crate::algo::passable_at;
 use crate::pathfinding::Metric;
 use crate::{GraphError, Projection};
 
@@ -185,8 +190,9 @@ impl Workspace {
                     if limit.is_some_and(|l| next > l) {
                         continue;
                     }
-                    for &v in p.out_neighbors(u) {
-                        if self.dist[v as usize].is_infinite() {
+                    let weights = p.out_weights(u);
+                    for (i, &v) in p.out_neighbors(u).iter().enumerate() {
+                        if passable_at(weights, i) && self.dist[v as usize].is_infinite() {
                             self.reach(v, next, u);
                             if Some(v) == target {
                                 return self.touched.len();

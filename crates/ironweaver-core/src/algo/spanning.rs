@@ -3,11 +3,13 @@
 // Minimum (or maximum) spanning forest by Kruskal's algorithm, edges taken
 // as undirected.
 
+use super::passable_at;
 use crate::{Direction, Projection};
 
 /// The edges of a minimum spanning forest (a spanning tree of every
 /// connected component), edges taken as undirected and weighted by the
-/// projection's weights (1 if unweighted); self-loops are ignored. With
+/// projection's weights (1 if unweighted); self-loops and impassable
+/// (infinite-weight) edges are left out. With
 /// `maximum`, the heaviest forest instead. Each edge is `(a, b, weight)`
 /// with `a < b`, in the order Kruskal's algorithm picks them (by weight,
 /// ties by `(a, b)`).
@@ -19,7 +21,7 @@ pub fn spanning_forest(p: &Projection, maximum: bool) -> Vec<(u32, u32, f64)> {
         let weights = p.out_weights(u);
         for (i, &v) in p.out_neighbors(u).iter().enumerate() {
             // An undirected projection lists every edge from both ends
-            if u == v || (both && v < u) {
+            if u == v || (both && v < u) || !passable_at(weights, i) {
                 continue;
             }
             edges.push((u.min(v), u.max(v), weights.map_or(1.0, |w| w[i])));
