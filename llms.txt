@@ -397,3 +397,5 @@ storage and O(n log n) time. Node views, repr, label/property lookups, pattern s
 and projections follow the setting. Derived subgraphs inherit it, while path
 sequences and edge adjacency keep their semantic order. Files do not store it;
 set it again after loading.
+
+Rust core only: `traversal::bidirectional_bfs_any` and `bidirectional_bfs_any_limited` return any shortest path through the first frontier meeting, without canonical tie-breaking. Their choice depends on edge order. Reconstruction edges consume the budget and truncation returns no partial path. Existing Rust and Python BFS APIs remain canonical.

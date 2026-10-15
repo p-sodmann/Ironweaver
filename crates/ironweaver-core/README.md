@@ -22,6 +22,11 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
 - **Queries:** Cypher-like pattern matching and variable-length path expansion. Patterns and filter expressions implement serde, and patterns print back as text that parses to the same pattern.
 - **Budgets:** traversals, path expansion and random walks can run under a `Budget` (most nodes visited, most results), failing or returning the first results with a `truncated` flag.
 - **Pathfinding:** BFS, Dijkstra and A* with pluggable heuristics.
+  `traversal::bidirectional_bfs_any` and `bidirectional_bfs_any_limited`
+  return any shortest path through the first meeting of the frontiers,
+  skipping canonical tie-breaking. The path depends on edge order; existing
+  `bidirectional_bfs` calls keep their canonical choice. Reconstruction
+  edges count against the budget; truncation returns no partial path.
 - **A file format** (JSON, or binary with a header and a CRC32), with atomic, deterministic saves, and binary loading from any reader without holding the whole file in memory.
 
 Payloads are read only through the `Attributes` trait, and user callbacks return `Result<_, X>` for your own error type `X`. `Record` (maps of `Value`s) is the ready-made payload.

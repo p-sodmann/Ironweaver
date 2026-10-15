@@ -47,6 +47,11 @@ a query layer and database foundations.
 
 ### Added
 
+- Rust core: `traversal::bidirectional_bfs_any` and
+  `bidirectional_bfs_any_limited` return any shortest path without canonical
+  tie-breaking, avoiding its extra work and edge-budget cost (#123).
+  Existing BFS APIs keep their canonical choice.
+
 - Opt-in `stats=True` on single and batch Python path queries exposes the core
   `settled` node counter in result metadata.
 

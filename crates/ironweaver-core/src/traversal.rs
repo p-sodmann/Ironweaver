@@ -351,6 +351,7 @@ type Depths = IxMap<NodeIx, usize>;
 /// shortest path. That is the path a one-sided BFS (or Dijkstra with unit
 /// weights) picks under the same rule (see [`find_path`](crate::pathfinding::find_path)); it does
 /// not depend on the order of the edges, nor on how the frontiers met.
+/// Use [`bidirectional_bfs_any`] to skip this canonical choice.
 pub fn bidirectional_bfs<N, E, X>(
     g: &Graph<N, E>,
     source: NodeIx,
@@ -385,6 +386,52 @@ where
     Ok(meter.finish(path)?)
 }
 
+/// A shortest path through the first meeting of the two frontiers.
+///
+/// Like [`bidirectional_bfs`], but skips canonical tie-breaking. The chosen
+/// shortest path depends on edge order. Reconstruction follows decreasing
+/// depths on each side, examining only edges at nodes on the returned path.
+/// Edge filters should give consistent answers throughout a call.
+pub fn bidirectional_bfs_any<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Option<Vec<NodeIx>>, X> {
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    bidirectional_search(g, source, target, max_depth, direction, &mut meter, edge_ok, PathMode::Any)
+}
+
+/// [`bidirectional_bfs_any`] under a [`Budget`]. Accounting follows
+/// [`bidirectional_bfs_limited`], including edges examined in reconstruction.
+/// If the budget stops reconstruction, returns `None`, never a partial path.
+#[allow(clippy::too_many_arguments)]
+pub fn bidirectional_bfs_any_limited<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    budget: Budget,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Limited<Option<Vec<NodeIx>>>, X>
+where
+    X: From<GraphError>,
+{
+    let mut meter = Meter::new(budget);
+    let path = bidirectional_search(g, source, target, max_depth, direction, &mut meter, edge_ok, PathMode::Any)?;
+    Ok(meter.finish(path)?)
+}
+
+#[derive(Clone, Copy)]
+enum PathMode {
+    Canonical,
+    Any,
+    Reachable,
+}
+
 /// Reachability only: stop at the first meeting without constructing a path.
 pub fn bidirectional_reachable<N, E, X>(
     g: &Graph<N, E>,
@@ -395,7 +442,8 @@ pub fn bidirectional_reachable<N, E, X>(
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<bool, X> {
     let mut meter = Meter::new(Budget::UNLIMITED);
-    Ok(bidirectional_search(g, source, target, max_depth, direction, &mut meter, edge_ok, false)?.is_some())
+    Ok(bidirectional_search(g, source, target, max_depth, direction, &mut meter, edge_ok, PathMode::Reachable)?
+        .is_some())
 }
 
 pub(crate) fn bidirectional_metered<N, E, X>(
@@ -407,7 +455,7 @@ pub(crate) fn bidirectional_metered<N, E, X>(
     meter: &mut Meter,
     edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
 ) -> Result<Option<Vec<NodeIx>>, X> {
-    bidirectional_search(g, source, target, max_depth, direction, meter, edge_ok, true)
+    bidirectional_search(g, source, target, max_depth, direction, meter, edge_ok, PathMode::Canonical)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -419,7 +467,7 @@ fn bidirectional_search<N, E, X>(
     direction: Direction,
     meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
-    canonical: bool,
+    mode: PathMode,
 ) -> Result<Option<Vec<NodeIx>>, X> {
     if source == target {
         return Ok(meter.produce().then(|| vec![source]));
@@ -450,7 +498,7 @@ fn bidirectional_search<N, E, X>(
         };
 
         let mut next = Vec::new();
-        let mut met = false;
+        let mut meeting = None;
         'level: for &ix in frontier.iter() {
             if !meter.enter() {
                 return Ok(None);
@@ -463,7 +511,7 @@ fn bidirectional_search<N, E, X>(
                     continue;
                 }
                 if other.contains_key(&neighbor) {
-                    met = true;
+                    meeting = Some(if forward { (ix, neighbor) } else { (neighbor, ix) });
                     break 'level;
                 }
                 this.insert(neighbor, depth + 1);
@@ -471,12 +519,13 @@ fn bidirectional_search<N, E, X>(
             }
         }
 
-        if met {
-            if !canonical {
-                return Ok(meter.produce().then(Vec::new));
-            }
+        if let Some((left, right)) = meeting {
             let ends = Ends { source, target, a: fwd_depth, b: bwd_depth, fwd: &fwd, bwd: &bwd };
-            let path = ends.canonical_path(g, direction, meter, &mut edge_ok)?;
+            let path = match mode {
+                PathMode::Reachable => Some(Vec::new()),
+                PathMode::Canonical => ends.canonical_path(g, direction, meter, &mut edge_ok)?,
+                PathMode::Any => ends.any_path(g, left, right, direction, meter, &mut edge_ok)?,
+            };
             return Ok(path.filter(|_| meter.produce()));
         }
         if forward {
@@ -505,6 +554,47 @@ struct Ends<'a> {
 }
 
 impl Ends<'_> {
+    /// Both meeting endpoints already have a shortest route to their end.
+    /// No viability search is needed: take the first allowed lower-depth edge.
+    #[allow(clippy::too_many_arguments)]
+    fn any_path<N, E, X>(
+        &self,
+        g: &Graph<N, E>,
+        left: NodeIx,
+        right: NodeIx,
+        direction: Direction,
+        meter: &mut Meter,
+        edge_ok: &mut impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+    ) -> Result<Option<Vec<NodeIx>>, X> {
+        let stop = crate::cancel::stop();
+        let mut path = vec![left];
+        for (start, depth, depths, dir) in
+            [(left, self.a, self.fwd, direction.reversed()), (right, self.b, self.bwd, direction)]
+        {
+            if start == right {
+                path.reverse();
+                path.push(right);
+            }
+            let mut cur = start;
+            for want in (0..depth).rev() {
+                let mut next = None;
+                for (e, u) in g.neighbors(cur, dir) {
+                    if stop.poll() || !meter.examine() {
+                        return Ok(None);
+                    }
+                    if depths.get(&u) == Some(&want) && edge_ok(e, g.edge_ref(e))? {
+                        next = Some(u);
+                        break;
+                    }
+                }
+                let Some(u) = next else { return Ok(None) };
+                path.push(u);
+                cur = u;
+            }
+        }
+        Ok(Some(path))
+    }
+
     /// Whether a target-side node can reach the source frontier, following
     /// strictly increasing backward depths. Iterative so long chains do not
     /// use the call stack. Every examined edge still consumes the budget.

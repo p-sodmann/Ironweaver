@@ -387,3 +387,15 @@ walks = v.random_walks(
 ```
 
 Duplicate walks are automatically removed.
+
+## Rust core: any shortest path
+
+Rust callers that do not need canonical tie-breaking can use
+`ironweaver_core::traversal::bidirectional_bfs_any` or
+`bidirectional_bfs_any_limited`, with the same arguments as their canonical
+BFS counterparts. They reconstruct a shortest path through the first meeting
+of the frontiers by following decreasing depths on each side. The chosen
+path depends on edge order. This skips the canonical viability search;
+reconstruction still checks filters and cancellation and charges examined
+edges to the budget. Truncation returns `None`, never a partial path.
+Python BFS and the existing Rust BFS functions keep their canonical behavior.
