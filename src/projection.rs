@@ -277,9 +277,8 @@ fn coord_array(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<(usize, Vec<f
 #[pyclass(module = "ironweaver")]
 pub struct Projection {
     pub(crate) inner: ironweaver_core::Projection,
-    /// Address of the Vertex it was projected from (0 for `from_arrays`),
-    /// to refuse other vertices' edges in `edge_index`.
-    pub(crate) vertex: usize,
+    /// Unique source token; keeps no reference to the Vertex or its graph.
+    pub(crate) vertex: Option<std::sync::Arc<()>>,
 }
 
 impl Projection {
@@ -394,6 +393,7 @@ pub(crate) fn run_shortest_paths(
     pairs: &[(u32, u32)],
     method: &BatchMethod,
     max_cost: Option<f64>,
+    stats: bool,
 ) -> PyResult<Py<PyList>> {
     let weighted = method.method.weighted;
     let results = interrupt::released(py, interrupt::size(p), || match &method.astar {
@@ -401,7 +401,7 @@ pub(crate) fn run_shortest_paths(
         None => batch::shortest_paths(p, pairs, weighted, max_cost),
     })?
     .map_err(graph_error)?;
-    paths_to_py(py, p, results, weighted)
+    paths_to_py(py, p, results, weighted, stats)
 }
 
 fn parse_side(direction: Option<&str>) -> PyResult<bool> {
@@ -448,7 +448,7 @@ impl Projection {
                 Ok(raw.finish())
             })
             .map_err(graph_error)?;
-        Ok(Projection { inner, vertex: 0 })
+        Ok(Projection { inner, vertex: None })
     }
 
     /// Change the weights of some edges in place: edge `edges[i]` gets
@@ -477,14 +477,16 @@ impl Projection {
     /// the edge was not projected (filtered out, added or removed since);
     /// only weighted projections made by `Vertex.project` keep their edges.
     fn edge_index(&self, edge: &Bound<'_, Edge>) -> PyResult<usize> {
+        let py = edge.py();
         let edge = edge.get();
-        if self.vertex == 0 || !self.inner.is_weighted() {
+        if self.vertex.is_none() || !self.inner.is_weighted() {
             return Err(PyValueError::new_err(
                 "edge_index needs a weighted projection made by Vertex.project (from_arrays: edges are numbered \
                  in the order given)",
             ));
         }
-        if edge.vertex.as_ptr() as usize != self.vertex {
+        if !std::sync::Arc::ptr_eq(self.vertex.as_ref().expect("checked source"), &edge.vertex.try_borrow(py)?.identity)
+        {
             return Err(PyValueError::new_err("edge belongs to another Vertex than the one projected"));
         }
         self.inner.edge_index(edge.ix).ok_or_else(|| PyValueError::new_err("edge is not in the projection"))
@@ -567,8 +569,10 @@ impl Projection {
     /// as `heuristic_scale` (default 1) times the "euclidean" (default) or
     /// "manhattan" distance to the target. Returns one entry per pair:
     /// {"nodelist": [...], "cost": c}, or None if the target is unreachable
-    /// within `max_cost`.
-    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None))]
+    /// within `max_cost`. With `stats=True`, found entries also contain
+    /// {"stats": {"settled": n}} (Dijkstra settled, A* expanded, BFS reached).
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, stats=false))]
     fn shortest_paths(
         &self,
         py: Python<'_>,
@@ -577,6 +581,7 @@ impl Projection {
         max_cost: Option<f64>,
         heuristic: Option<&str>,
         heuristic_scale: Option<f64>,
+        stats: bool,
     ) -> PyResult<Py<PyList>> {
         let args = AStarArgs { heuristic, scale: heuristic_scale, coords: false };
         let method = resolve_batch_method(method, self.inner.is_weighted(), Query::Pairs, args)?;
@@ -584,7 +589,7 @@ impl Projection {
             .iter()
             .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
             .collect::<PyResult<_>>()?;
-        run_shortest_paths(py, &self.inner, &dense, &method, max_cost)
+        run_shortest_paths(py, &self.inner, &dense, &method, max_cost, stats)
     }
 
     /// Cost from each source to every node it reaches within `max_cost`
@@ -964,7 +969,7 @@ impl Projection {
         let p = &self.inner;
         let paths = interrupt::released(py, interrupt::size(p), || algo::k_shortest_paths(p, s, t, k, weighted))?
             .map_err(graph_error)?;
-        paths_to_py(py, p, paths.into_iter().map(Some).collect(), weighted)
+        paths_to_py(py, p, paths.into_iter().map(Some).collect(), weighted, false)
     }
 
     fn __repr__(&self) -> String {

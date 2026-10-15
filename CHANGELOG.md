@@ -47,6 +47,9 @@ a query layer and database foundations.
 
 ### Added
 
+- Opt-in `stats=True` on single and batch Python path queries exposes the core
+  `settled` node counter in result metadata.
+
 - **Analytics on `Vertex.project(...)`**, a compact read-only snapshot
   (CSR, sorted neighbour lists, optional weights, node / edge filters);
   algorithms run in Rust with the GIL released, many of them in parallel:
@@ -206,6 +209,11 @@ a query layer and database foundations.
 
 ### Changed
 
+- BFS path queries now accept weights as passability filters: infinite weights
+  are skipped, finite weights still count as one hop. `Node.bfs_search` stays
+  unweighted and avoids canonical path reconstruction; path BFS checks only
+  the target-side candidates needed for the canonical path.
+
 - **Equal-cost paths are chosen by a stated rule** (#116): walking back
   from the target, each step goes to the earliest neighbour in node order
   (insertion order on a Vertex, the index on a Projection) through which a
@@ -271,6 +279,9 @@ a query layer and database foundations.
 - PyO3 0.29.
 
 ### Fixed
+
+- `Projection.edge_index` identifies its source Vertex with a unique token,
+  preventing unrelated edges from matching after Vertex address reuse.
 
 - Weighted betweenness centrality with zero-weight edges no longer gives
   NaN: a node's predecessors are the neighbours settled before it on a

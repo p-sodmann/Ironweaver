@@ -23,6 +23,7 @@ pub(crate) fn paths_to_py(
     p: &ironweaver_core::Projection,
     results: Vec<Option<DensePath>>,
     weighted: bool,
+    stats: bool,
 ) -> PyResult<Py<PyList>> {
     let _gc = GcPause::new(py);
     let out = PyList::empty(py);
@@ -34,6 +35,11 @@ pub(crate) fn paths_to_py(
                 let ids: Vec<&str> = path.nodes.iter().map(|&u| p.id(u)).collect();
                 entry.set_item("nodelist", ids)?;
                 entry.set_item("cost", cost_object(py, weighted, path.cost)?)?;
+                if stats {
+                    let stats = PyDict::new(py);
+                    stats.set_item("settled", path.settled)?;
+                    entry.set_item("stats", stats)?;
+                }
                 out.append(entry)?;
             }
         }

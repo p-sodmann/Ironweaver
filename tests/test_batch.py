@@ -113,8 +113,7 @@ def test_errors():
         g.distances(["a"], method="astar")
     with pytest.raises(ValueError):
         g.shortest_paths([("a", "e")], "nope")
-    with pytest.raises(ValueError):
-        g.shortest_paths([("a", "e")], "bfs", weight="weight")
+    assert g.shortest_paths([("a", "e")], "bfs", weight="weight") == g.shortest_paths([("a", "e")], "bfs")
     with pytest.raises(ValueError):
         g.distances(["a"], max_cost=-1)
     # Weights are validated for the whole graph when the snapshot is built

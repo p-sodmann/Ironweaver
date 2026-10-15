@@ -102,7 +102,7 @@ One method, several algorithms. `method` picks one; `Vertex.path_methods()` list
 | `"dijkstra"` | cheapest by edge weight | – |
 | `"astar"` | cheapest by edge weight, guided by a heuristic | `heuristic`, `coords`, `distances` |
 
-With `method=None` it picks `"astar"` if `heuristic`, `coords` or `distances` is given, `"dijkstra"` if `weight` is given, and `"bfs"` otherwise. Options shared by the weighted methods: `weight` (edge attribute, default `"weight"`), `default_weight` (cost of edges without it, default 1.0), `max_cost`, and `direction` (`"out"`, `"in"`, `"both"`). An option a method doesn't accept raises `TypeError`.
+With `method=None` it picks `"astar"` if `heuristic`, `coords` or `distances` is given, `"dijkstra"` if `weight` is given, and `"bfs"` otherwise. Shared options: `weight` (edge attribute, default `"weight"`), `default_weight` (cost of edges without it, default 1.0), `max_cost`, and `direction` (`"out"`, `"in"`, `"both"`). An option a method doesn't accept raises `TypeError`.
 
 The result is a new `Vertex` with copies of the path's nodes and the edges between them. `meta["nodelist"]` has the path in order, `meta["cost"]` its cost (the number of edges for `"bfs"`), `meta["method"]` the algorithm used, and `meta["expanded"]` how many nodes Dijkstra/A* settled. `ValueError` if a node is missing or the target is unreachable. If several shortest paths exist, the choice is fixed (see [Equal-cost paths](#equal-cost-paths)).
 
@@ -115,6 +115,34 @@ path = v.shortest_path("target", "root", method="bfs", direction="in", max_depth
 ```
 
 The older `shortest_path_bfs(...)` and `shortest_path_dijkstra(...)` still work but are deprecated (they emit a `DeprecationWarning`): use `method="bfs"` and `method="dijkstra"`.
+
+With `method="bfs"`, supplying `weight` or `default_weight` makes infinite
+weights impassable, just as on a weighted projection. Finite weights still
+count as one hop; missing attributes use `default_weight` (1.0). Negative,
+NaN and nonnumeric weights raise errors when examined. Without either option,
+BFS ignores weights. `Node.bfs_search` stays unweighted; use an edge filter
+to exclude weighted edges there. It only tests reachability and stops as soon
+as its frontiers meet.
+
+#### Search statistics
+
+Pass `stats=True` to `Vertex.shortest_path`, `Vertex.shortest_paths` or
+`Projection.shortest_paths`. A single path stores `meta["stats"]`; each found
+batch path includes a `"stats"` entry. Both contain `{"settled": n}`. Default
+results keep their existing shape and keys. Unreachable batch entries remain
+`None`, and a single unreachable query still raises `ValueError`.
+
+Dijkstra counts nodes settled (including the target), A* counts expansions
+(including the target and any reopens). Batch BFS counts nodes reached;
+bidirectional Vertex BFS counts frontier nodes expanded from both ends,
+so these BFS counts measure different work and should not be compared directly.
+Canonical path reconstruction is excluded from the node count. The counters
+already exist in the core; opting in only adds Python result conversion.
+
+```python
+measured = v.shortest_path("root", "target", method="dijkstra", stats=True)
+assert measured.meta["stats"]["settled"] == measured.meta["expanded"]
+```
 
 #### Equal-cost paths
 
@@ -205,7 +233,7 @@ assert set(d["root"]) == {"root", "a", "b"}            # {source: {node: cost}}
 assert v.distances(["root"], targets=["z"])["root"] == {"z": 2}
 ```
 
-Paths are those `shortest_path` returns, ties included (see [Equal-cost paths](#equal-cost-paths)), whatever the number of threads. Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `shortest_paths` also takes `"astar"`, with `coords` (as in `shortest_path`; `["x", "y"]` by default), `heuristic` and `heuristic_scale` (see [A* on a projection](#a-on-a-projection)); every node needs coordinates. `distances` has no `"astar"`: an estimate towards one target does not help a search to every node. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises (for weighted methods). Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
+Paths are those `shortest_path` returns, ties included (see [Equal-cost paths](#equal-cost-paths)), whatever the number of threads. Both take `method` (`"bfs"` or `"dijkstra"`; None picks dijkstra if `weight` is given), `weight`, `default_weight`, `max_cost` and `direction`, like `shortest_path`. `shortest_paths` also takes `"astar"`, with `coords` (as in `shortest_path`; `["x", "y"]` by default), `heuristic` and `heuristic_scale` (see [A* on a projection](#a-on-a-projection)); every node needs coordinates. `distances` has no `"astar"`: an estimate towards one target does not help a search to every node. Edge weights are read and validated for the whole graph when the snapshot is built, so a negative or non-numeric weight anywhere raises when weights are supplied. Unknown node ids raise `ValueError`. The number of threads follows rayon (`RAYON_NUM_THREADS`).
 
 ### Projections — `vertex.project(...)`
 
@@ -237,7 +265,7 @@ A projection is a snapshot: later changes to the graph don't affect it. Don't ch
 
 Projection methods:
 
-- `shortest_paths(pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"astar"` if `heuristic` or `heuristic_scale` is given, `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
+- `shortest_paths(pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, stats=False)` and `distances(sources, targets=None, method=None, *, max_cost=None)` work as on `Vertex`. `method=None` picks `"astar"` if `heuristic` or `heuristic_scale` is given, `"dijkstra"` on a weighted projection and `"bfs"` otherwise.
 - `neighbors(id, direction="out")`, `degree(id, direction="out")`: `"out"` or `"in"`, one entry per edge.
 - `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `coord_dim` (coordinates per node, 0 without), `memory_usage()` (bytes).
 - `set_weights(edges, weights)` and `edge_index(edge)` change edge weights in place (see [Changing weights](#changing-weights--set_weights)).

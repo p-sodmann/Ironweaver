@@ -344,7 +344,9 @@ class Node:
         """Search for *target_id* using BFS. Returns the Node if found, None otherwise.
 
         The search runs from both ends at once (bidirectional BFS), which is
-        much faster on large graphs.
+        much faster on large graphs. It stops when the frontiers meet, without
+        reconstructing a path. Weights are ignored; use an edge filter to
+        exclude impassable edges.
         *filter* / *edge_filter* are applied to every edge either side
         follows; *depth* bounds the path length.
         """
@@ -531,10 +533,15 @@ class Projection:
         max_cost: float | None = ...,
         heuristic: Literal["euclidean", "manhattan"] | None = ...,
         heuristic_scale: float | None = ...,
+        stats: bool = ...,
     ) -> list[dict[str, Any] | None]:
         """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "astar" if
         *heuristic* or *heuristic_scale* is given, "dijkstra" on a weighted
         projection, "bfs" otherwise.
+
+        With ``stats=True``, each found path includes ``"stats": {"settled": n}``.
+        Counts are Dijkstra settled nodes, A* expansions (including reopens),
+        or BFS nodes reached; unreachable entries stay None.
 
         "astar" needs a weighted projection with node coordinates
         (``Vertex.project(coords=...)`` or ``from_arrays(coords=...)``). It
@@ -1060,6 +1067,7 @@ class Vertex:
         heuristic: Literal["euclidean", "manhattan"] | None = ...,
         coords: str | list[str] | None = ...,
         distances: str | None = ...,
+        stats: bool = ...,
     ) -> Vertex:
         """Find a shortest path with the chosen algorithm (see ``path_methods()``).
 
@@ -1068,6 +1076,16 @@ class Vertex:
         estimate of the remaining cost). ``None`` picks ``"astar"`` if
         *heuristic*, *coords* or *distances* is given, ``"dijkstra"`` if
         *weight* is given, else ``"bfs"``.
+
+        With ``stats=True``, ``meta["stats"]`` contains ``{"settled": n}``.
+        Dijkstra counts settled nodes, A* expansions (including reopens),
+        and bidirectional BFS frontier nodes expanded from both ends.
+        Default results are unchanged.
+
+        BFS uses supplied *weight* / *default_weight* only to skip infinite
+        weights: all finite weights count as one hop. Missing weights use
+        the default (1.0); negative, NaN and nonnumeric weights are errors.
+        Without either option BFS and ``Node.bfs_search`` ignore weights.
 
         Shared options: *weight* (default ``"weight"``), *default_weight*
         (cost of edges without it, default 1.0), *max_cost* (for ``"bfs"``: a
@@ -1154,8 +1172,13 @@ class Vertex:
         coords: str | list[str] | None = ...,
         heuristic: Literal["euclidean", "manhattan"] | None = ...,
         heuristic_scale: float | None = ...,
+        stats: bool = ...,
     ) -> list[dict[str, Any] | None]:
         """Shortest paths for many (source, target) pairs, in parallel.
+
+        With ``stats=True``, each found path includes ``"stats": {"settled": n}``.
+        Counts are Dijkstra settled nodes, A* expansions (including reopens),
+        or BFS nodes reached; unreachable entries stay None.
 
         The graph and its edge costs are copied into a projection once, then
         all queries run on every core with the GIL released (use

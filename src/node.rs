@@ -398,9 +398,9 @@ impl Node {
         };
         let ok = edge_predicate(py, &self.vertex, &filter, &edge_filter);
         let path = interrupt::polling(py, || {
-            traversal::bidirectional_bfs(&v.graph, self.ix, target, depth, Direction::Out, ok)
+            traversal::bidirectional_reachable(&v.graph, self.ix, target, depth, Direction::Out, ok)
         })??;
-        path.map(|_| Node::handle(py, &self.vertex, target)).transpose()
+        path.then(|| Node::handle(py, &self.vertex, target)).transpose()
     }
 
     /// Retrieve a value from ``attr`` by key ("labels" gives the labels).

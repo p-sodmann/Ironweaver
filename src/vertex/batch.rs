@@ -50,7 +50,8 @@ pub fn project(
         let vertex = slf.try_borrow()?;
         projection::collect(py, &vertex, Some(&handle), &spec)?
     };
-    Ok(Projection { inner: py.detach(|| raw.finish()), vertex: slf.as_ptr() as usize })
+    let identity = slf.try_borrow()?.identity.clone();
+    Ok(Projection { inner: py.detach(|| raw.finish()), vertex: Some(identity) })
 }
 
 /// Validate the shared options (same rules and messages as
@@ -108,6 +109,7 @@ pub fn shortest_paths(
     coords: Option<&Bound<'_, PyAny>>,
     heuristic: Option<&str>,
     heuristic_scale: Option<f64>,
+    stats: bool,
 ) -> PyResult<Py<PyList>> {
     let coords = coords.filter(|c| !c.is_none());
     let astar = AStarArgs { heuristic, scale: heuristic_scale, coords: coords.is_some() };
@@ -118,7 +120,7 @@ pub fn shortest_paths(
         .collect::<PyResult<_>>()?;
     let p = project_all(vertex, py, &spec)?;
     let pairs: Vec<(u32, u32)> = pairs.iter().map(|&(s, t)| (dense(&p, s), dense(&p, t))).collect();
-    run_shortest_paths(py, &p, &pairs, &method, max_cost)
+    run_shortest_paths(py, &p, &pairs, &method, max_cost, stats)
 }
 
 #[allow(clippy::too_many_arguments)]

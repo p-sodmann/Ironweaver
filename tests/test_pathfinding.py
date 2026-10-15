@@ -118,7 +118,6 @@ def test_source_equals_target():
     ({"method": "bfs", "heuristic": "euclidean"}, TypeError, "does not accept option 'heuristic'"),
     ({"method": "dijkstra", "max_depth": 3}, TypeError, "accepted options: none"),
     ({"method": "astar", "max_depth": 3}, TypeError, "heuristic, coords, distances"),
-    ({"method": "bfs", "weight": "weight"}, ValueError, "ignores edge weights"),
     ({"method": "dijkstra", "max_cost": -1}, ValueError, "max_cost must be non-negative"),
     ({"direction": "sideways"}, ValueError, "direction must be"),
 ])

@@ -175,7 +175,10 @@ fn registry_resolution_and_validation() {
     let bfs = pathfinding::resolve(Some("bfs"), false, &[]).unwrap();
     assert!(pathfinding::check_options(bfs, &["max_depth"]).is_ok());
     assert!(matches!(pathfinding::check_options(bfs, &["coords"]), Err(GraphError::InvalidType(_))));
-    assert!(pathfinding::edge_cost(bfs, Some("w".into()), None).is_err());
+    assert_eq!(
+        pathfinding::edge_cost(bfs, Some("w".into()), None).unwrap(),
+        pathfinding::EdgeCost::weighted(Some("w".into()), None)
+    );
 }
 
 #[test]

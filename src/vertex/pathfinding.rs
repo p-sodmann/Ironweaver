@@ -159,8 +159,9 @@ pub fn shortest_path<'py>(
     options: Option<Bound<'py, PyDict>>,
 ) -> PyResult<Py<Vertex>> {
     let options = Options(options);
+    let stats = options.get::<bool>("stats")?.unwrap_or(false);
     let names = options.names()?;
-    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).filter(|&name| name != "stats").collect();
     let method = resolve(method, weight.is_some(), &names).map_err(graph_error)?;
     check_options(method, &names).map_err(graph_error)?;
     let cost = edge_cost(method, weight, default_weight).map_err(graph_error)?;
@@ -198,8 +199,13 @@ pub fn shortest_path<'py>(
         meta.set_item("cost", result.nodes.len() - 1)?;
     }
     meta.set_item("method", method.name)?;
-    if let Some(n) = result.expanded {
+    if let Some(n) = result.expanded.filter(|_| method.weighted) {
         meta.set_item("expanded", n)?;
+    }
+    if stats {
+        let stats = PyDict::new(py);
+        stats.set_item("settled", result.expanded.expect("every path method counts nodes"))?;
+        meta.set_item("stats", stats)?;
     }
     build_subgraph(py, vertex, result.nodes, meta.unbind(), false)
 }

@@ -385,6 +385,19 @@ where
     Ok(meter.finish(path)?)
 }
 
+/// Reachability only: stop at the first meeting without constructing a path.
+pub fn bidirectional_reachable<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<bool, X> {
+    let mut meter = Meter::new(Budget::UNLIMITED);
+    Ok(bidirectional_search(g, source, target, max_depth, direction, &mut meter, edge_ok, false)?.is_some())
+}
+
 pub(crate) fn bidirectional_metered<N, E, X>(
     g: &Graph<N, E>,
     source: NodeIx,
@@ -392,7 +405,21 @@ pub(crate) fn bidirectional_metered<N, E, X>(
     max_depth: Option<usize>,
     direction: Direction,
     meter: &mut Meter,
+    edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+) -> Result<Option<Vec<NodeIx>>, X> {
+    bidirectional_search(g, source, target, max_depth, direction, meter, edge_ok, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bidirectional_search<N, E, X>(
+    g: &Graph<N, E>,
+    source: NodeIx,
+    target: NodeIx,
+    max_depth: Option<usize>,
+    direction: Direction,
+    meter: &mut Meter,
     mut edge_ok: impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+    canonical: bool,
 ) -> Result<Option<Vec<NodeIx>>, X> {
     if source == target {
         return Ok(meter.produce().then(|| vec![source]));
@@ -445,8 +472,11 @@ pub(crate) fn bidirectional_metered<N, E, X>(
         }
 
         if met {
+            if !canonical {
+                return Ok(meter.produce().then(Vec::new));
+            }
             let ends = Ends { source, target, a: fwd_depth, b: bwd_depth, fwd: &fwd, bwd: &bwd };
-            let path = ends.canonical_path(g, &fwd_frontier, &bwd_frontier, direction, meter, &mut edge_ok)?;
+            let path = ends.canonical_path(g, direction, meter, &mut edge_ok)?;
             return Ok(path.filter(|_| meter.produce()));
         }
         if forward {
@@ -475,6 +505,57 @@ struct Ends<'a> {
 }
 
 impl Ends<'_> {
+    /// Whether a target-side node can reach the source frontier, following
+    /// strictly increasing backward depths. Iterative so long chains do not
+    /// use the call stack. Every examined edge still consumes the budget.
+    #[allow(clippy::too_many_arguments)]
+    fn viable<'g, N, E, X>(
+        &self,
+        g: &'g Graph<N, E>,
+        start: NodeIx,
+        direction: Direction,
+        meter: &mut Meter,
+        edge_ok: &mut impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
+        cache: &mut IxMap<NodeIx, bool>,
+        stack: &mut Vec<(NodeIx, Steps<'g>)>,
+    ) -> Result<bool, X> {
+        if let Some(&answer) = cache.get(&start) {
+            return Ok(answer);
+        }
+        let reverse = direction.reversed();
+        stack.clear();
+        stack.push((start, Steps::new(g, start, reverse)));
+        let stop = crate::cancel::stop();
+        while let Some((u, steps)) = stack.last_mut() {
+            if stop.poll() {
+                return Ok(false);
+            }
+            let Some((e, v)) = steps.next(g, direction == Direction::Both) else {
+                cache.insert(*u, false);
+                stack.pop();
+                continue;
+            };
+            if !meter.examine() {
+                return Ok(false);
+            }
+            let depth = self.bwd[u];
+            let at_meeting = depth == self.b;
+            let fits =
+                if at_meeting { self.fwd.get(&v) == Some(&self.a) } else { self.bwd.get(&v) == Some(&(depth + 1)) };
+            if !fits || (!at_meeting && cache.get(&v) == Some(&false)) || !edge_ok(e, g.edge_ref(e))? {
+                continue;
+            }
+            if at_meeting || cache.get(&v) == Some(&true) {
+                for &(u, _) in stack.iter() {
+                    cache.insert(u, true);
+                }
+                return Ok(true);
+            }
+            stack.push((v, Steps::new(g, v, reverse)));
+        }
+        Ok(false)
+    }
+
     /// The shortest path that walks back from the target to the lowest
     /// node (by `NodeIx`) one step closer to the source each time. Edges
     /// looked at count as examined; `None` if the budget runs out or the
@@ -482,84 +563,55 @@ impl Ends<'_> {
     fn canonical_path<N, E, X>(
         &self,
         g: &Graph<N, E>,
-        fwd_frontier: &[NodeIx],
-        bwd_frontier: &[NodeIx],
         direction: Direction,
         meter: &mut Meter,
         edge_ok: &mut impl FnMut(EdgeIx, &Edge<E>) -> Result<bool, X>,
     ) -> Result<Option<Vec<NodeIx>>, X> {
-        let (a, b, len) = (self.a, self.b, self.a + self.b + 1);
+        let (a, len) = (self.a, self.a + self.b + 1);
         let stop = crate::cancel::stop();
-        // The target's side of every shortest path: nodes at depth b of bwd
-        // linked from depth a of fwd (found from the smaller frontier), then
-        // layer by layer the nodes they lead to one step closer to the target.
-        let mut on_path: IxSet<NodeIx> = IxSet::default();
-        let mut layer = Vec::new();
-        if fwd_frontier.len() <= bwd_frontier.len() {
-            for &x in fwd_frontier {
-                for (e, y) in g.neighbors(x, direction) {
-                    if stop.poll() || !meter.examine() {
-                        return Ok(None);
-                    }
-                    if self.bwd.get(&y) == Some(&b) && !on_path.contains(&y) && edge_ok(e, g.edge_ref(e))? {
-                        on_path.insert(y);
-                        layer.push(y);
-                    }
-                }
-            }
-        } else {
-            for &y in bwd_frontier {
-                for (e, x) in g.neighbors(y, direction.reversed()) {
-                    if stop.poll() || !meter.examine() {
-                        return Ok(None);
-                    }
-                    if self.fwd.get(&x) == Some(&a) && edge_ok(e, g.edge_ref(e))? {
-                        on_path.insert(y);
-                        layer.push(y);
-                        break;
-                    }
-                }
-            }
-        }
-        for k in (1..=b).rev() {
-            let mut next = Vec::new();
-            for &y in &layer {
-                for (e, z) in g.neighbors(y, direction) {
-                    if stop.poll() || !meter.examine() {
-                        return Ok(None);
-                    }
-                    if self.bwd.get(&z) == Some(&(k - 1)) && !on_path.contains(&z) && edge_ok(e, g.edge_ref(e))? {
-                        on_path.insert(z);
-                        next.push(z);
-                    }
-                }
-            }
-            layer = next;
-        }
+        // Test target-side candidates lazily. Most queries need only one
+        // successful chain to the meeting level, rather than every node on
+        // every shortest path. Cache failed branches as well as successes.
+        let mut viable: IxMap<NodeIx, bool> = IxMap::default();
 
         // Walk back from the target: the node at distance `pos` from the
         // source steps to the lowest neighbour at distance `pos - 1`.
         let mut path = vec![self.target];
         let mut cur = self.target;
+        let mut candidates = Vec::new();
+        let mut stack = Vec::new();
         for want in (0..len).rev() {
-            let mut best: Option<NodeIx> = None;
+            candidates.clear();
+            let mut best = None;
             for (e, u) in g.neighbors(cur, direction.reversed()) {
                 if stop.poll() || !meter.examine() {
                     return Ok(None);
                 }
-                if best.is_some_and(|best| u >= best) {
-                    continue;
-                }
-                let fits = if want > a {
-                    self.bwd.get(&u) == Some(&(len - want)) && on_path.contains(&u)
-                } else {
-                    self.fwd.get(&u) == Some(&want)
-                };
-                if fits && edge_ok(e, g.edge_ref(e))? {
-                    best = Some(u);
+                if want <= a {
+                    // Source-side depths already prove viability. Find the
+                    // lowest predecessor in one pass, without sorting.
+                    if best.is_none_or(|best| u < best) && self.fwd.get(&u) == Some(&want) && edge_ok(e, g.edge_ref(e))?
+                    {
+                        best = Some(u);
+                    }
+                } else if self.bwd.get(&u) == Some(&(len - want)) {
+                    candidates.push((u, e));
                 }
             }
-            // Only an edge filter that changes its answers leaves no step
+            // On the target side, try lowest predecessors first: do not
+            // prove viability for a higher candidate we would replace.
+            if want > a {
+                candidates.sort_unstable();
+                for &(u, e) in &candidates {
+                    if edge_ok(e, g.edge_ref(e))?
+                        && self.viable(g, u, direction, meter, edge_ok, &mut viable, &mut stack)?
+                    {
+                        best = Some(u);
+                        break;
+                    }
+                }
+            }
+            // Only an edge filter that changes its answers leaves no step.
             let Some(u) = best else { return Ok(None) };
             path.push(u);
             cur = u;

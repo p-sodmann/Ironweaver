@@ -1,0 +1,108 @@
+bfs before round 0:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2235 ms/query
+  bfs_search: 0.1865 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.5006 ms/query
+  bfs_search: 0.4315 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0256 ms/query
+  bfs_search: 0.0108 ms/query
+
+astar before round 0:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.860 ms     0.927 ms   (1.0x)
+  astar manhattan         0.209 ms     0.175 ms   (4.1x)
+  astar euclidean         0.515 ms     0.432 ms   (1.7x)
+
+bfs after round 0:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2385 ms/query
+  bfs_search: 0.1564 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.4984 ms/query
+  bfs_search: 0.4410 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0283 ms/query
+  bfs_search: 0.0088 ms/query
+
+astar after round 0:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.926 ms     0.850 ms   (1.0x)
+  astar manhattan         0.206 ms     0.155 ms   (4.5x)
+  astar euclidean         0.469 ms     0.413 ms   (2.0x)
+
+bfs after round 1:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2190 ms/query
+  bfs_search: 0.1538 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.5063 ms/query
+  bfs_search: 0.4164 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0246 ms/query
+  bfs_search: 0.0078 ms/query
+
+astar after round 1:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.918 ms     0.842 ms   (1.0x)
+  astar manhattan         0.207 ms     0.152 ms   (4.4x)
+  astar euclidean         0.471 ms     0.418 ms   (2.0x)
+
+bfs before round 1:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2296 ms/query
+  bfs_search: 0.1967 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.5102 ms/query
+  bfs_search: 0.4336 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0234 ms/query
+  bfs_search: 0.0109 ms/query
+
+astar before round 1:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.864 ms     0.829 ms   (1.0x)
+  astar manhattan         0.207 ms     0.159 ms   (4.2x)
+  astar euclidean         0.470 ms     0.437 ms   (1.8x)
+
+bfs before round 2:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2166 ms/query
+  bfs_search: 0.1881 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.4991 ms/query
+  bfs_search: 0.4294 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0215 ms/query
+  bfs_search: 0.0107 ms/query
+
+astar before round 2:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.868 ms     0.871 ms   (1.0x)
+  astar manhattan         0.188 ms     0.157 ms   (4.6x)
+  astar euclidean         0.466 ms     0.420 ms   (1.9x)
+
+bfs after round 2:
+grid random trips: 10000 nodes, 100 queries
+  shortest_path: 0.2302 ms/query
+  bfs_search: 0.1543 ms/query
+grid corner trips: 10000 nodes, 100 queries
+  shortest_path: 0.5033 ms/query
+  bfs_search: 0.4157 ms/query
+random: 10000 nodes, 100 queries
+  shortest_path: 0.0272 ms/query
+  bfs_search: 0.0078 ms/query
+
+astar after round 2:
+39,001 nodes, 151,320 edges, 100 random trips, median of 9, threads: 1
+  method             one call/trip        batch
+  dijkstra                0.884 ms     0.847 ms   (1.0x)
+  astar manhattan         0.203 ms     0.156 ms   (4.4x)
+  astar euclidean         0.471 ms     0.422 ms   (1.9x)
+
