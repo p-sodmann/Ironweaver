@@ -399,3 +399,13 @@ sequences and edge adjacency keep their semantic order. Files do not store it;
 set it again after loading.
 
 Rust core only: `traversal::bidirectional_bfs_any` and `bidirectional_bfs_any_limited` return any shortest path through the first frontier meeting, without canonical tie-breaking. Their choice depends on edge order. Reconstruction edges consume the budget and truncation returns no partial path. Existing Rust and Python BFS APIs remain canonical.
+
+Projection integer handles: `shortest_paths(pairs, ..., by_index=True)`
+accepts integer positions in `ids()` (pair sequences or an `(n, 2)` int32/int64
+numpy matrix) and returns integer `nodelist`s. Boolean/noninteger endpoints
+raise TypeError; negative/out-of-range endpoints raise ValueError. Positions
+are stable for this snapshot. `weakly_connected_components(by_index=True)`
+and `strongly_connected_components(by_index=True)` return groups of these
+indices, largest first with members in projection order. Default string
+behavior remains unchanged. This option is specific to these Projection
+methods, not Vertex batch methods or Projection.distances.

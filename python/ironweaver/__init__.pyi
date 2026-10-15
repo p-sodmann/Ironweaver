@@ -527,17 +527,23 @@ class Projection:
         ...
     def shortest_paths(
         self,
-        pairs: list[tuple[str, str]],
+        pairs: Sequence[tuple[str, str]] | Sequence[tuple[int, int]] | Buffer,
         method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
         heuristic: Literal["euclidean", "manhattan"] | None = ...,
         heuristic_scale: float | None = ...,
+        by_index: bool = ...,
         stats: bool = ...,
     ) -> list[dict[str, Any] | None]:
         """Like :meth:`Vertex.shortest_paths`; ``method=None`` picks "astar" if
         *heuristic* or *heuristic_scale* is given, "dijkstra" on a weighted
         projection, "bfs" otherwise.
+
+        With ``by_index=True``, pairs and returned nodelists use integer
+        positions in ``ids()``. Also accepts an (n, 2) int32/int64 numpy
+        matrix. Negative, out-of-range, boolean and noninteger indices are
+        rejected. Default string-id behavior is unchanged.
 
         With ``stats=True``, each found path includes ``"stats": {"settled": n}``.
         Counts are Dijkstra settled nodes, A* expansions (including reopens),
@@ -577,11 +583,11 @@ class Projection:
         """Like :meth:`Vertex.distances`, on this projection ("astar" raises
         ValueError: it needs one target per query)."""
         ...
-    def weakly_connected_components(self) -> list[list[str]]:
-        """Components ignoring edge direction: lists of ids, largest first."""
+    def weakly_connected_components(self, *, by_index: bool = ...) -> list[list[str]] | list[list[int]]:
+        """Components ignoring edge direction: lists of ids (indices with ``by_index=True``), largest first."""
         ...
-    def strongly_connected_components(self) -> list[list[str]]:
-        """Strongly connected components along the edges: lists of ids, largest first."""
+    def strongly_connected_components(self, *, by_index: bool = ...) -> list[list[str]] | list[list[int]]:
+        """Strongly connected components along the edges: lists of ids (indices with ``by_index=True``), largest first."""
         ...
     def topological_sort(self) -> list[str]:
         """Ids with every edge pointing forwards (ties in projection order).

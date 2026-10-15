@@ -226,3 +226,8 @@ assert p.bfs_levels(["a", "f"], max_depth=1) == {"a": 0, "b": 1, "f": 0, "e": 1}
 - `tests/test_algorithms.py` compares every algorithm with networkx on random multigraphs.
 - `tests/test_graphalytics.py` runs the [LDBC Graphalytics](https://ldbcouncil.org/benchmarks/graphalytics/) validation graphs through BFS, WCC, CDLP, LCC, PageRank and SSSP, and checks the results against the benchmark's reference outputs.
 - `benchmarks/compare_libraries.py` runs the common algorithms with ironweaver, networkx, igraph, rustworkx and networkit on medium-sized graphs, checks that the results agree, and writes the timings to `performance_results/library_comparison.md`. The graphs are two SNAP social networks (GitHub developers and Facebook pages, downloaded once) and a generated Kronecker graph.
+
+Both `weakly_connected_components(by_index=True)` and
+`strongly_connected_components(by_index=True)` return lists of integer
+positions in the projection's `ids()` instead of strings. Component order
+(largest first) and member order (projection order) are unchanged.

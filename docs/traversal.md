@@ -270,6 +270,26 @@ Projection methods:
 - `ids()`, `node_count()`, `edge_count()`, `len(p)`, `id in p`, `weighted`, `direction`, `coord_dim` (coordinates per node, 0 without), `memory_usage()` (bytes).
 - `set_weights(edges, weights)` and `edge_index(edge)` change edge weights in place (see [Changing weights](#changing-weights--set_weights)).
 
+#### Integer node handles
+
+`Projection.shortest_paths(..., by_index=True)` accepts pairs of integer
+positions in `ids()` and returns those positions in each `nodelist`. This
+avoids node-id lookups and string results for repeated analytics queries.
+Pairs may also be an `(n, 2)` int32/int64 numpy array (including strided
+arrays). Booleans and nonintegers raise `TypeError`; negative or out-of-range
+indices raise `ValueError`. Indices remain stable for the projection's
+lifetime, even if the source Vertex changes. Other options and path tie
+breaking are unchanged. The default still takes and returns string ids.
+
+```python
+from ironweaver import Projection
+indexed = Projection.from_arrays(["a", "b", "c"], [0, 1], [1, 2])
+assert indexed.shortest_paths([(0, 2)], by_index=True) == [
+    {"nodelist": [0, 1, 2], "cost": 2}
+]
+assert indexed.weakly_connected_components(by_index=True) == [[0, 1, 2]]
+```
+
 #### A* on a projection
 
 With coordinates compiled in (`project(coords=...)` or `Projection.from_arrays(..., coords=...)`), `shortest_paths(pairs, "astar")` guides each search towards its target. The estimate of the remaining cost is `heuristic_scale` (default 1) times the `"euclidean"` (default) or `"manhattan"` distance between the node's and the target's coordinates, read from a flat array.
