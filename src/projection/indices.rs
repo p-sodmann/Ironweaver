@@ -1,8 +1,7 @@
 //! Validate dense node indices before any algorithm sees them.
-use pyo3::buffer::PyUntypedBuffer;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBool;
+use pyo3::types::{PyBool, PyMemoryView};
 
 fn checked(value: i64, count: usize) -> PyResult<u32> {
     if value < 0 || value as u64 >= count as u64 {
@@ -40,8 +39,13 @@ pub(super) fn pairs(py: Python<'_>, obj: &Bound<'_, PyAny>, count: usize) -> PyR
                 return Err(PyValueError::new_err("each pair must contain exactly two node indices"));
             }
             let endpoint = |value: &Bound<'_, PyAny>| {
+                // Older NumPy scalar buffers have null shape/stride pointers
+                // for zero dimensions, which PyUntypedBuffer rejects. A
+                // memoryview still exposes their Boolean format correctly.
                 if value.is_instance_of::<PyBool>()
-                    || PyUntypedBuffer::get(value).is_ok_and(|b| b.format().to_bytes() == b"?")
+                    || PyMemoryView::from(value)
+                        .and_then(|b| b.getattr("format")?.extract::<String>())
+                        .is_ok_and(|format| format == "?")
                 {
                     return Err(PyTypeError::new_err("node indices must be integers, not bool"));
                 }

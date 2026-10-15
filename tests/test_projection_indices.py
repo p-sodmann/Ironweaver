@@ -63,9 +63,23 @@ def test_numpy_pairs(projection):
         for bad in [np.array([0, 2], dtype=dtype), np.zeros((1, 3), dtype=dtype)]:
             with pytest.raises(ValueError):
                 projection.shortest_paths(bad, by_index=True)
-    for pairs in [np.array([[0., 2.]]), np.array([[False, True]]), [(np.bool_(False), 2)]]:
-        with pytest.raises(TypeError):
-            projection.shortest_paths(pairs, by_index=True)
+    assert projection.shortest_paths([(np.int32(0), np.int64(2))], by_index=True) == [
+        {"nodelist": [0, 1, 2], "cost": 2}
+    ]
+
+
+@pytest.mark.parametrize("kind", ["float_matrix", "bool_matrix", "false_scalar", "true_scalar", "bool_array_scalar"])
+def test_numpy_noninteger_pairs(projection, kind):
+    np = pytest.importorskip("numpy")
+    pairs = {
+        "float_matrix": np.array([[0., 2.]]),
+        "bool_matrix": np.array([[False, True]]),
+        "false_scalar": [(np.bool_(False), 2)],
+        "true_scalar": [(np.bool_(True), 2)],
+        "bool_array_scalar": [(np.array(False), 2)],
+    }[kind]
+    with pytest.raises(TypeError, match="node indices"):
+        projection.shortest_paths(pairs, by_index=True)
 
 
 def test_snapshot_indices_and_default_mode():
