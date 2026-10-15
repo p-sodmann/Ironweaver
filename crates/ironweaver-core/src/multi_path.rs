@@ -29,9 +29,9 @@ pub struct MultiPath {
 /// dominate its scaled distance to the goal. Nodes may reopen.
 ///
 /// Equal-cost exits prefer the lower target index. Inside the path, equal
-/// costs over steps that increase the represented distance prefer the lower predecessor index (the
-/// virtual source sorts after real nodes); zero edges retain the first
-/// route to avoid cycles. Input and edge order do not decide ties.
+/// costs over steps that increase the represented distance prefer the lower
+/// predecessor index (the virtual source sorts after real nodes). Steps
+/// with unchanged distance retain the first route to avoid cycles. Input and edge order do not decide ties.
 #[allow(clippy::too_many_arguments)]
 pub fn shortest_path_multi(
     p: &Projection,
@@ -66,12 +66,12 @@ pub fn shortest_path_multi(
     } else if goal_coords.is_some() {
         return Err(GraphError::InvalidArgument("goal_coords is an option of method 'astar'".into()));
     }
-    if let Some(goal) = goal_coords {
-        if goal.len() != p.coord_dim() || goal.iter().any(|v| !v.is_finite()) {
-            return Err(GraphError::InvalidArgument(
-                "goal_coords must contain one finite value per coordinate dimension".into(),
-            ));
-        }
+    if let Some(goal) = goal_coords
+        && (goal.len() != p.coord_dim() || goal.iter().any(|v| !v.is_finite()))
+    {
+        return Err(GraphError::InvalidArgument(
+            "goal_coords must contain one finite value per coordinate dimension".into(),
+        ));
     }
     if sources.is_empty() || targets.is_empty() {
         return Ok(None);
@@ -79,6 +79,9 @@ pub fn shortest_path_multi(
     let n = p.node_count();
     let mut exits = vec![f64::INFINITY; n];
     for &(u, cost) in targets {
+        if stop.poll() {
+            return Ok(None);
+        }
         exits[u as usize] = exits[u as usize].min(cost + 0.0);
     }
     let h = |u: u32| {
@@ -88,10 +91,16 @@ pub fn shortest_path_multi(
         let coords = p.coords(u).expect("coordinates checked");
         match goal_coords {
             Some(goal) => a.scale * a.metric.distance(coords, goal),
-            None => targets
-                .iter()
-                .map(|&(v, exit)| a.scale * a.metric.distance(coords, p.coords(v).unwrap()) + exit)
-                .fold(f64::INFINITY, f64::min),
+            None => {
+                let mut estimate = f64::INFINITY;
+                for &(v, exit) in targets {
+                    if stop.poll() {
+                        return 0.0;
+                    }
+                    estimate = estimate.min(a.scale * a.metric.distance(coords, p.coords(v).unwrap()) + exit);
+                }
+                estimate
+            }
         }
     };
     let none = u32::MAX;
@@ -99,10 +108,16 @@ pub fn shortest_path_multi(
     let mut parent = vec![none; n];
     // Seed in node order, independent of the caller's endpoint ordering.
     for &(u, cost) in sources {
+        if stop.poll() {
+            return Ok(None);
+        }
         dist[u as usize] = dist[u as usize].min(cost + 0.0);
     }
     let mut heap = BinaryHeap::new();
     for (u, &d) in dist.iter().enumerate() {
+        if stop.poll() {
+            return Ok(None);
+        }
         if d.is_finite() && max_cost.is_none_or(|limit| d <= limit) {
             heap.push((Reverse((d + h(u as u32)).to_bits()), d.to_bits(), Reverse(u as u32)));
         }

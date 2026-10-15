@@ -27,6 +27,10 @@ The graph engine behind the [ironweaver](https://pypi.org/project/ironweaver/) P
   skipping canonical tie-breaking. The path depends on edge order; existing
   `bidirectional_bfs` calls keep their canonical choice. Reconstruction
   edges count against the budget; truncation returns no partial path.
+- **Routing between endpoint sets:** `multi_path::shortest_path_multi`
+  minimizes entry cost + graph path cost + exit cost with one Dijkstra or
+  A* search. A* can estimate towards coordinates of a real destination
+  between junctions.
 - **A file format** (JSON, or binary with a header and a CRC32), with atomic, deterministic saves, and binary loading from any reader without holding the whole file in memory.
 
 Payloads are read only through the `Attributes` trait, and user callbacks return `Result<_, X>` for your own error type `X`. `Record` (maps of `Value`s) is the ready-made payload.

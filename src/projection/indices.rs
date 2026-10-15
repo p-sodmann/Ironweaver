@@ -25,7 +25,12 @@ pub(super) fn pairs(py: Python<'_>, obj: &Bound<'_, PyAny>, count: usize) -> PyR
         if shape[1] != 2 {
             return Err(PyValueError::new_err("pairs must have shape (n, 2)"));
         }
-        return values.chunks_exact(2).map(|row| Ok((checked(row[0], count)?, checked(row[1], count)?))).collect();
+        return values
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|row| Ok((checked(row[0], count)?, checked(row[1], count)?)))
+            .collect();
     }
     obj.try_iter()?
         .map(|row| {
