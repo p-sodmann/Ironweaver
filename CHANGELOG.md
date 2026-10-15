@@ -47,6 +47,15 @@ a query layer and database foundations.
 
 ### Added
 
+- `Projection.shortest_paths(..., by_index=True)` accepts dense integer
+  node pairs (including numpy int32/int64 matrices) and returns integer
+  paths. Both connected-component methods accept `by_index=True` to return
+  integer groups, avoiding node-id conversion for analytics (#125).
+
+- `Projection.shortest_path_multi` finds one cheapest route between endpoint
+  sets with entry/exit costs, using one Dijkstra or A* search (optional real
+  goal coordinates), with deterministic ties and optional search statistics.
+
 - Rust core: `traversal::bidirectional_bfs_any` and
   `bidirectional_bfs_any_limited` return any shortest path without canonical
   tie-breaking, avoiding its extra work and edge-budget cost (#123).

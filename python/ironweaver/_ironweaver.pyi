@@ -179,13 +179,27 @@ class Projection:
     def edge_index(self, edge: Edge) -> int: ...
     def shortest_paths(
         self,
-        pairs: list[tuple[str, str]],
+        pairs: Sequence[tuple[str, str]] | Sequence[tuple[int, int]] | Buffer,
         method: Literal["bfs", "dijkstra", "astar"] | None = ...,
         *,
         max_cost: float | None = ...,
         heuristic: Literal["euclidean", "manhattan"] | None = ...,
         heuristic_scale: float | None = ...,
+        stats: bool = ...,
+        by_index: bool = ...,
     ) -> list[dict[str, Any] | None]: ...
+    def shortest_path_multi(
+        self,
+        sources: list[tuple[str, float]],
+        targets: list[tuple[str, float]],
+        method: Literal["dijkstra", "astar"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
+        goal_coords: Sequence[float] | None = ...,
+        stats: bool = ...,
+    ) -> dict[str, Any] | None: ...
     def distances(
         self,
         sources: list[str],
@@ -194,8 +208,8 @@ class Projection:
         *,
         max_cost: float | None = ...,
     ) -> dict[str, dict[str, float]]: ...
-    def weakly_connected_components(self) -> list[list[str]]: ...
-    def strongly_connected_components(self) -> list[list[str]]: ...
+    def weakly_connected_components(self, *, by_index: bool = ...) -> list[list[str]] | list[list[int]]: ...
+    def strongly_connected_components(self, *, by_index: bool = ...) -> list[list[str]] | list[list[int]]: ...
     def topological_sort(self) -> list[str]: ...
     def find_cycle(self) -> list[str] | None: ...
     def degree_centrality(self, direction: Literal["out", "in"] | None = ...) -> dict[str, float]: ...

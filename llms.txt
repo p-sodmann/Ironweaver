@@ -399,3 +399,30 @@ sequences and edge adjacency keep their semantic order. Files do not store it;
 set it again after loading.
 
 Rust core only: `traversal::bidirectional_bfs_any` and `bidirectional_bfs_any_limited` return any shortest path through the first frontier meeting, without canonical tie-breaking. Their choice depends on edge order. Reconstruction edges consume the budget and truncation returns no partial path. Existing Rust and Python BFS APIs remain canonical.
+
+Projection integer handles: `shortest_paths(pairs, ..., by_index=True)`
+accepts integer positions in `ids()` (pair sequences or an `(n, 2)` int32/int64
+numpy matrix) and returns integer `nodelist`s. Boolean/noninteger endpoints
+raise TypeError; negative/out-of-range endpoints raise ValueError. Positions
+are stable for this snapshot. `weakly_connected_components(by_index=True)`
+and `strongly_connected_components(by_index=True)` return groups of these
+indices, largest first with members in projection order. Default string
+behavior remains unchanged. This option is specific to these Projection
+methods, not Vertex batch methods or Projection.distances.
+
+`Projection.shortest_path_multi(sources, targets, method=None, *, max_cost=None,
+heuristic=None, heuristic_scale=None, goal_coords=None, stats=False)` performs
+one search minimizing entry + graph + exit costs. Endpoint lists contain
+`(id, finite_nonnegative_cost)` pairs; duplicates use minimum cost, empty
+sides return None. Returns `{"nodelist": [...], "cost": c, "source": id,
+"target": id}` or None; stats adds `{"stats": {"settled": n}}`. The total
+limit includes both endpoint costs. Default is dijkstra (unit graph edges
+if unweighted), or astar when A* options are supplied. A* requires projection
+coordinates; without goal_coords h=min(target exit + scaled metric distance
+from node to target), otherwise h=scaled metric distance to the real goal.
+For optimality, edges must dominate scaled distances and, with a real goal,
+each target exit must dominate its scaled distance to that goal. Goal coords
+are A*-only. Ties prefer lowest target index then lowest predecessor, with
+the virtual source after real nodes; steps with unchanged represented cost
+keep their first predecessor to avoid cycles. Infinite edges/overflowing
+route costs are impassable.

@@ -36,6 +36,11 @@ assert p.strongly_connected_components() == [["a", "b", "c"], ["d", "e"], ["f"],
 
 Groups are ordered largest first. Equal sizes keep projection order, and members are in projection order too (the graph's node order).
 
+Both `weakly_connected_components(by_index=True)` and
+`strongly_connected_components(by_index=True)` return lists of integer
+positions in the projection's `ids()` instead of strings. Component order
+(largest first) and member order (projection order) are unchanged.
+
 ## Cycles and topological order
 
 ```python
@@ -226,3 +231,46 @@ assert p.bfs_levels(["a", "f"], max_depth=1) == {"a": 0, "b": 1, "f": 0, "e": 1}
 - `tests/test_algorithms.py` compares every algorithm with networkx on random multigraphs.
 - `tests/test_graphalytics.py` runs the [LDBC Graphalytics](https://ldbcouncil.org/benchmarks/graphalytics/) validation graphs through BFS, WCC, CDLP, LCC, PageRank and SSSP, and checks the results against the benchmark's reference outputs.
 - `benchmarks/compare_libraries.py` runs the common algorithms with ironweaver, networkx, igraph, rustworkx and networkit on medium-sized graphs, checks that the results agree, and writes the timings to `performance_results/library_comparison.md`. The graphs are two SNAP social networks (GitHub developers and Facebook pages, downloaded once) and a generated Kronecker graph.
+
+## Routing between endpoint sets
+
+`Projection.shortest_path_multi` minimizes entry cost + graph path cost +
+exit cost with one search, useful when a start or destination lies between
+junctions. Endpoints are `(node_id, cost)` pairs; costs must be finite and
+nonnegative. Duplicate ids use the lowest cost. An empty side, an unreachable
+route, or a route above `max_cost` returns `None`. The limit includes entry
+and exit costs. Infinite graph edges are impassable; an overflowing route
+cost cannot be returned. Unweighted projections use unit graph edges.
+
+```python
+from ironweaver import Projection
+roads = Projection.from_arrays(
+    ["a", "b", "c"], [0, 1], [1, 2], [1.0, 1.0],
+    coords=[[0.0], [1.0], [2.0]],
+)
+route = roads.shortest_path_multi(
+    [("a", 0.5), ("b", 2.0)], [("c", 0.5)],
+    method="astar", heuristic="manhattan", goal_coords=[2.5],
+)
+assert route == {"nodelist": ["a", "b", "c"], "cost": 3.0,
+                 "source": "a", "target": "c"}
+```
+
+The default method is `"dijkstra"`, or `"astar"` when `heuristic`,
+`heuristic_scale` or `goal_coords` is supplied. A* needs projection
+coordinates. Without `goal_coords`, its estimate is the minimum of exit
+cost plus scaled metric distance to each target; with it, the estimate is
+scaled metric distance to that real destination. For optimal results, edge
+costs must dominate the scaled metric distance between their endpoints;
+when using a real goal, each exit cost must also dominate the scaled metric
+distance from its target junction to that goal. A larger, inadmissible
+estimate can return a more expensive route. The search reopens nodes for
+admissible but inconsistent estimates. `goal_coords` is only accepted by A*.
+
+Equal total costs prefer the lowest target index, then walking backward the
+lowest predecessor through which a cheapest route arrives. The virtual
+source sorts after real nodes. A step that leaves the represented floating
+point distance unchanged keeps its first route to avoid cycles (including
+positive weights too small to change a large accumulated cost). Input and
+edge order do not decide ties. `stats=True` adds `"stats": {"settled": n}`,
+counting Dijkstra settlements or A* expansions, including reopens.

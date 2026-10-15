@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
 use std::collections::{HashMap, HashSet};
 
+mod indices;
 pub(crate) mod results;
 
 use self::results::{distances_to_py, groups_to_py, paths_to_py, per_node, rows_to_py};
@@ -561,6 +562,8 @@ impl Projection {
     }
 
     /// Shortest path for each (source_id, target_id) pair, in parallel.
+    /// With `by_index=True`, pairs and returned nodelists use integer positions
+    /// in `ids()` instead of strings. Accepts an (n, 2) integer numpy array.
     ///
     /// `method`: "dijkstra" (weights; needs a weighted projection), "astar"
     /// (weights and node coordinates) or "bfs" (edge count); None picks
@@ -572,24 +575,107 @@ impl Projection {
     /// within `max_cost`. With `stats=True`, found entries also contain
     /// {"stats": {"settled": n}} (Dijkstra settled, A* expanded, BFS reached).
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, stats=false))]
+    #[pyo3(signature = (pairs, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, stats=false, by_index=false))]
     fn shortest_paths(
         &self,
         py: Python<'_>,
-        pairs: Vec<(String, String)>,
+        pairs: &Bound<'_, PyAny>,
         method: Option<&str>,
         max_cost: Option<f64>,
         heuristic: Option<&str>,
         heuristic_scale: Option<f64>,
         stats: bool,
+        by_index: bool,
     ) -> PyResult<Py<PyList>> {
         let args = AStarArgs { heuristic, scale: heuristic_scale, coords: false };
         let method = resolve_batch_method(method, self.inner.is_weighted(), Query::Pairs, args)?;
-        let dense: Vec<(u32, u32)> = pairs
-            .iter()
-            .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
-            .collect::<PyResult<_>>()?;
-        run_shortest_paths(py, &self.inner, &dense, &method, max_cost, stats)
+        let dense = if by_index {
+            indices::pairs(py, pairs, self.inner.node_count())?
+        } else {
+            pairs
+                .extract::<Vec<(String, String)>>()?
+                .iter()
+                .map(|(s, t)| Ok((self.index(s, "Root node")?, self.index(t, "Target node")?)))
+                .collect::<PyResult<Vec<_>>>()?
+        };
+        if by_index {
+            let p = &self.inner;
+            let weighted = method.method.weighted;
+            let paths = interrupt::released(py, interrupt::size(p), || match &method.astar {
+                Some(astar) => batch::shortest_paths_astar(p, &dense, astar, max_cost),
+                None => batch::shortest_paths(p, &dense, weighted, max_cost),
+            })?
+            .map_err(graph_error)?;
+            results::paths_to_py_mode(py, p, paths, weighted, stats, true)
+        } else {
+            run_shortest_paths(py, &self.inner, &dense, &method, max_cost, stats)
+        }
+    }
+
+    /// One search minimizing entry cost + graph cost + exit cost.
+    /// Endpoint lists contain (node id, finite nonnegative cost) pairs.
+    /// Duplicate endpoints use their lowest cost; empty endpoints return None.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (sources, targets, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, goal_coords=None, stats=false))]
+    fn shortest_path_multi(
+        &self,
+        py: Python<'_>,
+        sources: Vec<(String, f64)>,
+        targets: Vec<(String, f64)>,
+        method: Option<&str>,
+        max_cost: Option<f64>,
+        heuristic: Option<&str>,
+        heuristic_scale: Option<f64>,
+        goal_coords: Option<Vec<f64>>,
+        stats: bool,
+    ) -> PyResult<Py<PyAny>> {
+        let selected = method.or_else(|| {
+            if heuristic.is_some() || heuristic_scale.is_some() || goal_coords.is_some() {
+                Some("astar")
+            } else {
+                Some("dijkstra")
+            }
+        });
+        if !matches!(selected, Some("dijkstra" | "astar")) {
+            return Err(PyValueError::new_err("shortest_path_multi method must be 'dijkstra' or 'astar'"));
+        }
+        // Dijkstra also works on unweighted projections (unit graph costs).
+        let resolved = resolve_batch_method(
+            selected,
+            true,
+            Query::Pairs,
+            AStarArgs { heuristic, scale: heuristic_scale, coords: false },
+        )?;
+        let dense = |endpoints: &[(String, f64)], what| -> PyResult<Vec<(u32, f64)>> {
+            endpoints.iter().map(|(id, c)| Ok((self.index(id, what)?, *c))).collect()
+        };
+        let sources = dense(&sources, "Root node")?;
+        let targets = dense(&targets, "Target node")?;
+        let result = interrupt::released(py, interrupt::size(&self.inner), || {
+            ironweaver_core::multi_path::shortest_path_multi(
+                &self.inner,
+                &sources,
+                &targets,
+                resolved.astar.as_ref(),
+                goal_coords.as_deref(),
+                max_cost,
+            )
+        })?
+        .map_err(graph_error)?;
+        let Some(result) = result else {
+            return Ok(py.None());
+        };
+        let entry = PyDict::new(py);
+        entry.set_item("nodelist", result.path.nodes.iter().map(|&u| self.inner.id(u)).collect::<Vec<_>>())?;
+        entry.set_item("cost", result.path.cost)?;
+        entry.set_item("source", self.inner.id(result.source))?;
+        entry.set_item("target", self.inner.id(result.target))?;
+        if stats {
+            let counters = PyDict::new(py);
+            counters.set_item("settled", result.path.settled)?;
+            entry.set_item("stats", counters)?;
+        }
+        Ok(entry.into_any().unbind())
     }
 
     /// Cost from each source to every node it reaches within `max_cost`
@@ -616,18 +702,28 @@ impl Projection {
 
     /// Weakly connected components (edges in either direction), as lists of
     /// ids: largest first, members in projection order.
-    fn weakly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+    #[pyo3(signature = (*, by_index=false))]
+    fn weakly_connected_components(&self, py: Python<'_>, by_index: bool) -> PyResult<Py<PyList>> {
         let p = &self.inner;
         let groups = interrupt::released(py, interrupt::size(p), || algo::weakly_connected_components(p))?;
-        groups_to_py(py, p, &groups)
+        if by_index {
+            Ok(PyList::new(py, &groups)?.unbind())
+        } else {
+            groups_to_py(py, p, &groups)
+        }
     }
 
     /// Strongly connected components along the projection's edges, as
     /// lists of ids: largest first, members in projection order.
-    fn strongly_connected_components(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+    #[pyo3(signature = (*, by_index=false))]
+    fn strongly_connected_components(&self, py: Python<'_>, by_index: bool) -> PyResult<Py<PyList>> {
         let p = &self.inner;
         let groups = interrupt::released(py, interrupt::size(p), || algo::strongly_connected_components(p))?;
-        groups_to_py(py, p, &groups)
+        if by_index {
+            Ok(PyList::new(py, &groups)?.unbind())
+        } else {
+            groups_to_py(py, p, &groups)
+        }
     }
 
     /// Node ids ordered so that every edge goes from an earlier to a later

@@ -26,6 +26,7 @@ pub mod format;
 pub mod graph;
 pub mod heap_size;
 pub mod index;
+pub mod multi_path;
 pub mod ops;
 pub mod pathfinding;
 pub mod projection;
