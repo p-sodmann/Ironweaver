@@ -572,6 +572,34 @@ class Projection:
         "astar" on a projection without weights or coordinates.
         """
         ...
+    def shortest_path_multi(
+        self,
+        sources: list[tuple[str, float]],
+        targets: list[tuple[str, float]],
+        method: Literal["dijkstra", "astar"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
+        goal_coords: Sequence[float] | None = ...,
+        stats: bool = ...,
+    ) -> dict[str, Any] | None:
+        """One search minimizing entry + graph + exit costs. Endpoints are
+        (id, finite nonnegative cost) pairs. Duplicates use the minimum;
+        empty sides return None. Result has nodelist, cost, source, target;
+        stats=True adds stats.settled. max_cost includes entry and exit.
+
+        Default method is dijkstra (unit edges on unweighted projections),
+        or astar if an A* option is given. A* needs projection coordinates.
+        Without goal_coords its estimate is min(exit + scaled distance to
+        each target); with goal_coords, scaled distance to that goal. For
+        optimal results edges must dominate scaled metric distances, and
+        exits must dominate scaled distances from targets to the goal.
+        Equal costs prefer the lowest target index, then lowest predecessor
+        at each step that increases represented distance; the virtual source
+        sorts after nodes. Unchanged-distance steps keep the first route
+        to avoid cycles.
+        """
     def distances(
         self,
         sources: list[str],

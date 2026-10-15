@@ -188,6 +188,18 @@ class Projection:
         stats: bool = ...,
         by_index: bool = ...,
     ) -> list[dict[str, Any] | None]: ...
+    def shortest_path_multi(
+        self,
+        sources: list[tuple[str, float]],
+        targets: list[tuple[str, float]],
+        method: Literal["dijkstra", "astar"] | None = ...,
+        *,
+        max_cost: float | None = ...,
+        heuristic: Literal["euclidean", "manhattan"] | None = ...,
+        heuristic_scale: float | None = ...,
+        goal_coords: Sequence[float] | None = ...,
+        stats: bool = ...,
+    ) -> dict[str, Any] | None: ...
     def distances(
         self,
         sources: list[str],

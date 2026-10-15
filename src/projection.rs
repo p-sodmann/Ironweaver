@@ -612,6 +612,72 @@ impl Projection {
         }
     }
 
+    /// One search minimizing entry cost + graph cost + exit cost.
+    /// Endpoint lists contain (node id, finite nonnegative cost) pairs.
+    /// Duplicate endpoints use their lowest cost; empty endpoints return None.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (sources, targets, method=None, *, max_cost=None, heuristic=None, heuristic_scale=None, goal_coords=None, stats=false))]
+    fn shortest_path_multi(
+        &self,
+        py: Python<'_>,
+        sources: Vec<(String, f64)>,
+        targets: Vec<(String, f64)>,
+        method: Option<&str>,
+        max_cost: Option<f64>,
+        heuristic: Option<&str>,
+        heuristic_scale: Option<f64>,
+        goal_coords: Option<Vec<f64>>,
+        stats: bool,
+    ) -> PyResult<Py<PyAny>> {
+        let selected = method.or_else(|| {
+            if heuristic.is_some() || heuristic_scale.is_some() || goal_coords.is_some() {
+                Some("astar")
+            } else {
+                Some("dijkstra")
+            }
+        });
+        if !matches!(selected, Some("dijkstra" | "astar")) {
+            return Err(PyValueError::new_err("shortest_path_multi method must be 'dijkstra' or 'astar'"));
+        }
+        // Dijkstra also works on unweighted projections (unit graph costs).
+        let resolved = resolve_batch_method(
+            selected,
+            true,
+            Query::Pairs,
+            AStarArgs { heuristic, scale: heuristic_scale, coords: false },
+        )?;
+        let dense = |endpoints: &[(String, f64)], what| -> PyResult<Vec<(u32, f64)>> {
+            endpoints.iter().map(|(id, c)| Ok((self.index(id, what)?, *c))).collect()
+        };
+        let sources = dense(&sources, "Root node")?;
+        let targets = dense(&targets, "Target node")?;
+        let result = interrupt::released(py, interrupt::size(&self.inner), || {
+            ironweaver_core::multi_path::shortest_path_multi(
+                &self.inner,
+                &sources,
+                &targets,
+                resolved.astar.as_ref(),
+                goal_coords.as_deref(),
+                max_cost,
+            )
+        })?
+        .map_err(graph_error)?;
+        let Some(result) = result else {
+            return Ok(py.None());
+        };
+        let entry = PyDict::new(py);
+        entry.set_item("nodelist", result.path.nodes.iter().map(|&u| self.inner.id(u)).collect::<Vec<_>>())?;
+        entry.set_item("cost", result.path.cost)?;
+        entry.set_item("source", self.inner.id(result.source))?;
+        entry.set_item("target", self.inner.id(result.target))?;
+        if stats {
+            let counters = PyDict::new(py);
+            counters.set_item("settled", result.path.settled)?;
+            entry.set_item("stats", counters)?;
+        }
+        Ok(entry.into_any().unbind())
+    }
+
     /// Cost from each source to every node it reaches within `max_cost`
     /// (only `targets`, if given), in parallel: {source: {node: cost}}.
     #[pyo3(signature = (sources, targets=None, method=None, *, max_cost=None))]
