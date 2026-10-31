@@ -167,6 +167,10 @@ g.drop_index("city")
 v.save_to_json("graph.json")
 v2 = Vertex.load_from_json("graph.json")
 
+# Binary bytes for a database blob or an application cache (no file I/O)
+blob = v.to_binary()
+v2 = Vertex.from_binary(blob)
+
 # Binary (faster for large graphs)
 v.save_to_binary("graph.bin")
 v2 = Vertex.load_from_binary("graph.bin")
@@ -258,3 +262,8 @@ e.attr_get("type")           # "follows"
 e.attr_set("weight", 2.0)   # fires on_edge_update_callbacks
 e.vertex                     # back-reference to the owning Vertex
 ```
+
+`to_binary()` and `Vertex.from_binary(data)` use the same format-v2 framing
+and checksum as binary files. Encoding bytes does not persist them: commit the
+blob through your storage layer for durability. File-save methods keep their
+atomic writes and sync behavior.

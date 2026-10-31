@@ -48,6 +48,10 @@ a query layer and database foundations.
 
 ### Added
 
+- `Vertex.to_binary()` and `Vertex.from_binary(bytes)` serialize graphs in memory
+  using the existing format-v2 checksum and framing. The in-memory Rust encoder
+  computes CRC32 once over the completed payload, speeding up small snapshots.
+
 - `Projection.shortest_paths(..., by_index=True)` accepts dense integer
   node pairs (including numpy int32/int64 matrices) and returns integer
   paths. Both connected-component methods accept `by_index=True` to return

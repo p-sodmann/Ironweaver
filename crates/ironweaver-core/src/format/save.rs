@@ -257,6 +257,19 @@ impl<'a, N, E, C: Codec<N, E>> GraphWriter<'a, N, E, C> {
         bytes.map_err(|e| GraphError::Format(e.to_string()))
     }
 
+    /// Encode a framed binary document in memory. Hash the finished payload
+    /// once rather than updating the checksum for every small postcard write.
+    pub fn to_binary(&self) -> Result<Vec<u8>, GraphError> {
+        let mut out = Vec::with_capacity(256);
+        out.extend_from_slice(&super::binary_header());
+        super::take_error();
+        let mut out = postcard::to_extend(self, out).map_err(super::postcard_error)?;
+        let payload = &out[super::HEADER_LEN..];
+        let trailer = super::binary_trailer(payload.len() as u64, crc32fast::hash(payload));
+        out.extend_from_slice(&trailer);
+        Ok(out)
+    }
+
     /// Write the graph in the binary format: header, postcard payload,
     /// trailer with the payload's length and CRC32 (see `format/mod.rs`).
     pub fn write_binary<W: Write>(&self, mut writer: W) -> Result<(), GraphError> {

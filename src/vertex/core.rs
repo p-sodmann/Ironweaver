@@ -1,7 +1,7 @@
 // vertex/core.rs
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
 
 use crate::data::{split_reserved, AttrMap, EdgeData, NodeData, PyAttrs, PyGraph};
@@ -555,6 +555,17 @@ impl Vertex {
     ///     RuntimeError: If saving fails
     fn save_to_binary(&self, py: Python<'_>, file_path: String) -> PyResult<()> {
         serialization::save_to_binary(self, py, file_path)
+    }
+
+    /// Serialize to format-v2 binary bytes, without writing a file.
+    fn to_binary<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        serialization::to_binary(self, py)
+    }
+
+    /// Load format-v2 binary bytes without reading a file.
+    #[staticmethod]
+    fn from_binary(py: Python<'_>, data: &Bound<'_, PyBytes>) -> PyResult<Py<Vertex>> {
+        serialization::from_binary(py, data)
     }
 
     /// Save the graph to a binary file using f16 precision for floats

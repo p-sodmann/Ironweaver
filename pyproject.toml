@@ -29,7 +29,7 @@ dependencies = []
 
 [project.optional-dependencies]
 networkx = ["networkx>=3.0"]  # Vertex.to_networkx
-test = ["pytest>=7", "networkx>=3.0", "numpy", "scipy", "psutil"]
+test = ["pytest>=7", "networkx>=3.0", "numpy", "scipy", "psutil", "lz4>=4.4", "zstandard>=0.25"]
 
 [project.urls]
 Homepage = "https://github.com/p-sodmann/Ironweaver"

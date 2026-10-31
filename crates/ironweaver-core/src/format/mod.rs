@@ -228,9 +228,7 @@ pub fn to_json(graph: &Graph<Record, Record>, meta: &Attrs, pretty: bool) -> Res
 /// file of format version 2: header, postcard payload and a trailer with
 /// length and CRC32. `half` stores floats at half precision.
 pub fn to_binary(graph: &Graph<Record, Record>, meta: &Attrs, half: bool) -> Result<Vec<u8>, GraphError> {
-    let mut out = Vec::new();
-    GraphWriter::new(graph, &RecordCodec { meta, half }).write_binary(&mut out)?;
-    Ok(out)
+    GraphWriter::new(graph, &RecordCodec { meta, half }).to_binary()
 }
 
 /// Decode a JSON document into a `Graph<Record, Record>` and its graph-level meta.
