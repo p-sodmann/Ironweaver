@@ -133,32 +133,26 @@ class NodeView:
 
     def has_edge_to(self, target_id: str) -> bool:
         """Return ``True`` if this node has an outgoing edge to *target_id*."""
-        for edge in self._node.edges:
-            if edge.to_node.id == target_id:
-                return True
-        return False
+        return self._node._has_neighbor(target_id)
 
     def has_edge_from(self, source_id: str) -> bool:
         """Return ``True`` if this node has an incoming edge from *source_id*."""
-        for edge in self._node.inverse_edges:
-            if edge.from_node.id == source_id:
-                return True
-        return False
+        return self._node._has_neighbor(source_id, incoming=True)
 
     @property
     def neighbor_ids(self) -> set:
         """Set of IDs of directly connected outgoing neighbours."""
-        return {edge.to_node.id for edge in self._node.edges}
+        return self._node._neighbor_ids()
 
     @property
     def degree(self) -> int:
         """Number of outgoing edges."""
-        return len(self._node.edges)
+        return self._node._degree()
 
     @property
     def in_degree(self) -> int:
         """Number of incoming edges."""
-        return len(self._node.inverse_edges)
+        return self._node._degree(incoming=True)
 
     # ---- dunder helpers ----
 

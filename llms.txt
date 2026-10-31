@@ -432,3 +432,5 @@ keep their first predecessor to avoid cycles. Infinite edges/overflowing
 route costs are impassable.
 
 View `attr(key, default)` and `has_attr(key)` use direct Rust lookups without copying whole attribute dictionaries. Stored `None` differs from an absent key; `attrs` still returns a snapshot.
+
+NodeView degree counts read Rust adjacency lengths in O(1); neighbor checks and neighbor_ids scan native adjacency without allocating Edge/Node handles. Parallel edges count individually in degrees; outgoing neighbor_ids are deduplicated.

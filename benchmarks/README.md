@@ -178,3 +178,16 @@ same paths as a rebuilt one. It needs numpy.
 ```bash
 python benchmarks/compare_set_weights.py
 ```
+
+
+## NodeView adjacency queries
+
+`compare_nodeview_adjacency.py` compares native degree counts, neighbor existence
+checks and neighbor ID sets with equivalent Python edge-snapshot queries on the
+same graph and extension. It checks results, alternates measurement order, and
+reports median times for degrees 8 and 1,000 as JSON. Use an optimized build;
+these are local microbenchmarks rather than whole-application speedups.
+
+```bash
+python benchmarks/compare_nodeview_adjacency.py
+```

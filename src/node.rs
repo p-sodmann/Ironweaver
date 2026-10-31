@@ -5,7 +5,7 @@ use ironweaver_core::{Direction, NodeIx};
 use pyo3::class::basic::CompareOp;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString};
+use pyo3::types::{PyAny, PyDict, PyList, PySet, PyString};
 use pyo3::{PyTraverseError, PyVisit};
 use std::hash::{Hash, Hasher};
 
@@ -290,6 +290,46 @@ impl Node {
     #[getter]
     fn inverse_edges(&self, py: Python<'_>) -> PyResult<Vec<Py<Edge>>> {
         self.edge_handles(py, true)
+    }
+
+    /// Counts adjacency entries, including parallel edges and self-loops.
+    #[pyo3(signature = (incoming=false))]
+    fn _degree(&self, py: Python<'_>, incoming: bool) -> PyResult<usize> {
+        self.read(py, |n| if incoming { n.in_edges().len() } else { n.out_edges().len() })
+    }
+
+    /// Inspect native adjacency without allocating Python edge/node handles.
+    #[pyo3(signature = (id, incoming=false))]
+    fn _has_neighbor(&self, py: Python<'_>, id: &str, incoming: bool) -> PyResult<bool> {
+        let v = self.vertex.try_borrow(py)?;
+        let g = &v.graph;
+        g.node(self.ix).ok_or_else(stale)?;
+        let Some(target) = g.node_ix(id) else { return Ok(false) };
+        let direction = if incoming { Direction::In } else { Direction::Out };
+        for (i, (_, neighbor)) in g.neighbors(self.ix, direction).enumerate() {
+            if i % 4096 == 0 {
+                py.check_signals()?;
+            }
+            if neighbor == target {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Outgoing neighbor IDs, deduplicated as in the Python set comprehension.
+    fn _neighbor_ids<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PySet>> {
+        let v = self.vertex.try_borrow(py)?;
+        let g = &v.graph;
+        g.node(self.ix).ok_or_else(stale)?;
+        let out = PySet::empty(py)?;
+        for (i, (_, neighbor)) in g.neighbors(self.ix, Direction::Out).enumerate() {
+            if i % 4096 == 0 {
+                py.check_signals()?;
+            }
+            out.add(g.node(neighbor).expect("adjacent nodes are live").id())?;
+        }
+        Ok(out)
     }
 
     #[getter]
