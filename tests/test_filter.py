@@ -176,11 +176,27 @@ def test_nodeview_attrs_dict():
     assert {n.id for n in result} == {"test_c", "other_e"}
 
 
-def test_vertex_len():
+def test_vertex_len(monkeypatch):
     v = build_rich_graph()
     assert len(v) == 5
     result = v.filter(lambda n: n.type == "A")
     assert len(result) == 2
+
+    def no_snapshot(self):
+        raise AssertionError("counting nodes must not materialize a nodes snapshot")
+
+    monkeypatch.setattr(Vertex, "nodes", property(no_snapshot))
+    empty = Vertex()
+    assert len(empty) == 0 and not empty
+    assert len(v) == 5 and v
+    v.add_node("new")
+    assert len(v) == 6
+    v.remove_node("new")
+    assert len(v) == 5
+    empty.add_node("only")
+    assert len(empty) == 1 and empty
+    empty.remove_node("only")
+    assert len(empty) == 0 and not empty
 
 
 def test_vertex_iter():
