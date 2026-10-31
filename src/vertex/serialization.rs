@@ -2,7 +2,7 @@
 
 use ironweaver_core::format::{self, GraphWriter, LoadGraph};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyString};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyString};
 use std::cell::RefCell;
 use std::io::Write;
 
@@ -56,6 +56,23 @@ pub fn save_to_binary(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyR
 
 pub fn save_to_binary_f16(vertex: &Vertex, py: Python<'_>, file_path: String) -> PyResult<()> {
     save_binary(vertex, py, &file_path, true)
+}
+
+/// Encode the existing framed format directly into memory, without file I/O.
+pub fn to_binary<'py>(vertex: &Vertex, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+    let codec = codec(vertex, py, false);
+    let bytes = GraphWriter::new(&vertex.graph, &codec)
+        .to_binary()
+        .map_err(|e| runtime_error("Failed to serialize graph to binary", e))?;
+    Ok(PyBytes::new(py, &bytes))
+}
+
+pub fn from_binary(py: Python<'_>, source: &Bound<'_, PyBytes>) -> PyResult<Py<Vertex>> {
+    let bytes = source.as_bytes();
+    let doc = py
+        .detach(|| LoadGraph::from_binary_slice(bytes))
+        .map_err(|e| runtime_error("Failed to parse graph from binary", e))?;
+    into_vertex(py, &doc)
 }
 
 /// Build a Vertex from a parsed document.

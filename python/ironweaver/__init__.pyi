@@ -1061,6 +1061,13 @@ class Vertex:
         cannot be written.
         """
         ...
+    def to_binary(self) -> bytes:
+        """Return format-v2 binary bytes without file I/O; includes the checksum."""
+        ...
+    @staticmethod
+    def from_binary(data: bytes) -> Vertex:
+        """Load format-v2 binary bytes, validating the header and checksum."""
+        ...
     def save_to_binary(self, file_path: str) -> None:
         """Serialize to a compact binary format."""
         ...

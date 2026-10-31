@@ -191,3 +191,35 @@ these are local microbenchmarks rather than whole-application speedups.
 ```bash
 python benchmarks/compare_nodeview_adjacency.py
 ```
+
+
+## Tiny graph binary bytes
+
+`compare_binary_bytes.py` measures binary bytes encoding/decoding and atomic file
+save/load for 0, 1, 10 and 100 nodes, with two edges per node. Build/install an
+optimized extension first. It emits raw repeat samples as JSON. File saves
+include fsync/rename; bytes encoding excludes storage durability costs.
+
+```bash
+python benchmarks/compare_binary_bytes.py
+```
+
+`compare_binary_compression.py` compares raw binary bytes, gzip/zlib/raw DEFLATE,
+and optional Zstandard/LZ4, measuring size, codec costs and graph round trips.
+Install `zstandard` and `lz4` only to benchmark those optional codecs. See
+`performance_results/tiny_binary/compression/REPORT.md` for measurements and limits.
+
+## Durable binary BLOB persistence
+
+`persist_binary.py` compares encoding/compression plus SQLite WAL commits with
+`synchronous=FULL`, and fetching/decompression plus graph reconstruction. It
+tests one or 100 graphs per commit, changing one or all scores, and verifies
+reopen/read-back. Select the real target filesystem; `/tmp` may be RAM-backed.
+
+```bash
+python benchmarks/persist_binary.py --directory /path/on/target/filesystem --output results.json
+```
+
+Correctness and batch rollback run in `tests/test_binary_persistence.py`; there
+are no timing assertions. See `performance_results/tiny_binary/persistence/REPORT.md`.
+SQLite results do not characterize Ironweaver DB's WAL or server behavior.

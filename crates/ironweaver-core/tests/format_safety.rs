@@ -366,3 +366,20 @@ fn value_serde_non_finite_floats_match_the_file_format() {
     assert!(text.contains(r#"{"Float":"-Infinity"}"#), "{text}");
     assert_eq!(sonic_rs::from_str::<O>(&text).unwrap(), op);
 }
+
+#[test]
+fn in_memory_binary_matches_streamed_encoding() {
+    for mut g in [G::new(), nested(3), nested(MAX_DEPTH)] {
+        g.set_shuffle_seed(Some(42));
+        for half in [false, true] {
+            let meta = Attrs::new();
+            let codec = format::RecordCodec { meta: &meta, half };
+            let writer = format::GraphWriter::new(&g, &codec).with_timestamp(None);
+            let mut streamed = Vec::new();
+            writer.write_binary(&mut streamed).unwrap();
+            let buffered = writer.to_binary().unwrap();
+            assert_eq!(buffered, streamed);
+            format::from_binary(&buffered).unwrap();
+        }
+    }
+}
