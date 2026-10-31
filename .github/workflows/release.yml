@@ -175,7 +175,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --only-binary ironweaver --no-index --find-links dist ironweaver
-          python -m pip install pytest networkx numpy scipy psutil
+          python -m pip install "ironweaver[test]"
       - name: Run the tests against the installed wheel
         shell: bash
         run: |
@@ -199,7 +199,8 @@ jobs:
           name: sdist
           path: dist
       - run: |
-          python -m pip install dist/*.tar.gz pytest networkx numpy scipy psutil
+          python -m pip install dist/*.tar.gz
+          python -m pip install "ironweaver[test]"
           rm -rf python
           python -m pytest -q
 
