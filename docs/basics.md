@@ -10,6 +10,26 @@ from ironweaver import Vertex
 v = Vertex()
 ```
 
+### Cloning a graph
+
+`clone()` makes an independent graph, including deep copies of node and edge
+attributes and metadata and graph metadata. Node IDs, labels, edge IDs, types,
+property indexes and the shuffle seed are preserved. Callback lists start empty.
+Built-in lists, dictionaries, tuples and scalar values are copied directly in
+Rust. Other objects use Python's `copy.deepcopy` with the same memo, preserving
+cycles and shared references. Very deep nesting also uses the Python fallback
+to retain its recursion checks. Values follow Python's `copy.deepcopy` rules;
+custom objects can define copying hooks, and errors from values that cannot be
+copied propagate to the caller.
+
+```python
+original = Vertex()
+original.add_node("item", {"tags": ["first"]})
+cloned = original.clone()
+cloned["item"].attr_get("tags").append("second")
+assert original["item"].attr_get("tags") == ["first"]
+```
+
 ### Testing callers for order dependence
 
 Default node iteration keeps the existing arena slot order: insertion order

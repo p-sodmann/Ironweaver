@@ -2,6 +2,8 @@
 
 > Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict, labels and edges, `Edge`s are directed and carry a type, a persistent integer id and an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
 
+Requires Python 3.13 or newer. CI and release wheels target Python 3.13–3.14.
+
 Install from source: `pip install maturin && pip install -e .` — then `from ironweaver import Vertex`.
 
 ## Build a graph
@@ -26,6 +28,8 @@ assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # 
 ```
 
 `add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
+
+- `g.clone()` returns an independent graph with deeply copied node/edge attributes and metadata and graph metadata (built-in lists/dicts/tuples/scalars copy in Rust; other values use Python `copy.deepcopy` with a shared memo). Preserves IDs, labels, types, indexes and shuffle seed; callback lists start empty.
 
 ## Bulk loading
 

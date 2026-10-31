@@ -1,7 +1,7 @@
 # Releasing
 
 A release publishes the Python package `ironweaver` to PyPI (wheels for
-Linux, macOS and Windows, Python 3.9–3.14, plus the sdist) and the Rust crate
+Linux, macOS and Windows, Python 3.13–3.14, plus the sdist) and the Rust crate
 `ironweaver-core` to crates.io, from one tag. `.github/workflows/release.yml`
 does the work.
 
@@ -45,7 +45,7 @@ The workflow then:
 - builds wheels (manylinux 2.28 and musllinux 1.2 for x86_64 and aarch64,
   macOS Intel and Apple Silicon, Windows x64) with the `dist` profile (fat
   LTO), and the sdist;
-- installs the wheels on every platform (Python 3.9 and 3.14) and runs the
+- installs the wheels on every platform (Python 3.13 and 3.14) and runs the
   test suite against them, and builds and tests the sdist;
 - publishes to PyPI and crates.io, then creates a GitHub release with the
   changelog section and the files.

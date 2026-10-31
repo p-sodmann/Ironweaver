@@ -314,6 +314,14 @@ class Vertex:
     def __new__(cls, *, shuffle_seed: int | None = None) -> Vertex:
         """Optional uint64 seed for reproducible unordered node iteration in tests."""
         ...
+    def clone(self) -> Vertex:
+        """Deep-copy the graph, attributes and metadata; callback lists start empty.
+
+        Preserves node IDs, labels, edge IDs/types, indexes and shuffle seed.
+        Built-in containers/scalars copy in Rust; other values use Python's
+        copy.deepcopy with the same memo (including custom hooks).
+        """
+        ...
     @property
     def shuffle_seed(self) -> int | None: ...
     def set_shuffle_seed(self, seed: int | None = None) -> None:

@@ -105,6 +105,30 @@ impl Vertex {
         Vertex::with_graph(py, graph)
     }
 
+    /// Return an independent graph with deeply copied attributes and metadata.
+    /// Callback lists start empty. Values follow Python's copy.deepcopy rules.
+    fn clone(&self, py: Python<'_>) -> PyResult<Self> {
+        let deepcopy = super::deepcopy::DeepCopy::new(py)?;
+        let copy_attrs = |attrs: &PyAttrs| -> PyResult<PyAttrs> {
+            py.check_signals()?;
+            match attrs.dict(py) {
+                Some(dict) => Ok(PyAttrs::from_dict(deepcopy.copy(dict.as_any())?.cast_into::<PyDict>()?)),
+                None => Ok(PyAttrs::default()),
+            }
+        };
+        let mut graph = self.graph.induced_subgraph(
+            self.graph.node_indices(),
+            |n| Ok::<_, PyErr>(NodeData::new(copy_attrs(&n.data.attr)?, copy_attrs(&n.data.meta)?)),
+            |e| Ok::<_, PyErr>(EdgeData::new(copy_attrs(&e.data.attr)?, copy_attrs(&e.data.meta)?)),
+        )?;
+        for path in self.graph.index_paths() {
+            graph.create_index::<crate::errors::Error>(path)?;
+        }
+        let mut vertex = Vertex::with_graph(py, graph);
+        vertex.meta = deepcopy.copy(self.meta.bind(py).as_any())?.cast_into::<PyDict>()?.unbind();
+        Ok(vertex)
+    }
+
     /// Set a reproducible node iteration seed for testing, or None to restore
     /// default order. Derived subgraphs inherit it; saved files do not.
     #[pyo3(signature = (seed=None))]

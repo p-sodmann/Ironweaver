@@ -33,7 +33,8 @@ a query layer and database foundations.
   `Vertex.get_edge`), never reused.
 - `Projection.label_propagation` on a directed projection follows the LDBC
   Graphalytics CDLP rule: in- and out-neighbours count separately.
-- Python 3.8 is no longer supported (3.9 – 3.14 are).
+- Python 3.13 or newer is required; Python 3.8–3.12 are no longer supported.
+  CI and release wheels target Python 3.13–3.14.
 - `datetime.date` / `datetime.datetime` attribute values are saved as dates
   and date-times (they used to be saved as their `str()` and load as
   strings), and `bytes` / `bytearray` as bytes (they used to become lists of
