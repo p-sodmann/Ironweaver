@@ -2,6 +2,8 @@
 
 > Rust-powered directed graph library for Python (PyO3). A `Vertex` is the graph, `Node`s hold an `attr` dict, labels and edges, `Edge`s are directed and carry a type, a persistent integer id and an `attr` dict. Traversals, filtering, shortest paths (BFS and Dijkstra), random walks, JSON/binary persistence, change callbacks, NetworkX conversion and an LGF text format parser. Every example below runs as written.
 
+Requires Python 3.13 or newer. CI and release wheels target Python 3.13–3.14.
+
 Install from source: `pip install maturin && pip install -e .` — then `from ironweaver import Vertex`.
 
 ## Build a graph
