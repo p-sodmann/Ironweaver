@@ -342,6 +342,36 @@ impl Attributes for EdgeData {
 // `attr["labels"]` keeps working: these helpers answer such lookups from
 // the fields.
 
+/// Single-key lookup matching the snapshot returned by Node.attr, including
+/// absent labels and ordinary values stored under the reserved name.
+pub fn node_attr_value<'py>(
+    py: Python<'py>,
+    g: &PyGraph,
+    ix: ironweaver_core::NodeIx,
+    key: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Some(node) = g.node(ix) else { return Ok(None) };
+    if key == "labels" && !node.labels().is_empty() {
+        return node_value(py, g, ix, key);
+    }
+    node.data.attr.get(py, key)
+}
+
+/// Single-key lookup matching Edge.attr, including non-string ordinary type
+/// attributes on untyped edges.
+pub fn edge_attr_value<'py>(
+    py: Python<'py>,
+    g: &PyGraph,
+    ix: ironweaver_core::EdgeIx,
+    key: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Some(edge) = g.edge(ix) else { return Ok(None) };
+    if key == "type" && g.edge_type_name(ix).is_some() {
+        return edge_value(py, g, ix, key);
+    }
+    edge.data.attr.get(py, key)
+}
+
 /// Edge attribute `key`, where `"type"` is the edge's type.
 pub fn edge_value<'py>(
     py: Python<'py>,

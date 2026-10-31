@@ -128,3 +128,8 @@ expanded = seed.expand(full, depth=1, direction="both")
 ```
 
 `expand` returns a new vertex with every node of `source_vertex` within `depth` hops of any node in the current vertex, plus the edges between them. By default only outgoing edges are followed; `direction="in"` follows incoming edges and `direction="both"` ignores direction.
+
+Single-key `NodeView.attr(key, default)` / `EdgeView.attr(key, default)` and
+`has_attr(key)` read directly through Rust without copying the full attribute
+dictionary. Missing keys use the default; stored `None` remains `None`. Use
+`attrs` when you need a snapshot of all attributes.

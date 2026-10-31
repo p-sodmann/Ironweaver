@@ -430,3 +430,5 @@ are A*-only. Ties prefer lowest target index then lowest predecessor, with
 the virtual source after real nodes; steps with unchanged represented cost
 keep their first predecessor to avoid cycles. Infinite edges/overflowing
 route costs are impassable.
+
+View `attr(key, default)` and `has_attr(key)` use direct Rust lookups without copying whole attribute dictionaries. Stored `None` differs from an absent key; `attrs` still returns a snapshot.
