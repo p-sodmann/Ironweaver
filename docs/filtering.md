@@ -133,3 +133,8 @@ Single-key `NodeView.attr(key, default)` / `EdgeView.attr(key, default)` and
 `has_attr(key)` read directly through Rust without copying the full attribute
 dictionary. Missing keys use the default; stored `None` remains `None`. Use
 `attrs` when you need a snapshot of all attributes.
+
+`NodeView.degree` and `in_degree` read adjacency counts in constant time.
+`has_edge_to`, `has_edge_from`, and `neighbor_ids` inspect Rust adjacency
+without creating edge handles. Degrees count parallel edges and self-loops;
+`neighbor_ids` contains each outgoing neighbor ID once.
