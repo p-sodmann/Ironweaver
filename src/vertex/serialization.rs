@@ -78,7 +78,7 @@ pub fn from_binary(py: Python<'_>, source: &Bound<'_, PyBytes>) -> PyResult<Py<V
 /// Build a Vertex from a parsed document.
 fn into_vertex(py: Python<'_>, doc: &LoadGraph<'_>) -> PyResult<Py<Vertex>> {
     let _gc = GcPause::new(py);
-    let strings: RefCell<Strings<'_>> = RefCell::new(Strings::new());
+    let strings: RefCell<Strings<'_>> = RefCell::new(Strings::default());
     let legacy = doc.version() < 2;
     let graph = doc.build(
         |n| -> Result<NodeData, Error> {
