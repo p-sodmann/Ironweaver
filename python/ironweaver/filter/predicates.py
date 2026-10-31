@@ -29,7 +29,7 @@ def _get_attr(node: Union[Node, NodeView], key: str, default=None):
     """Get attribute value from either a Node or NodeView."""
     if isinstance(node, NodeView):
         return node.attr(key, default)
-    return node.attr.get(key, default)
+    return node._attr_get(key, default)
 
 
 def attr_equals(key: str, value: Any) -> Callable[[Union[Node, NodeView]], bool]:

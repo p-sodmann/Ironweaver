@@ -123,11 +123,11 @@ class NodeView:
         >>> n.attr("score")       # returns the value or None
         >>> n.attr("score", 0.0)  # returns the value or 0.0
         """
-        return self._node.attr.get(key, default)
+        return self._node._attr_get(key, default)
 
     def has_attr(self, key: str) -> bool:
         """Return ``True`` if attribute *key* exists on this node."""
-        return key in self._node.attr
+        return self._node._has_attr(key)
 
     # ---- edge helpers ----
 
@@ -234,11 +234,11 @@ class EdgeView:
 
     def attr(self, key: str, default=None):
         """Return the value of attribute *key*, or *default* if missing."""
-        return self._edge.attr.get(key, default)
+        return self._edge._attr_get(key, default)
 
     def has_attr(self, key: str) -> bool:
         """Return ``True`` if attribute *key* exists on this edge."""
-        return key in self._edge.attr
+        return self._edge._has_attr(key)
 
     def __repr__(self):
         return repr(self._edge)

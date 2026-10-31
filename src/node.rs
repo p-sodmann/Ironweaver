@@ -403,6 +403,24 @@ impl Node {
         path.then(|| Node::handle(py, &self.vertex, target)).transpose()
     }
 
+    /// Internal snapshot-compatible lookup for the Python view wrappers.
+    #[pyo3(signature = (key, default=None))]
+    fn _attr_get(&self, py: Python<'_>, key: &str, default: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        let v = self.vertex.try_borrow(py)?;
+        v.graph.node(self.ix).ok_or_else(stale)?;
+        Ok(crate::data::node_attr_value(py, &v.graph, self.ix, key)?
+            .map(Bound::unbind)
+            .or(default)
+            .unwrap_or_else(|| py.None()))
+    }
+
+    /// Internal membership lookup: stored None still counts as present.
+    fn _has_attr(&self, py: Python<'_>, key: &str) -> PyResult<bool> {
+        let v = self.vertex.try_borrow(py)?;
+        v.graph.node(self.ix).ok_or_else(stale)?;
+        Ok(crate::data::node_attr_value(py, &v.graph, self.ix, key)?.is_some())
+    }
+
     /// Retrieve a value from ``attr`` by key ("labels" gives the labels).
     /// Returns ``None`` if the key does not exist.
     fn attr_get(&self, py: Python<'_>, key: &str) -> PyResult<Option<Py<PyAny>>> {
