@@ -377,11 +377,6 @@ def _vertex_iter(self):
     return iter(self.nodes.values())
 
 
-def _vertex_len(self):
-    """Return the number of nodes in this Vertex."""
-    return len(self.nodes)
-
-
 def _vertex_contains(self, key):
     """Return True if a node with the given ID (or the given Node) is in this Vertex.
 
@@ -396,7 +391,8 @@ def _vertex_contains(self, key):
 
 
 Vertex.__iter__ = _vertex_iter
-Vertex.__len__ = _vertex_len
+# Reuse the native O(1) count without creating a nodes dictionary or handles.
+Vertex.__len__ = Vertex.node_count
 Vertex.__contains__ = _vertex_contains
 
 
