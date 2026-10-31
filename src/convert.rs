@@ -9,6 +9,7 @@
 // through the JSON loader.
 
 use ironweaver_core::format::{tagged, Codec, LoadAttrs, LoadKind, LoadValue};
+use ironweaver_core::graph::StrMap;
 use ironweaver_core::temporal::Parts;
 use ironweaver_core::{Date, DateTime, Value};
 use pyo3::exceptions::PyValueError;
@@ -374,7 +375,7 @@ pub fn to_value(v: &Bound<'_, PyAny>) -> PyResult<ironweaver_core::Value> {
 const SHARED_STRING_MAX: usize = 64;
 
 /// Interned short strings, keyed by their text in the input buffer.
-pub type Strings<'s> = HashMap<&'s str, Py<PyAny>>;
+pub type Strings<'s> = StrMap<&'s str, Py<PyAny>>;
 
 /// Convert a loaded value to a Python object.
 pub fn to_python<'s>(py: Python<'_>, value: &'s LoadValue<'_>, strings: &mut Strings<'s>) -> PyResult<Py<PyAny>> {

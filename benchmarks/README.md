@@ -223,3 +223,11 @@ python benchmarks/persist_binary.py --directory /path/on/target/filesystem --out
 Correctness and batch rollback run in `tests/test_binary_persistence.py`; there
 are no timing assertions. See `performance_results/tiny_binary/persistence/REPORT.md`.
 SQLite results do not characterize Ironweaver DB's WAL or server behavior.
+
+## Tiny graph load cache
+
+`compare_binary_decode.py` profiles complete binary/JSON load lifecycles and an
+encoding control for ordinary, unique-key, nested, embedding, indexed and Unicode
+graphs. `compare_decode_controls.py` independently repeats selected encoding and
+numeric JSON controls. Run frozen artifacts in alternating independent processes.
+See `performance_results/tiny_decode/REPORT.md` and raw measurements.
