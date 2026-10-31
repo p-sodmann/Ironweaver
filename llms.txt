@@ -27,6 +27,8 @@ assert [e.from_node.id for e in g["acme"].inverse_edges] == ["bob", "alice"]  # 
 
 `add_node` raises `ValueError` if the id exists; `add_edge` raises `ValueError` if either node is missing. Parallel edges are allowed.
 
+- `g.clone()` returns an independent graph with deeply copied node/edge attributes and metadata and graph metadata (built-in lists/dicts/tuples/scalars copy in Rust; other values use Python `copy.deepcopy` with a shared memo). Preserves IDs, labels, types, indexes and shuffle seed; callback lists start empty.
+
 ## Bulk loading
 
 ```python
