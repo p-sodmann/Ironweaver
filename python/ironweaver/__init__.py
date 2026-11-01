@@ -11,7 +11,8 @@ Core classes:
 * :class:`Edge` - a directed edge with an ``attr`` dict.
 * :class:`NodeView` / :class:`EdgeView` - read-only views passed to filter
   lambdas.
-* :func:`parse_lgf` / :func:`parse_lgf_file` - read the Labeled Graph Format.
+* :func:`parse_lgf` / :func:`parse_lgf_file` - read the Labeled Graph Format;
+  :func:`to_lgf` / :func:`to_lgf_file` write it.
 
 Quick example::
 
@@ -35,6 +36,7 @@ from ._ironweaver import __version__
 
 # Import the Python LGF parser
 from .lgf_parser import parse_lgf, parse_lgf_file
+from .lgf_writer import to_lgf, to_lgf_file
 
 
 class NodeView:
@@ -544,4 +546,6 @@ __all__ = [
     "edge_type",
     "parse_lgf",
     "parse_lgf_file",
+    "to_lgf",
+    "to_lgf_file",
 ]

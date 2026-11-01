@@ -10,7 +10,7 @@ This file describes every symbol available after::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Iterator, Literal, Sequence, final, overload
+from typing import Any, Callable, Iterable, Iterator, Literal, Mapping, Sequence, final, overload
 
 from typing_extensions import Buffer, deprecated
 
@@ -1504,6 +1504,25 @@ def parse_lgf_file(
     """Parse an LGF file from *path* into a :class:`Vertex`."""
     ...
 
+def to_lgf(
+    graph: Vertex,
+    order: Iterable[str] | None = ...,
+    banners: Mapping[str, str] | None = ...,
+    header: str | None = ...,
+) -> str:
+    """Serialize *graph* to LGF text; the inverse of :func:`parse_lgf`.
+
+    *order* lists node IDs to write first, *banners* maps node IDs to comment
+    banners written before them. Raises ``ValueError`` for values LGF cannot
+    represent (multi-line strings, list items containing ``]``, IDs with
+    whitespace).
+    """
+    ...
+
+def to_lgf_file(graph: Vertex, path: str, **kwargs: Any) -> None:
+    """Write *graph* as LGF to *path*; keyword arguments go to :func:`to_lgf`."""
+    ...
+
 # ---------------------------------------------------------------------------
 # Expressions — filters evaluated in Rust
 # ---------------------------------------------------------------------------
@@ -1574,4 +1593,6 @@ __all__ = [
     "edge_type",
     "parse_lgf",
     "parse_lgf_file",
+    "to_lgf",
+    "to_lgf_file",
 ]
