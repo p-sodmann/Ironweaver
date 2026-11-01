@@ -48,6 +48,12 @@ a query layer and database foundations.
 
 ### Added
 
+- **`to_lgf` / `to_lgf_file`** write a graph as LGF text, the inverse of
+  `parse_lgf`. `order` and `banners` control node order and comment headers;
+  values LGF cannot represent (multi-line strings, list items containing `]`,
+  IDs with whitespace) raise `ValueError` instead of writing a file that reads
+  back differently.
+
 - `Vertex.to_binary()` and `Vertex.from_binary(bytes)` serialize graphs in memory
   using the existing format-v2 checksum and framing. The in-memory Rust encoder
   computes CRC32 once over the completed payload, speeding up small snapshots.

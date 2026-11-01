@@ -380,6 +380,23 @@ alice Person
   count = 42            # Parsed as integer 42
 ```
 
+## Writing LGF
+
+`to_lgf` serializes a graph back to LGF; parsing the result yields the same
+nodes, labels, attributes and edges:
+
+```python
+from ironweaver import parse_lgf, to_lgf, to_lgf_file
+
+text = to_lgf(graph, order=["start", "end"], banners={"start": "Header"})
+assert parse_lgf(text).node_count() == graph.node_count()
+to_lgf_file(graph, "graph.lgf")
+```
+
+Lists are written in the multi-line form. Values LGF cannot represent raise
+`ValueError`: multi-line strings, list items containing `]`, nested dicts,
+and node IDs, labels or edge types containing whitespace.
+
 ## Examples Repository
 
 More examples can be found in the `examples/` directory:
